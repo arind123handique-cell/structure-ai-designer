@@ -101,6 +101,82 @@ export const ColumnDesignView: React.FC = () => {
     return ColumnNumberingService.getColumnMemberMapping(activeModel);
   }, [activeModel]);
 
+  // Ground-level support columns only — one row per support node (excluding lift core)
+  const groundColumns = useMemo(() => {
+    if (!activeModel) return [];
+
+    // Step 1: Identify lift core supports — tight cluster of 3+ supports within 2.5m of each other near wall plates
+    const supportNodeIds = Array.from(activeModel.supports.keys());
+    const supportInfo: { nodeId: number; x: number; z: number }[] = [];
+    for (const nodeId of supportNodeIds) {
+      const node = activeModel.nodes.get(nodeId);
+      if (node) supportInfo.push({ nodeId, x: node.x, z: node.z });
+    }
+
+    // Find tight clusters of supports (lift core = densest cluster of 3+)
+    const liftCoreNodeIds = new Set<number>();
+    if (supportInfo.length >= 3) {
+      // For each support, count how many other supports are within 2.5m
+      let bestClusterCenter: { x: number; z: number } | null = null;
+      let bestClusterSize = 0;
+      for (const a of supportInfo) {
+        const nearby = supportInfo.filter(
+          (b) => Math.hypot(a.x - b.x, a.z - b.z) <= 2.5
+        );
+        if (nearby.length > bestClusterSize) {
+          bestClusterSize = nearby.length;
+          bestClusterCenter = { x: a.x, z: a.z };
+        }
+      }
+      // Lift core = the tightest cluster with 3+ supports
+      if (bestClusterCenter && bestClusterSize >= 3) {
+        for (const s of supportInfo) {
+          if (Math.hypot(s.x - bestClusterCenter.x, s.z - bestClusterCenter.z) <= 2.5) {
+            liftCoreNodeIds.add(s.nodeId);
+          }
+        }
+      }
+    }
+
+    // Step 2: Also exclude supports that have wall plates (classification='WALL') sitting on them
+    if (activeModel.plates) {
+      for (const plate of activeModel.plates.values()) {
+        if ((plate as any).classification !== 'WALL') continue;
+        const plateNodeIds = (plate as any).nodeIds || (plate as any).nodes || [];
+        for (const nid of plateNodeIds) {
+          if (supportInfo.some((s) => s.nodeId === nid)) {
+            liftCoreNodeIds.add(nid);
+          }
+        }
+      }
+    }
+
+    // Step 3: For each non-lift-core support, find the ground column member connected to it
+    const cols = Array.from(activeModel.members.values()).filter(
+      (m) => m.classification === 'COLUMN'
+    );
+
+    const result: typeof cols = [];
+    for (const sup of supportInfo) {
+      if (liftCoreNodeIds.has(sup.nodeId)) continue;
+
+      // Find the column member connected to this support node
+      const groundCol = cols.find(
+        (c) => c.startNodeId === sup.nodeId || c.endNodeId === sup.nodeId
+      );
+      if (groundCol && !result.some((r) => r.id === groundCol.id)) {
+        result.push(groundCol);
+      }
+    }
+
+    return result.sort((a, b) => {
+      const slA = columnMapping.get(a.id)?.columnSlNo || a.id;
+      const slB = columnMapping.get(b.id)?.columnSlNo || b.id;
+      return slA - slB;
+    });
+  }, [activeModel, columnMapping]);
+
+  // All columns (for design engine — still needs all floors to find governing load)
   const allColumns = useMemo(() => {
     if (!activeModel) return [];
     const cols = Array.from(activeModel.members.values()).filter((m) => m.classification === 'COLUMN');
@@ -503,8 +579,13 @@ export const ColumnDesignView: React.FC = () => {
     ).length;
   }, [designedColumns]);
 
+  // Count of designed ground columns for the filter badges
+  const groundDesignedCount = useMemo(() => {
+    return groundColumns.filter((c) => designedColumns.has(c.id)).length;
+  }, [groundColumns, designedColumns]);
+
   const rows = useMemo(() => {
-    return allColumns
+    return groundColumns
       .map((col) => {
         const design = designedColumns.get(col.id);
         const mapping = columnMapping.get(col.id);
@@ -531,7 +612,7 @@ export const ColumnDesignView: React.FC = () => {
         if (filterStatus === 'ALL') return true;
         return r.design?.status === filterStatus;
       });
-  }, [allColumns, designedColumns, filterStatus, activeProject, columnMapping]);
+  }, [groundColumns, designedColumns, filterStatus, activeProject, columnMapping]);
 
   const columns: ColumnDef<any>[] = [
     {
@@ -982,7 +1063,7 @@ export const ColumnDesignView: React.FC = () => {
                   : 'bg-white text-slate-700 border-ui-border hover:bg-slate-50'
               }`}
             >
-              {st} ({st === 'ALL' ? allColumns.length : Array.from(designedColumns.values()).filter((c) => c.status === st).length})
+              {st} (              {st === 'ALL' ? groundColumns.length : Array.from(designedColumns.values()).filter((c) => c.status === st && groundColumns.some((gc) => gc.id === c.memberId)).length})
             </button>
           ))}
         </div>
