@@ -7,7 +7,8 @@ import { DetailedCalculationReport } from '@/features/calculations/types';
 import { DataTable, ColumnDef } from '@/components/tables/DataTable';
 import { exportToCsv } from '@/utils/exportUtils';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
-import { Play, Compass, FileText, Download, X, Layers, ShieldCheck, Activity, Save, CheckCircle2 } from 'lucide-react';
+import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
+import { Play, Compass, FileText, Download, X, Layers, ShieldCheck, Activity, Save, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 
 export const GradeBeamDesignView: React.FC = () => {
   const { activeModel, activeProject, saveGradeBeamDesigns } = useProjectStore();
@@ -18,6 +19,12 @@ export const GradeBeamDesignView: React.FC = () => {
   const [isDesigning, setIsDesigning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+
+  // Panel hide/show toggles
+  const [showBanner, setShowBanner] = useState(true);
+  const [showRebar, setShowRebar] = useState(true);
+  const [showKpi, setShowKpi] = useState(true);
+  const [showTable, setShowTable] = useState(true);
 
   const handleDesignAll = () => {
     if (!activeModel || !activeProject) return;
@@ -216,8 +223,36 @@ export const GradeBeamDesignView: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full space-y-4 p-5 bg-ui-background overflow-y-auto font-sans">
+      {/* Global Hide / Show All */}
+      <div className="flex items-center justify-end gap-1.5 -mb-1">
+        <span className="text-[10px] font-mono text-slate-500 font-semibold uppercase tracking-wider">Panels:</span>
+        <button
+          type="button"
+          onClick={() => { setShowBanner(true); setShowRebar(true); setShowKpi(true); setShowTable(true); }}
+          className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
+        >
+          <Eye className="w-3 h-3" /> Show All
+        </button>
+        <button
+          type="button"
+          onClick={() => { setShowBanner(false); setShowRebar(false); setShowKpi(false); setShowTable(false); }}
+          className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
+        >
+          <EyeOff className="w-3 h-3" /> Hide All
+        </button>
+      </div>
+
       {/* Top Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-surface-card p-4 rounded-md border border-ui-border shadow-xs">
+      <CollapsiblePanel
+        title="IS 13920:2016 & IS 2911 FOUNDATION GRADE / TIE BEAM DESIGN ENGINE"
+        icon={<Compass className="w-4 h-4 text-sky-600" />}
+        storageKey="gradebeam-banner"
+        open={showBanner}
+        onToggle={setShowBanner}
+        contentClassName="p-4"
+        variant="card"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="font-mono text-base font-bold text-deep-navy flex items-center gap-2">
             <Compass className="w-5 h-5 text-sky-600" />
@@ -255,10 +290,23 @@ export const GradeBeamDesignView: React.FC = () => {
             <span>Export CSV Schedule</span>
           </button>
         </div>
-      </div>
+        </div>
+      </CollapsiblePanel>
 
       {/* Universal Rebar Master Selection Toolbar */}
-      <UniversalRebarBar moduleName="Plinth & Grade Beam" />
+      <CollapsiblePanel
+        title="UNIVERSAL REBAR SELECTION (Plinth & Grade Beam)"
+        icon={<Layers className="w-4 h-4 text-emerald-600" />}
+        storageKey="gradebeam-rebar"
+        open={showRebar}
+        onToggle={setShowRebar}
+        contentClassName="p-0"
+        variant="card"
+      >
+        <div className="p-3">
+          <UniversalRebarBar moduleName="Plinth & Grade Beam" />
+        </div>
+      </CollapsiblePanel>
 
       {/* Save Success Notification Banner */}
       {saveSuccessMsg && (
@@ -269,7 +317,16 @@ export const GradeBeamDesignView: React.FC = () => {
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 font-mono">
+      <CollapsiblePanel
+        title="KEY PERFORMANCE INDICATORS"
+        icon={<Activity className="w-4 h-4 text-indigo-600" />}
+        storageKey="gradebeam-kpi"
+        open={showKpi}
+        onToggle={setShowKpi}
+        contentClassName="p-4"
+        variant="card"
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 font-mono">
         <div className="bg-surface-card border border-ui-border rounded p-3 shadow-2xs">
           <span className="text-[10px] text-slate-500 font-bold uppercase block flex items-center gap-1">
             <Layers className="w-3.5 h-3.5 text-sky-600" />
@@ -298,16 +355,28 @@ export const GradeBeamDesignView: React.FC = () => {
           </span>
           <span className="text-lg font-bold text-slate-900">IS 13920 Cl. 11.2 (2D zone)</span>
         </div>
-      </div>
+        </div>
+      </CollapsiblePanel>
 
       {/* Table */}
-      <div className="flex-1 min-h-0 bg-surface-card rounded-md border border-ui-border shadow-xs overflow-hidden">
+      <CollapsiblePanel
+        title="GRADE BEAM DESIGN SCHEDULE"
+        icon={<Layers className="w-4 h-4 text-sky-700" />}
+        storageKey="gradebeam-table"
+        open={showTable}
+        onToggle={setShowTable}
+        contentClassName="p-0"
+        className="flex-1 flex flex-col min-h-[420px]"
+        variant="card"
+      >
+        <div className="flex-1 min-h-[380px] flex flex-col overflow-hidden">
         <DataTable
           columns={columns}
           data={designedGradeBeams}
           searchPlaceholder="Search by Grade Beam (e.g. GB-1-2) or Pile Cap (e.g. PC-1)..."
         />
-      </div>
+        </div>
+      </CollapsiblePanel>
 
       {/* Calculation Modal */}
       {selectedReport && (

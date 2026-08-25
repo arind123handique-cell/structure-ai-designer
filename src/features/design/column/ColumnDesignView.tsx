@@ -11,6 +11,7 @@ import { SectionEditModal } from '@/features/design/common/SectionEditModal';
 import { ColumnRebarEditModal } from './ColumnRebarEditModal';
 import { ColumnAutoDesignModal } from './ColumnAutoDesignModal';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
+import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
 import {
   ColumnOptimizationEngine,
   BatchColumnOptimizationSummary,
@@ -36,6 +37,8 @@ import {
   Zap,
   RotateCw,
   Save,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 const QUICK_COL_SIZES = [
@@ -89,6 +92,10 @@ export const ColumnDesignView: React.FC = () => {
   const [isApplyingAutoDesign, setIsApplyingAutoDesign] = useState(false);
   const [isAutoOrienting, setIsAutoOrienting] = useState(false);
   const [editMemberId, setEditMemberId] = useState<number | null>(null);
+  const [showBanner, setShowBanner] = useState(true);
+  const [showRebar, setShowRebar] = useState(true);
+  const [showFilters, setShowFilters] = useState(true);
+  const [showTable, setShowTable] = useState(true);
 
   const columnMapping = useMemo(() => {
     return ColumnNumberingService.getColumnMemberMapping(activeModel);
@@ -707,17 +714,40 @@ export const ColumnDesignView: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full space-y-3.5 p-5 bg-ui-background overflow-y-auto font-sans">
-      {/* Top Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-surface-card p-4 rounded-md border border-ui-border shadow-sm">
-        <div>
-          <h2 className="font-mono text-base font-bold text-deep-navy flex items-center gap-2">
-            <Layers className="w-5 h-5 text-emerald-600" />
-            IS 456:2000 & IS 13920:2016 RCC COLUMN DESIGN ENGINE
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Biaxial bending interaction (Bresler method), 1-click economical auto-designer, mixed rebar (4-T16 + 4-T12, 4-T20 + 4-T16), 90° orientation optimization, P-M curves, and ductile confining ties.
-          </p>
-        </div>
+      {/* Global hide bar */}
+      <div className="flex items-center justify-end gap-1.5 -mb-1">
+        <span className="text-[10px] font-mono text-slate-500 font-semibold uppercase tracking-wider">Panels:</span>
+        <button
+          type="button"
+          onClick={() => { setShowBanner(true); setShowRebar(true); setShowFilters(true); setShowTable(true); }}
+          className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
+        >
+          <Eye className="w-3 h-3" /> Show All
+        </button>
+        <button
+          type="button"
+          onClick={() => { setShowBanner(false); setShowRebar(false); setShowFilters(false); setShowTable(false); }}
+          className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
+        >
+          <EyeOff className="w-3 h-3" /> Hide All
+        </button>
+      </div>
+
+      <CollapsiblePanel
+        title="IS 456:2000 & IS 13920:2016 RCC COLUMN DESIGN ENGINE"
+        icon={<Layers className="w-5 h-5 text-emerald-600" />}
+        storageKey="column-banner"
+        open={showBanner}
+        onToggle={setShowBanner}
+        variant="card"
+        contentClassName="p-4"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Biaxial bending interaction (Bresler method), 1-click economical auto-designer, mixed rebar (4-T16 + 4-T12, 4-T20 + 4-T16), 90° orientation optimization, P-M curves, and ductile confining ties.
+            </p>
+          </div>
 
         <div className="flex items-center gap-2 flex-wrap">
           {/* ⚡ 1-Click Auto-Design All Columns Button */}
@@ -801,15 +831,25 @@ export const ColumnDesignView: React.FC = () => {
             <span>{isDesigning ? 'Designing...' : 'Re-calculate'}</span>
           </button>
         </div>
-      </div>
+        </div>
+      </CollapsiblePanel>
 
-      {/* Universal Rebar Master Selection Toolbar & 90° Orientation Tool */}
-      <UniversalRebarBar
-        moduleName="RCC Column"
-        showOrientationTool={true}
-        onAutoOrient90={handleAutoOrientAll}
-        isAutoOrienting={isAutoOrienting}
-      />
+      <CollapsiblePanel
+        title="UNIVERSAL REBAR SELECTION (RCC Column)"
+        icon={<Layers className="w-4 h-4 text-emerald-600" />}
+        storageKey="column-rebar"
+        open={showRebar}
+        onToggle={setShowRebar}
+        variant="card"
+        contentClassName="p-3"
+      >
+        <UniversalRebarBar
+          moduleName="RCC Column"
+          showOrientationTool={true}
+          onAutoOrient90={handleAutoOrientAll}
+          isAutoOrienting={isAutoOrienting}
+        />
+      </CollapsiblePanel>
 
       {/* Save Success Notification Banner */}
       {saveSuccessMsg && (
@@ -819,40 +859,58 @@ export const ColumnDesignView: React.FC = () => {
         </div>
       )}
 
-      {/* Filter Tabs */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-mono text-slate-500 font-semibold uppercase">Filter Status:</span>
-        {(['ALL', 'PASS', 'WARNING', 'FAIL'] as const).map((st) => (
-          <button
-            key={st}
-            onClick={() => setFilterStatus(st)}
-            className={`px-3 py-1 text-xs font-mono rounded border transition-colors ${
-              filterStatus === st
-                ? 'bg-deep-navy text-white border-deep-navy shadow-sm'
-                : 'bg-white text-slate-700 border-ui-border hover:bg-slate-50'
-            }`}
-          >
-            {st} ({st === 'ALL' ? allColumns.length : Array.from(designedColumns.values()).filter((c) => c.status === st).length})
-          </button>
-        ))}
-      </div>
+      <CollapsiblePanel
+        title="Filter by Status"
+        storageKey="column-filters"
+        open={showFilters}
+        onToggle={setShowFilters}
+        variant="card"
+        contentClassName="p-3"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-mono text-slate-500 font-semibold uppercase">Filter Status:</span>
+          {(['ALL', 'PASS', 'WARNING', 'FAIL'] as const).map((st) => (
+            <button
+              key={st}
+              onClick={() => setFilterStatus(st)}
+              className={`px-3 py-1 text-xs font-mono rounded border transition-colors ${
+                filterStatus === st
+                  ? 'bg-deep-navy text-white border-deep-navy shadow-sm'
+                  : 'bg-white text-slate-700 border-ui-border hover:bg-slate-50'
+              }`}
+            >
+              {st} ({st === 'ALL' ? allColumns.length : Array.from(designedColumns.values()).filter((c) => c.status === st).length})
+            </button>
+          ))}
+        </div>
+      </CollapsiblePanel>
 
-      {/* Main Table */}
-      <div className="flex-1 overflow-hidden">
-        <DataTable
-          data={rows}
-          columns={columns}
-          title="RCC COLUMN SCHEDULE & BIAXIAL INTERACTION RATIOS"
-          searchPlaceholder="Search by column # (e.g. C-1), member #, or size..."
-          searchFilter={(item, q) =>
-            item.columnLabel.toLowerCase().includes(q) ||
-            String(item.memberId).includes(q) ||
-            item.dimensions.toLowerCase().includes(q) ||
-            String(item.design?.rebar.callout || '').toLowerCase().includes(q)
-          }
-          onExportCsv={handleExport}
-        />
-      </div>
+      <CollapsiblePanel
+        title="RCC COLUMN SCHEDULE & BIAXIAL INTERACTION RATIOS"
+        icon={<Layers className="w-4 h-4 text-sky-700" />}
+        storageKey="column-table"
+        open={showTable}
+        onToggle={setShowTable}
+        variant="card"
+        className="flex-1 flex flex-col min-h-[420px]"
+        contentClassName="p-0"
+      >
+        <div className="flex-1 min-h-[380px] flex flex-col overflow-hidden">
+          <DataTable
+            data={rows}
+            columns={columns}
+            title="RCC COLUMN SCHEDULE & BIAXIAL INTERACTION RATIOS"
+            searchPlaceholder="Search by column # (e.g. C-1), member #, or size..."
+            searchFilter={(item, q) =>
+              item.columnLabel.toLowerCase().includes(q) ||
+              String(item.memberId).includes(q) ||
+              item.dimensions.toLowerCase().includes(q) ||
+              String(item.design?.rebar.callout || '').toLowerCase().includes(q)
+            }
+            onExportCsv={handleExport}
+          />
+        </div>
+      </CollapsiblePanel>
 
       {/* Calculation Modal */}
       <CalculationModal report={selectedReport} onClose={() => setSelectedReport(null)} />

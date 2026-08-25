@@ -606,7 +606,7 @@ export const PileCapDesignView: React.FC = () => {
         </button>
         <button
           type="button"
-          onClick={() => { setShowBanner(false); setShowRebar(false); setShowCombined(false); }}
+          onClick={() => { setShowBanner(false); setShowRebar(false); setShowCombined(false); setShowTable(false); }}
           className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
         >
           <EyeOff className="w-3 h-3" /> Hide All

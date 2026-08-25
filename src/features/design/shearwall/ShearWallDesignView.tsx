@@ -9,7 +9,8 @@ import { DetailedCalculationReport } from '@/features/calculations/types';
 import { DataTable, ColumnDef } from '@/components/tables/DataTable';
 import { exportToCsv } from '@/utils/exportUtils';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
-import { Play, Layers, FileText, Download, X, Sparkles, Edit3, CheckCircle2, ShieldCheck, Save, Eye, Box } from 'lucide-react';
+import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
+import { Play, Layers, FileText, Download, X, Sparkles, Edit3, CheckCircle2, ShieldCheck, Save, Eye, EyeOff, Box } from 'lucide-react';
 
 export const ShearWallDesignView: React.FC = () => {
   const {
@@ -33,6 +34,11 @@ export const ShearWallDesignView: React.FC = () => {
   const [isDesigning, setIsDesigning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [autoFixSuccessMsg, setAutoFixSuccessMsg] = useState<string | null>(null);
+
+  // Panel hide/show toggles
+  const [showBanner, setShowBanner] = useState(true);
+  const [showRebar, setShowRebar] = useState(true);
+  const [showTable, setShowTable] = useState(true);
 
   // Shell elements directly from ANL file parametric model — only plates on the combined pile that is the shear wall / lift core (U 1.35m), strictly vertical plates
   const wallElements = useMemo(() => {
@@ -626,8 +632,36 @@ export const ShearWallDesignView: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full space-y-4 p-5 bg-ui-background overflow-y-auto font-sans">
+      {/* Global Hide / Show All */}
+      <div className="flex items-center justify-end gap-1.5 -mb-1">
+        <span className="text-[10px] font-mono text-slate-500 font-semibold uppercase tracking-wider">Panels:</span>
+        <button
+          type="button"
+          onClick={() => { setShowBanner(true); setShowRebar(true); setShowTable(true); }}
+          className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
+        >
+          <Eye className="w-3 h-3" /> Show All
+        </button>
+        <button
+          type="button"
+          onClick={() => { setShowBanner(false); setShowRebar(false); setShowTable(false); }}
+          className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
+        >
+          <EyeOff className="w-3 h-3" /> Hide All
+        </button>
+      </div>
+
       {/* Top Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-surface-card p-4 rounded-md border border-ui-border shadow-sm">
+      <CollapsiblePanel
+        title="IS 13920:2016 DUCTILE RC SHEAR WALL DESIGN & AUTO-FIX ENGINE"
+        icon={<Layers className="w-4 h-4 text-rose-600" />}
+        storageKey="shearwall-banner"
+        open={showBanner}
+        onToggle={setShowBanner}
+        contentClassName="p-4"
+        variant="card"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="font-mono text-base font-bold text-deep-navy flex items-center gap-2">
             <Layers className="w-5 h-5 text-rose-600" />
@@ -678,10 +712,23 @@ export const ShearWallDesignView: React.FC = () => {
             <span>{isDesigning ? 'Designing Walls...' : 'Re-calculate All'}</span>
           </button>
         </div>
-      </div>
+        </div>
+      </CollapsiblePanel>
 
       {/* Universal Rebar Master Selection Toolbar */}
-      <UniversalRebarBar moduleName="Ductile Shear Wall" />
+      <CollapsiblePanel
+        title="UNIVERSAL REBAR SELECTION (Ductile Shear Wall)"
+        icon={<Layers className="w-4 h-4 text-emerald-600" />}
+        storageKey="shearwall-rebar"
+        open={showRebar}
+        onToggle={setShowRebar}
+        contentClassName="p-0"
+        variant="card"
+      >
+        <div className="p-3">
+          <UniversalRebarBar moduleName="Ductile Shear Wall" />
+        </div>
+      </CollapsiblePanel>
 
       {/* Success Notification Banner */}
       {autoFixSuccessMsg && (
@@ -692,7 +739,17 @@ export const ShearWallDesignView: React.FC = () => {
       )}
 
       {/* Main Table */}
-      <div className="flex-1 overflow-hidden">
+      <CollapsiblePanel
+        title="RCC SHEAR WALL SCHEDULE & BOUNDARY ELEMENT STATUS"
+        icon={<Layers className="w-4 h-4 text-rose-600" />}
+        storageKey="shearwall-table"
+        open={showTable}
+        onToggle={setShowTable}
+        contentClassName="p-0"
+        className="flex-1 flex flex-col min-h-[420px]"
+        variant="card"
+      >
+        <div className="flex-1 min-h-[380px] flex flex-col overflow-hidden">
         <DataTable
           data={rows}
           columns={columns}
@@ -701,7 +758,8 @@ export const ShearWallDesignView: React.FC = () => {
           searchFilter={(item, q) => String(item.id).includes(q)}
           onExportCsv={handleExport}
         />
-      </div>
+        </div>
+      </CollapsiblePanel>
 
       {/* Calculation Modal */}
       <CalculationModal report={selectedReport} onClose={() => setSelectedReport(null)} />

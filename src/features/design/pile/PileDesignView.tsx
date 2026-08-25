@@ -8,6 +8,7 @@ import { ColumnNumberingService } from '@/features/model/columnNumbering';
 import { IS2911PileGroup } from '@/features/codes/is2911/pileGroup';
 import { exportToCsv } from '@/utils/exportUtils';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
+import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
 import {
   Building,
   FileText,
@@ -23,6 +24,8 @@ import {
   PieChart,
   HardHat,
   Save,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 export const PileDesignView: React.FC = () => {
@@ -55,6 +58,11 @@ export const PileDesignView: React.FC = () => {
 
   const [selectedReport, setSelectedReport] = useState<DetailedCalculationReport | null>(null);
   const [isDrawingOpen, setIsDrawingOpen] = useState(false);
+
+  // Panel hide/show toggles
+  const [showBanner, setShowBanner] = useState(true);
+  const [showPileType, setShowPileType] = useState(true);
+  const [showBoq, setShowBoq] = useState(true);
 
   const handleSaveDesigns = async () => {
     if (pileTypes.length === 0) return;
@@ -293,8 +301,36 @@ export const PileDesignView: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full space-y-4 p-4 bg-ui-background overflow-y-auto font-sans">
+      {/* Global Hide / Show All */}
+      <div className="flex items-center justify-end gap-1.5 -mb-1">
+        <span className="text-[10px] font-mono text-slate-500 font-semibold uppercase tracking-wider">Panels:</span>
+        <button
+          type="button"
+          onClick={() => { setShowBanner(true); setShowPileType(true); setShowBoq(true); }}
+          className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
+        >
+          <Eye className="w-3 h-3" /> Show All
+        </button>
+        <button
+          type="button"
+          onClick={() => { setShowBanner(false); setShowPileType(false); setShowBoq(false); }}
+          className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
+        >
+          <EyeOff className="w-3 h-3" /> Hide All
+        </button>
+      </div>
+
       {/* Top Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-surface-card p-4 rounded-md border border-ui-border shadow-xs">
+      <CollapsiblePanel
+        title="IS 2911:2010 STANDARD RCC PILE DESIGN WORKSPACE"
+        icon={<Building className="w-4 h-4 text-sky-600" />}
+        storageKey="pile-banner"
+        open={showBanner}
+        onToggle={setShowBanner}
+        contentClassName="p-4"
+        variant="card"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="font-mono text-base font-bold text-deep-navy flex items-center gap-2">
             <Building className="w-5 h-5 text-sky-600" />
@@ -340,7 +376,8 @@ export const PileDesignView: React.FC = () => {
             Export Foundation Schedule CSV
           </button>
         </div>
-      </div>
+        </div>
+      </CollapsiblePanel>
 
       {/* Universal Rebar Master Selection Toolbar */}
       <UniversalRebarBar moduleName="Cast-In-Situ Pile" />
@@ -354,7 +391,16 @@ export const PileDesignView: React.FC = () => {
       )}
 
       {/* SECTION 1: MASTER PILE TYPE DESIGN CARD */}
-      <div className="bg-surface-card border border-ui-border rounded-lg p-4 space-y-4 shadow-xs">
+      <CollapsiblePanel
+        title="MASTER PILE TYPE DESIGN"
+        icon={<Layers className="w-4 h-4 text-sky-600" />}
+        storageKey="pile-type-design"
+        open={showPileType}
+        onToggle={setShowPileType}
+        contentClassName="p-4"
+        variant="card"
+      >
+        <div className="space-y-4">
         {/* Pile Type Selector Tabs */}
         <div className="flex items-center justify-between border-b border-slate-200 pb-3">
           <div className="flex items-center gap-2 flex-wrap">
@@ -783,10 +829,20 @@ export const PileDesignView: React.FC = () => {
             </div>
           </div>
         </div>
-      </div>
+        </div>
+      </CollapsiblePanel>
 
       {/* SECTION 2: EXECUTIVE BILL OF QUANTITIES (BOQ) STRIP */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <CollapsiblePanel
+        title="BILL OF QUANTITIES (BOQ)"
+        icon={<Layers className="w-4 h-4 text-indigo-600" />}
+        storageKey="pile-boq"
+        open={showBoq}
+        onToggle={setShowBoq}
+        contentClassName="p-4"
+        variant="card"
+      >
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-surface-card p-3 rounded-lg border border-ui-border shadow-2xs">
           <span className="text-[10px] font-mono uppercase text-slate-500 block font-semibold">
             Total Columns / Caps
@@ -819,7 +875,8 @@ export const PileDesignView: React.FC = () => {
             {boqMetrics.totalConcreteM3} m³ / {boqMetrics.totalSteelMT} MT
           </span>
         </div>
-      </div>
+        </div>
+      </CollapsiblePanel>
 
 
 

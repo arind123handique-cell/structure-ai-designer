@@ -8,7 +8,8 @@ import { DataTable, ColumnDef } from '@/components/tables/DataTable';
 import { exportToCsv } from '@/utils/exportUtils';
 import { ColumnNumberingService } from '@/features/model/columnNumbering';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
-import { Play, Building, FileText, Download, X, Save, CheckCircle2 } from 'lucide-react';
+import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
+import { Play, Building, FileText, Download, X, Save, CheckCircle2, Eye, EyeOff, Layers } from 'lucide-react';
 
 export const FootingDesignView: React.FC = () => {
   const { activeModel, activeProject, saveFootingDesigns } = useProjectStore();
@@ -25,6 +26,11 @@ export const FootingDesignView: React.FC = () => {
   const [isDesigning, setIsDesigning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+
+  // Panel hide/show toggles
+  const [showBanner, setShowBanner] = useState(true);
+  const [showRebar, setShowRebar] = useState(true);
+  const [showTable, setShowTable] = useState(true);
 
   const handleSaveDesigns = async () => {
     if (designedFootings.size === 0) return;
@@ -242,8 +248,36 @@ export const FootingDesignView: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full space-y-4 p-5 bg-ui-background overflow-y-auto font-sans">
+      {/* Global Hide / Show All */}
+      <div className="flex items-center justify-end gap-1.5 -mb-1">
+        <span className="text-[10px] font-mono text-slate-500 font-semibold uppercase tracking-wider">Panels:</span>
+        <button
+          type="button"
+          onClick={() => { setShowBanner(true); setShowRebar(true); setShowTable(true); }}
+          className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
+        >
+          <Eye className="w-3 h-3" /> Show All
+        </button>
+        <button
+          type="button"
+          onClick={() => { setShowBanner(false); setShowRebar(false); setShowTable(false); }}
+          className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
+        >
+          <EyeOff className="w-3 h-3" /> Hide All
+        </button>
+      </div>
+
       {/* Top Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-surface-card p-4 rounded-md border border-ui-border shadow-sm">
+      <CollapsiblePanel
+        title="IS 456:2000 ISOLATED & COMBINED PAD FOOTING DESIGN ENGINE"
+        icon={<Building className="w-4 h-4 text-amber-600" />}
+        storageKey="footing-banner"
+        open={showBanner}
+        onToggle={setShowBanner}
+        contentClassName="p-4"
+        variant="card"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="font-mono text-base font-bold text-deep-navy flex items-center gap-2">
             <Building className="w-5 h-5 text-amber-600" />
@@ -295,10 +329,23 @@ export const FootingDesignView: React.FC = () => {
             <span>{isDesigning ? 'Designing Footings...' : 'Re-calculate All Footings'}</span>
           </button>
         </div>
-      </div>
+        </div>
+      </CollapsiblePanel>
 
       {/* Universal Rebar Master Selection Toolbar */}
-      <UniversalRebarBar moduleName="Pad Footing" />
+      <CollapsiblePanel
+        title="UNIVERSAL REBAR SELECTION (Pad Footing)"
+        icon={<Layers className="w-4 h-4 text-emerald-600" />}
+        storageKey="footing-rebar"
+        open={showRebar}
+        onToggle={setShowRebar}
+        contentClassName="p-0"
+        variant="card"
+      >
+        <div className="p-3">
+          <UniversalRebarBar moduleName="Pad Footing" />
+        </div>
+      </CollapsiblePanel>
 
       {/* Save Success Notification Banner */}
       {saveSuccessMsg && (
@@ -309,7 +356,17 @@ export const FootingDesignView: React.FC = () => {
       )}
 
       {/* Main Table */}
-      <div className="flex-1 overflow-hidden">
+      <CollapsiblePanel
+        title="RCC ISOLATED FOOTING SCHEDULE & BASE PRESSURE CHECKS"
+        icon={<Layers className="w-4 h-4 text-sky-700" />}
+        storageKey="footing-table"
+        open={showTable}
+        onToggle={setShowTable}
+        contentClassName="p-0"
+        className="flex-1 flex flex-col min-h-[420px]"
+        variant="card"
+      >
+        <div className="flex-1 min-h-[380px] flex flex-col overflow-hidden">
         <DataTable
           data={rows}
           columns={columns}
@@ -318,7 +375,8 @@ export const FootingDesignView: React.FC = () => {
           searchFilter={(item, q) => String(item.nodeId).includes(q)}
           onExportCsv={handleExport}
         />
-      </div>
+        </div>
+      </CollapsiblePanel>
 
       {/* Calculation Modal */}
       <CalculationModal report={selectedReport} onClose={() => setSelectedReport(null)} />

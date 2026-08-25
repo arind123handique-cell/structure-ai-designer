@@ -15,6 +15,7 @@ import {
 } from './beamOptimizationEngine';
 import { BeamAutoDesignModal } from './BeamAutoDesignModal';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
+import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
 import { Member3D } from '@/features/model/types';
 import {
   Play,
@@ -33,6 +34,8 @@ import {
   Wrench,
   Zap,
   Save,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 export interface FloorLevelGroup {
@@ -104,6 +107,12 @@ export const BeamDesignView: React.FC = () => {
   const [isAutoDesigning, setIsAutoDesigning] = useState(false);
   const [isApplyingAutoDesign, setIsApplyingAutoDesign] = useState(false);
   const [editMemberId, setEditMemberId] = useState<number | null>(null);
+  const [showBanner, setShowBanner] = useState(true);
+  const [showRebar, setShowRebar] = useState(true);
+  const [showFloors, setShowFloors] = useState(true);
+  const [showAudit, setShowAudit] = useState(true);
+  const [showFilters, setShowFilters] = useState(true);
+  const [showTable, setShowTable] = useState(true);
 
   const allBeams = useMemo(() => {
     if (!activeModel) return [];
@@ -801,74 +810,105 @@ export const BeamDesignView: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full space-y-4 p-5 bg-ui-background overflow-y-auto font-sans">
-      {/* Top Banner & Batch Design Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-surface-card p-4 rounded-md border border-ui-border shadow-sm">
-        <div>
-          <h2 className="font-mono text-base font-bold text-deep-navy flex items-center gap-2">
-            <Compass className="w-5 h-5 text-sky-600" />
-            IS 456:2000 & IS 13920:2016 FLOOR-WISE RCC BEAM DESIGN ENGINE
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Story-by-story beam detailing, 1-click economical auto-designer, Ast rebar optimizer, and ductile confinement.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* ⚡ 1-Click Auto-Design All Beams Button */}
-          <button
-            onClick={() => handleRunAutoDesign(allBeams)}
-            disabled={isAutoDesigning || allBeams.length === 0}
-            className="flex items-center gap-2 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-xs font-bold rounded shadow transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
-            title="Automatically optimize cross sections and rebars to be as economical as possible without failing code checks"
-          >
-            <Sparkles className="w-4 h-4 text-emerald-200" />
-            <span>{isAutoDesigning ? 'Optimizing All Beams...' : '⚡ 1-Click Auto-Design All Beams'}</span>
-          </button>
-
-          {floorStats.warningCount > 0 && (
-            <button
-              onClick={handleAutoFixAllWarnings}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-mono text-xs font-bold rounded shadow transition-all animate-bounce"
-              title="1-Click Auto-Fix all warnings and non-compliant beams"
-            >
-              <Zap className="w-3.5 h-3.5" />
-              <span>⚡ Auto-Fix All ({floorStats.warningCount}) Warnings</span>
-            </button>
-          )}
-
-          {designedBeams.size > 0 && (
-            <button
-              onClick={handleExport}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-slate-700 bg-white hover:bg-slate-50 border border-ui-border rounded transition-colors shadow-sm"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Export Floor CSV
-            </button>
-          )}
-
-          <button
-            onClick={handleSaveDesigns}
-            disabled={isSaving || designedBeams.size === 0}
-            className="flex items-center gap-2 px-3.5 py-1.5 bg-blue-700 hover:bg-blue-800 text-white font-mono text-xs font-bold rounded shadow transition-all disabled:opacity-50"
-            title="Save designed beams and custom rebar configurations to project"
-          >
-            <Save className="w-3.5 h-3.5 text-blue-200" />
-            <span>{isSaving ? 'Saving...' : '💾 Save Designs'}</span>
-          </button>
-
-          <button
-            onClick={handleDesignAll}
-            disabled={isDesigning}
-            className="flex items-center gap-2 px-4 py-1.5 bg-secondary-brand hover:bg-blue-700 text-white font-mono text-xs font-semibold rounded shadow transition-all disabled:opacity-50"
-          >
-            <Play className="w-3.5 h-3.5" />
-            <span>{isDesigning ? 'Designing Beams...' : 'Re-calculate Beams'}</span>
-          </button>
-        </div>
+      {/* Global hide for all panels */}
+      <div className="flex items-center justify-end gap-1.5 -mb-1">
+        <span className="text-[10px] font-mono text-slate-500 font-semibold uppercase tracking-wider">Panels:</span>
+        <button
+          type="button"
+          onClick={() => { setShowBanner(true); setShowRebar(true); setShowFloors(true); setShowAudit(true); setShowFilters(true); setShowTable(true); }}
+          className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
+        >
+          <Eye className="w-3 h-3" /> Show All
+        </button>
+        <button
+          type="button"
+          onClick={() => { setShowBanner(false); setShowRebar(false); setShowFloors(false); setShowAudit(false); }}
+          className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
+        >
+          <EyeOff className="w-3 h-3" /> Hide All
+        </button>
       </div>
 
-      {/* Universal Rebar Master Selection Toolbar */}
-      <UniversalRebarBar moduleName="RCC Beam" />
+      <CollapsiblePanel
+        title="IS 456:2000 & IS 13920:2016 FLOOR-WISE RCC BEAM DESIGN ENGINE"
+        icon={<Compass className="w-5 h-5 text-sky-600" />}
+        storageKey="beam-banner"
+        open={showBanner}
+        onToggle={setShowBanner}
+        contentClassName="p-4"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xs text-slate-500">
+              Story-by-story beam detailing, 1-click economical auto-designer, Ast rebar optimizer, and ductile confinement.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* ⚡ 1-Click Auto-Design All Beams Button */}
+            <button
+              onClick={() => handleRunAutoDesign(allBeams)}
+              disabled={isAutoDesigning || allBeams.length === 0}
+              className="flex items-center gap-2 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-xs font-bold rounded shadow transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
+              title="Automatically optimize cross sections and rebars to be as economical as possible without failing code checks"
+            >
+              <Sparkles className="w-4 h-4 text-emerald-200" />
+              <span>{isAutoDesigning ? 'Optimizing All Beams...' : '⚡ 1-Click Auto-Design All Beams'}</span>
+            </button>
+
+            {floorStats.warningCount > 0 && (
+              <button
+                onClick={handleAutoFixAllWarnings}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-mono text-xs font-bold rounded shadow transition-all animate-bounce"
+                title="1-Click Auto-Fix all warnings and non-compliant beams"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>⚡ Auto-Fix All ({floorStats.warningCount}) Warnings</span>
+              </button>
+            )}
+
+            {designedBeams.size > 0 && (
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-slate-700 bg-white hover:bg-slate-50 border border-ui-border rounded transition-colors shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Export Floor CSV
+              </button>
+            )}
+
+            <button
+              onClick={handleSaveDesigns}
+              disabled={isSaving || designedBeams.size === 0}
+              className="flex items-center gap-2 px-3.5 py-1.5 bg-blue-700 hover:bg-blue-800 text-white font-mono text-xs font-bold rounded shadow transition-all disabled:opacity-50"
+              title="Save designed beams and custom rebar configurations to project"
+            >
+              <Save className="w-3.5 h-3.5 text-blue-200" />
+              <span>{isSaving ? 'Saving...' : '💾 Save Designs'}</span>
+            </button>
+
+            <button
+              onClick={handleDesignAll}
+              disabled={isDesigning}
+              className="flex items-center gap-2 px-4 py-1.5 bg-secondary-brand hover:bg-blue-700 text-white font-mono text-xs font-semibold rounded shadow transition-all disabled:opacity-50"
+            >
+              <Play className="w-3.5 h-3.5" />
+              <span>{isDesigning ? 'Designing Beams...' : 'Re-calculate Beams'}</span>
+            </button>
+          </div>
+        </div>
+      </CollapsiblePanel>
+
+      <CollapsiblePanel
+        title="UNIVERSAL REBAR SELECTION (RCC Beam)"
+        icon={<Layers className="w-4 h-4 text-emerald-600" />}
+        storageKey="beam-rebar"
+        open={showRebar}
+        onToggle={setShowRebar}
+        contentClassName="p-3"
+      >
+        <UniversalRebarBar moduleName="RCC Beam" />
+      </CollapsiblePanel>
 
       {/* Save Success Notification Banner */}
       {saveSuccessMsg && (
@@ -878,13 +918,20 @@ export const BeamDesignView: React.FC = () => {
         </div>
       )}
 
-      {/* ----------------- FLOOR-WISE LEVEL SELECTOR & BATCH SIZING ----------------- */}
-      <div className="bg-surface-card p-3 rounded-md border border-ui-border shadow-sm space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="font-mono text-xs font-bold text-deep-navy flex items-center gap-1.5 uppercase">
-            <Building2 className="w-4 h-4 text-sky-600" />
-            Select Floor / Story Level:
-          </span>
+      <CollapsiblePanel
+        title="Floor / Story Level Selector & Batch Sizing"
+        icon={<Building2 className="w-4 h-4 text-sky-600" />}
+        storageKey="beam-floors"
+        open={showFloors}
+        onToggle={setShowFloors}
+        contentClassName="p-3"
+      >
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="font-mono text-xs font-bold text-deep-navy flex items-center gap-1.5 uppercase">
+              <Building2 className="w-4 h-4 text-sky-600" />
+              Select Floor / Story Level:
+            </span>
           <div className="flex items-center gap-2">
             {/* Auto-Design Active Floor Button */}
             <button
@@ -979,16 +1026,24 @@ export const BeamDesignView: React.FC = () => {
             <span className="font-bold text-orange-600">{floorStats.maxMoment} kNm</span>
           </div>
         </div>
-      </div>
+        </div>
+      </CollapsiblePanel>
 
-      {/* ─── LOAD COMBINATION & GRAVITY ENVELOPE AUDIT PANEL ─────────────────────────────── */}
       {activeModel && (
-        <div className="bg-surface-card p-3 rounded-md border border-amber-200 shadow-sm space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-amber-600" />
-              <span className="font-mono text-xs font-bold text-amber-900 uppercase">
-                Load Combination & Engineering Gravity Envelope Audit (G+3 Standard)
+        <CollapsiblePanel
+          title="Load Combination & Engineering Gravity Envelope Audit (G+3 Standard)"
+          icon={<Layers className="w-4 h-4 text-amber-600" />}
+          storageKey="beam-audit"
+          open={showAudit}
+          onToggle={setShowAudit}
+          contentClassName="p-3"
+        >
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-amber-600" />
+                <span className="font-mono text-xs font-bold text-amber-900 uppercase">
+                  Load Combination & Engineering Gravity Envelope Audit (G+3 Standard)
               </span>
             </div>
             <span className="text-[10px] font-mono px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded border border-emerald-300 font-semibold">
@@ -1074,29 +1129,52 @@ export const BeamDesignView: React.FC = () => {
               Beams are designed for governing <span className="font-bold text-deep-navy">max(STAAD ANL Forces, 1.5 DL + 1.5 LL Gravity Envelope)</span> with span-to-depth deflection minimums (L ≥ 4.2m → D ≥ 450mm, 3.2m ≤ L &lt; 4.2m → D ≥ 400mm, 2.2m ≤ L &lt; 3.2m → D ≥ 350mm).
             </span>
           </div>
-        </div>
+          </div>
+        </CollapsiblePanel>
       )}
 
-      {/* Filter Tabs */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-mono text-slate-500 font-semibold uppercase">Filter Status:</span>
-        {(['ALL', 'PASS', 'WARNING', 'FAIL'] as const).map((st) => (
-          <button
-            key={st}
-            onClick={() => setFilterStatus(st)}
-            className={`px-3 py-1 text-xs font-mono rounded border transition-colors ${
-              filterStatus === st
-                ? 'bg-deep-navy text-white border-deep-navy shadow-sm'
-                : 'bg-white text-slate-700 border-ui-border hover:bg-slate-50'
-            }`}
-          >
-            {st} ({st === 'ALL' ? visibleBeams.length : visibleBeams.filter((b) => designedBeams.get(b.id)?.status === st).length})
-          </button>
-        ))}
-      </div>
+      <CollapsiblePanel
+        title="Filter by Status"
+        icon={<Layers className="w-4 h-4 text-slate-500" />}
+        storageKey="beam-filters"
+        open={showFilters}
+        onToggle={setShowFilters}
+        contentClassName="p-3"
+        variant="card"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-mono text-slate-500 font-semibold uppercase">Filter Status:</span>
+          {(['ALL', 'PASS', 'WARNING', 'FAIL'] as const).map((st) => (
+            <button
+              key={st}
+              onClick={() => setFilterStatus(st)}
+              className={`px-3 py-1 text-xs font-mono rounded border transition-colors ${
+                filterStatus === st
+                  ? 'bg-deep-navy text-white border-deep-navy shadow-sm'
+                  : 'bg-white text-slate-700 border-ui-border hover:bg-slate-50'
+              }`}
+            >
+              {st} ({st === 'ALL' ? visibleBeams.length : visibleBeams.filter((b) => designedBeams.get(b.id)?.status === st).length})
+            </button>
+          ))}
+        </div>
+      </CollapsiblePanel>
 
-      {/* Main Table */}
-      <div className="flex-1 overflow-hidden">
+      <CollapsiblePanel
+        title={
+          selectedFloorId === 'ALL'
+            ? 'RCC BEAM SCHEDULE — ALL FLOORS'
+            : `RCC BEAM SCHEDULE — ${floorGroups.find((g) => g.id === selectedFloorId)?.label.toUpperCase()}`
+        }
+        icon={<Layers className="w-4 h-4 text-sky-700" />}
+        storageKey="beam-table"
+        open={showTable}
+        onToggle={setShowTable}
+        contentClassName="p-0"
+        className="flex-1 flex flex-col min-h-[420px]"
+        variant="card"
+      >
+        <div className="flex-1 min-h-[380px] flex flex-col overflow-hidden">
         <DataTable
           data={rows}
           columns={columns}
@@ -1114,7 +1192,8 @@ export const BeamDesignView: React.FC = () => {
           }
           onExportCsv={handleExport}
         />
-      </div>
+        </div>
+      </CollapsiblePanel>
 
       {/* Step-by-Step Calculation Sheet Modal */}
       <CalculationModal report={selectedReport} onClose={() => setSelectedReport(null)} />

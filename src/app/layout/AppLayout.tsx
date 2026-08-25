@@ -1,10 +1,10 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { useProjectStore } from '@/features/projects/projectStore';
 import { Sidebar } from './Sidebar';
 import { TopHeader } from './TopHeader';
 import { ANLImportModal } from '@/features/anl/ANLImportModal';
 import { UniversalRebarModal } from '@/features/design/common/UniversalRebarModal';
-import { Loader2 } from 'lucide-react';
+import { Loader2, PanelLeftOpen, PanelTopOpen, Eye, EyeOff } from 'lucide-react';
 
 const ProjectDashboard = lazy(() => import('@/features/projects/ProjectDashboard').then(m => ({ default: m.ProjectDashboard })));
 const Structural3DViewer = lazy(() => import('@/components/model-viewer/Structural3DViewer').then(m => ({ default: m.Structural3DViewer })));
@@ -36,6 +36,16 @@ const ViewFallback: React.FC = () => (
 export const AppLayout: React.FC = () => {
   const activeView = useProjectStore(s => s.activeView);
   const selectedMemberId = useProjectStore(s => s.selectedMemberId);
+
+  // Navigation panel visibility (persisted)
+  const [sidebarVisible, setSidebarVisible] = useState(() => {
+    try { return localStorage.getItem('nav:sidebarVisible') !== '0'; } catch { return true; }
+  });
+  const [headerVisible, setHeaderVisible] = useState(() => {
+    try { return localStorage.getItem('nav:headerVisible') !== '0'; } catch { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem('nav:sidebarVisible', sidebarVisible ? '1' : '0'); } catch {} }, [sidebarVisible]);
+  useEffect(() => { try { localStorage.setItem('nav:headerVisible', headerVisible ? '1' : '0'); } catch {} }, [headerVisible]);
 
   const renderMainView = () => {
     switch (activeView) {
@@ -82,12 +92,55 @@ export const AppLayout: React.FC = () => {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-ui-background text-on-surface">
-      {/* Left Sidebar */}
-      <Sidebar />
+      {/* Left Sidebar — hideable */}
+      {sidebarVisible ? (
+        <Sidebar onHide={() => setSidebarVisible(false)} />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setSidebarVisible(true)}
+          className="fixed left-2 top-3 z-40 p-2 bg-deep-navy hover:bg-slate-800 text-white rounded-md shadow-lg border border-slate-700 flex items-center gap-1.5 text-xs font-mono"
+          title="Show Navigation Sidebar"
+        >
+          <PanelLeftOpen className="w-4 h-4" />
+          <span className="hidden md:inline">Nav</span>
+        </button>
+      )}
 
       {/* Main Container */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
-        <TopHeader />
+        {headerVisible ? (
+          <TopHeader onHide={() => setHeaderVisible(false)} />
+        ) : (
+          <div className="h-8 bg-surface-card border-b border-ui-border flex items-center justify-between px-3 shrink-0">
+            <span className="text-[10px] font-mono text-slate-400">Header hidden</span>
+            <button
+              type="button"
+              onClick={() => setHeaderVisible(true)}
+              className="flex items-center gap-1 px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs"
+              title="Show Top Header"
+            >
+              <PanelTopOpen className="w-3.5 h-3.5" /> Show Header
+            </button>
+          </div>
+        )}
+
+        {/* Global hide/show for navigation */}
+        {!sidebarVisible || !headerVisible ? (
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border-b border-ui-border text-[11px] font-mono text-slate-500">
+            <EyeOff className="w-3 h-3 text-slate-400" />
+            <span>Navigation hidden:</span>
+            {!sidebarVisible && <span className="px-1.5 py-0.5 bg-slate-200 rounded text-slate-700 font-semibold">Sidebar</span>}
+            {!headerVisible && <span className="px-1.5 py-0.5 bg-slate-200 rounded text-slate-700 font-semibold">Header</span>}
+            <button
+              type="button"
+              onClick={() => { setSidebarVisible(true); setHeaderVisible(true); }}
+              className="ml-2 flex items-center gap-1 px-2 py-0.5 bg-white hover:bg-slate-100 border border-ui-border rounded text-[11px] font-mono"
+            >
+              <Eye className="w-3 h-3" /> Show All Nav
+            </button>
+          </div>
+        ) : null}
 
         <div className="flex-1 flex overflow-hidden relative">
           {/* Main View Area */}

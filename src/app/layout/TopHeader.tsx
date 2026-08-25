@@ -14,9 +14,15 @@ import {
   Sparkles,
   Zap,
   Sliders,
+  EyeOff,
+  PanelTopClose,
 } from 'lucide-react';
 
-export const TopHeader: React.FC = React.memo(() => {
+interface TopHeaderProps {
+  onHide?: () => void;
+}
+
+export const TopHeader: React.FC<TopHeaderProps> = React.memo(({ onHide }) => {
   const activeProject = useProjectStore(s => s.activeProject);
   const activeModel = useProjectStore(s => s.activeModel);
   const setImportModalOpen = useProjectStore(s => s.setImportModalOpen);
@@ -126,6 +132,17 @@ export const TopHeader: React.FC = React.memo(() => {
             <Upload className="w-3.5 h-3.5" />
             <span>Import ANL</span>
           </button>
+
+          {onHide && (
+            <button
+              type="button"
+              onClick={onHide}
+              className="p-1.5 hover:bg-slate-100 rounded text-slate-500 hover:text-slate-700 border border-transparent hover:border-ui-border transition-colors"
+              title="Hide Top Header"
+            >
+              <PanelTopClose className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </header>
 

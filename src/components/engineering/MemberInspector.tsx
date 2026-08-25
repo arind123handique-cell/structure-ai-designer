@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useProjectStore } from '@/features/projects/projectStore';
 import { X, Layers, Activity, Ruler, Cpu, Sparkles, ArrowRight, FileText } from 'lucide-react';
+import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
 import { BeamDesignEngine } from '@/features/design/beam/beamDesignEngine';
 import { ColumnDesignEngine } from '@/features/design/column/columnDesignEngine';
 import { CalculationModal } from '@/features/calculations/CalculationModal';
@@ -125,12 +126,14 @@ export const MemberInspector: React.FC = () => {
 
         {/* Inspector Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-5 text-xs">
-          {/* Section 1: Geometry */}
-          <div className="space-y-2">
-            <h4 className="font-mono text-[11px] font-semibold text-slate-500 uppercase flex items-center gap-1.5">
-              <Ruler className="w-3.5 h-3.5" /> Geometry & Coordinates
-            </h4>
-            <div className="bg-slate-50 border border-ui-border rounded p-3 space-y-2 font-mono">
+          <CollapsiblePanel
+            title="Geometry & Coordinates"
+            icon={<Ruler className="w-3.5 h-3.5 text-slate-500" />}
+            storageKey="inspector-geometry"
+            variant="card"
+            contentClassName="p-3"
+          >
+            <div className="bg-slate-50 border border-ui-border rounded p-3 space-y-2 font-mono text-xs">
               <div className="flex justify-between">
                 <span className="text-slate-500">Span Length:</span>
                 <span className="font-bold text-slate-800">{member.length.toFixed(3)} m</span>
@@ -148,23 +151,25 @@ export const MemberInspector: React.FC = () => {
                 </span>
               </div>
             </div>
-          </div>
+          </CollapsiblePanel>
 
-          {/* Section 2: Cross Section Properties & Interactive Edit */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h4 className="font-mono text-[11px] font-semibold text-slate-500 uppercase flex items-center gap-1.5">
-                <Cpu className="w-3.5 h-3.5" /> Cross Section & Material
-              </h4>
+          <CollapsiblePanel
+            title="Cross Section & Material"
+            icon={<Cpu className="w-3.5 h-3.5 text-slate-500" />}
+            storageKey="inspector-section"
+            variant="card"
+            contentClassName="p-3"
+            headerActions={
               <button
                 type="button"
                 onClick={() => setIsEditModalOpen(true)}
-                className="text-[11px] font-mono text-secondary-brand hover:underline font-bold"
+                className="text-[11px] font-mono text-secondary-brand hover:underline font-bold px-2 py-0.5 bg-white border border-ui-border rounded"
               >
-                ✎ Modify Section
+                ✎ Modify
               </button>
-            </div>
-            <div className="bg-slate-50 border border-ui-border rounded p-3 space-y-2 font-mono">
+            }
+          >
+            <div className="bg-slate-50 border border-ui-border rounded p-3 space-y-2 font-mono text-xs">
               <div className="flex justify-between items-center">
                 <span className="text-slate-500">Dimensions:</span>
                 <button
@@ -193,15 +198,17 @@ export const MemberInspector: React.FC = () => {
                 </span>
               </div>
             </div>
-          </div>
+          </CollapsiblePanel>
 
-          {/* Weak Beam Strong Column (WBSC) Box */}
-          <div className="space-y-2">
-            <h4 className="font-mono text-[11px] font-semibold text-slate-500 uppercase flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" /> IS 13920 WBSC Hierarchy
-            </h4>
+          <CollapsiblePanel
+            title="IS 13920 WBSC Hierarchy"
+            icon={<Sparkles className="w-3.5 h-3.5 text-amber-500" />}
+            storageKey="inspector-wbsc"
+            variant="card"
+            contentClassName="p-3"
+          >
             <div className={`border rounded p-3 space-y-1.5 ${wbsc.isCompliant ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'}`}>
-              <div className="flex justify-between items-center font-mono">
+              <div className="flex justify-between items-center font-mono text-xs">
                 <span className="text-slate-700 font-bold">Ratio (∑Mc / ∑Mb):</span>
                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${wbsc.isCompliant ? 'bg-emerald-200 text-emerald-900' : 'bg-rose-200 text-rose-900'}`}>
                   {wbsc.ratio} ({wbsc.status})
@@ -209,14 +216,16 @@ export const MemberInspector: React.FC = () => {
               </div>
               <p className="text-[10px] font-sans text-slate-600 leading-tight">{wbsc.suggestion}</p>
             </div>
-          </div>
+          </CollapsiblePanel>
 
-          {/* Section 3: Governing Analysis Forces */}
-          <div className="space-y-2">
-            <h4 className="font-mono text-[11px] font-semibold text-slate-500 uppercase flex items-center gap-1.5">
-              <Activity className="w-3.5 h-3.5" /> Governing Analysis Forces
-            </h4>
-            <div className="bg-slate-50 border border-ui-border rounded p-3 space-y-2 font-mono">
+          <CollapsiblePanel
+            title="Governing Analysis Forces"
+            icon={<Activity className="w-3.5 h-3.5 text-slate-500" />}
+            storageKey="inspector-forces"
+            variant="card"
+            contentClassName="p-3"
+          >
+            <div className="bg-slate-50 border border-ui-border rounded p-3 space-y-2 font-mono text-xs">
               <div className="flex justify-between">
                 <span className="text-slate-500">Governing Load Case:</span>
                 <span className="font-bold text-secondary-brand">LC #{maxForce.loadCaseId}</span>
@@ -234,26 +243,30 @@ export const MemberInspector: React.FC = () => {
                 <span className="font-bold text-slate-900">{maxForce.mz.toFixed(2)} kNm</span>
               </div>
             </div>
-          </div>
+          </CollapsiblePanel>
 
-          {/* Section 4: IS Code Design Actions */}
-          <div className="bg-emerald-50/70 border border-emerald-300 rounded p-3 space-y-2">
-            <div className="flex items-center justify-between text-emerald-950 font-mono text-[11px] font-bold">
-              <span>IS 456 & IS 13920 DESIGN ENGINE</span>
-              <span className="px-1.5 py-0.2 bg-emerald-200 text-emerald-900 rounded text-[9px]">ACTIVE</span>
+          <CollapsiblePanel
+            title="IS 456 & IS 13920 DESIGN ENGINE"
+            icon={<FileText className="w-3.5 h-3.5 text-emerald-700" />}
+            storageKey="inspector-design"
+            variant="card"
+            contentClassName="p-3"
+            headerActions={<span className="px-1.5 py-0.2 bg-emerald-200 text-emerald-900 rounded text-[9px] font-bold">ACTIVE</span>}
+          >
+            <div className="bg-emerald-50/70 border border-emerald-300 rounded p-3 space-y-2">
+              <p className="text-[11px] text-emerald-900/80 font-sans">
+                Instant calculation sheet with symbolic formulas, code citations, and pass/fail audit.
+              </p>
+              <button
+                onClick={handleOpenCalculation}
+                className="w-full flex items-center justify-center gap-2 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded font-mono text-xs font-semibold shadow-xs transition-colors"
+              >
+                <FileText className="w-4 h-4" />
+                <span>Open Step-by-Step Calculation Sheet</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <p className="text-[11px] text-emerald-900/80 font-sans">
-              Instant calculation sheet with symbolic formulas, code citations, and pass/fail audit.
-            </p>
-            <button
-              onClick={handleOpenCalculation}
-              className="w-full flex items-center justify-center gap-2 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded font-mono text-xs font-semibold shadow-xs transition-colors"
-            >
-              <FileText className="w-4 h-4" />
-              <span>Open Step-by-Step Calculation Sheet</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          </CollapsiblePanel>
         </div>
       </div>
 
