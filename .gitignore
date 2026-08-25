@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+build/
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Large analysis files (keep sample, ignore generated)
+*.anl
+!**/sampleData*.ts
+STR FINAL.anl
+STD 6MILES.ANL
+STD 6MILES.STD
+
+# Testing
+coverage/
