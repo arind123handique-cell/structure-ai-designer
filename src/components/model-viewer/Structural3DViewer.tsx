@@ -442,7 +442,7 @@ export const Structural3DViewer: React.FC = () => {
       memberMeshesRef.current.set(member.id, mesh);
 
       if (isCol && showLabels) {
-        const isGroundCol = model.supports.has(member.startNodeId) || model.supports.has(member.endNodeId);
+        const isGroundCol = supports.has(member.startNodeId) || supports.has(member.endNodeId);
         if (isGroundCol) {
           const colInfo = columnMemberMapping.get(member.id);
           const colLabel = colInfo?.columnLabel || `C${member.id}`;
