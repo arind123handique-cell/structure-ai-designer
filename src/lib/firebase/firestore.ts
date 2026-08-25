@@ -22,13 +22,67 @@ function userProjectDoc(uid: string, projectId: string) {
   return doc(db, 'users', uid, PROJECTS_COLLECTION, projectId);
 }
 
+/**
+ * Recursively sanitize data for Firestore: nested arrays are not supported.
+ * - Array of Arrays → convert outer array to object with numeric-string keys
+ * - Flat arrays of primitives are kept
+ * - Objects are recursively sanitized
+ */
+function sanitizeForFirestore(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) {
+    if (value.length > 0 && Array.isArray(value[0])) {
+      const obj: Record<string, unknown> = {};
+      for (let i = 0; i < value.length; i++) {
+        obj[String(i)] = sanitizeForFirestore(value[i]);
+      }
+      return obj;
+    }
+    return value.map(sanitizeForFirestore);
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = sanitizeForFirestore(v);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Reverse the sanitization: convert object-with-numeric-keys back to arrays.
+ */
+function restoreFromFirestore(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) {
+    return value.map(restoreFromFirestore);
+  }
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj);
+    if (keys.length > 0 && keys.every((k) => /^\d+$/.test(k))) {
+      const maxIdx = Math.max(...keys.map(Number));
+      const arr: unknown[] = new Array(maxIdx + 1);
+      for (const k of keys) {
+        arr[Number(k)] = restoreFromFirestore(obj[k]);
+      }
+      return arr;
+    }
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      out[k] = restoreFromFirestore(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 export class FirestoreProjectStorage {
   static async saveProject(uid: string, project: StoredProject): Promise<void> {
     const docRef = userProjectDoc(uid, project.metadata.id);
-    await setDoc(docRef, {
-      ...project,
-      _syncedAt: serverTimestamp(),
-    });
+    const safe = sanitizeForFirestore({ ...project, _syncedAt: serverTimestamp() });
+    await setDoc(docRef, safe);
   }
 
   static async getProject(uid: string, projectId: string): Promise<StoredProject | null> {
@@ -36,7 +90,7 @@ export class FirestoreProjectStorage {
     if (!snap.exists()) return null;
     const data = snap.data();
     delete data._syncedAt;
-    return data as StoredProject;
+    return restoreFromFirestore(data) as StoredProject;
   }
 
   static async getAllProjects(uid: string): Promise<StoredProject[]> {
@@ -45,7 +99,7 @@ export class FirestoreProjectStorage {
     return snapshot.docs.map((d) => {
       const data = d.data();
       delete data._syncedAt;
-      return data as StoredProject;
+      return restoreFromFirestore(data) as StoredProject;
     });
   }
 
@@ -56,7 +110,8 @@ export class FirestoreProjectStorage {
   static async saveAllProjects(uid: string, projects: StoredProject[]): Promise<void> {
     const writes = projects.map((p) => {
       const docRef = userProjectDoc(uid, p.metadata.id);
-      return setDoc(docRef, { ...p, _syncedAt: serverTimestamp() });
+      const safe = sanitizeForFirestore({ ...p, _syncedAt: serverTimestamp() });
+      return setDoc(docRef, safe);
     });
     await Promise.all(writes);
   }

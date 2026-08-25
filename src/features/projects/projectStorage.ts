@@ -13,6 +13,67 @@ interface StructureAIDB extends DBSchema {
 const DB_NAME = 'StructureAIDesignerDB';
 const DB_VERSION = 1;
 
+/**
+ * Recursively sanitize data for Firestore: nested arrays are not supported.
+ * - Array of Arrays → convert outer array to object with numeric-string keys
+ * - Flat arrays of primitives are kept (Firestore supports them)
+ * - Objects are recursively sanitized
+ */
+function sanitizeForFirestore(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) {
+    // Check if any element is itself an array → convert to object
+    if (value.length > 0 && Array.isArray(value[0])) {
+      const obj: Record<string, unknown> = {};
+      for (let i = 0; i < value.length; i++) {
+        obj[String(i)] = sanitizeForFirestore(value[i]);
+      }
+      return obj;
+    }
+    // Flat array — recurse into each element
+    return value.map(sanitizeForFirestore);
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = sanitizeForFirestore(v);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Reverse the sanitization: convert object-with-numeric-keys back to arrays.
+ * Only targets objects whose keys are all numeric strings (our serialized Map entries).
+ */
+function restoreFromFirestore(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) {
+    return value.map(restoreFromFirestore);
+  }
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj);
+    // If all keys are numeric strings, convert back to array
+    if (keys.length > 0 && keys.every((k) => /^\d+$/.test(k))) {
+      const maxIdx = Math.max(...keys.map(Number));
+      const arr: unknown[] = new Array(maxIdx + 1);
+      for (const k of keys) {
+        arr[Number(k)] = restoreFromFirestore(obj[k]);
+      }
+      return arr;
+    }
+    // Otherwise recurse
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      out[k] = restoreFromFirestore(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 export class ProjectStorage {
   private static dbPromise: Promise<IDBPDatabase<StructureAIDB>> = openDB<StructureAIDB>(DB_NAME, DB_VERSION, {
     upgrade(db) {
