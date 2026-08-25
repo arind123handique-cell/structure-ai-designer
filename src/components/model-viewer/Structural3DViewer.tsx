@@ -599,8 +599,27 @@ export const Structural3DViewer: React.FC = () => {
             ];
           }
 
-          const capGeom = new THREE.BoxGeometry(capWidth, capDepth, capLength);
-          capGeom.translate(0, -capDepth / 2, 0);
+          let capGeom: THREE.BufferGeometry;
+          if (capResult.pileCount === 5) {
+            const Rp = (capResult.pileSpacing / 1000) / (2 * Math.sin(Math.PI / 5));
+            const overhangM = (capResult.edgeDistance || 300) / 1000;
+            const R = Rp + overhangM;
+            const shape = new THREE.Shape();
+            for (let i = 0; i < 5; i++) {
+              const angle = Math.PI / 2 + (2 * Math.PI * i) / 5;
+              const px = R * Math.cos(angle);
+              const py = R * Math.sin(angle);
+              if (i === 0) shape.moveTo(px, py);
+              else shape.lineTo(px, py);
+            }
+            shape.closePath();
+            capGeom = new THREE.ExtrudeGeometry(shape, { depth: capDepth, bevelEnabled: false });
+            capGeom.rotateX(-Math.PI / 2);
+            capGeom.translate(0, -capDepth, 0);
+          } else {
+            capGeom = new THREE.BoxGeometry(capWidth, capDepth, capLength);
+            capGeom.translate(0, -capDepth / 2, 0);
+          }
 
           const capMesh = new THREE.Mesh(capGeom, isSelected ? selectedPileCapMaterial : pileCapMaterial);
           capMesh.userData = { type: 'support', nodeId: supp.nodeId };
