@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { useProjectStore } from '@/features/projects/projectStore';
 import { AppLayout } from '@/app/layout/AppLayout';
 import { AuthProvider, useAuth } from '@/lib/firebase/AuthContext';
@@ -6,9 +6,35 @@ import { LoginPage } from '@/features/auth/LoginPage';
 import { ProjectStorage } from '@/features/projects/projectStorage';
 import { Loader2 } from 'lucide-react';
 
+const SharedProjectView = lazy(() =>
+  import('@/features/projects/SharedProjectView')
+);
+
+function getShareTokenFromUrl(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('share');
+}
+
 const AppInner: React.FC = () => {
   const { initializeStore, activeProject, importANL, isLoading } = useProjectStore();
   const { user, loading: authLoading } = useAuth();
+  const [shareToken] = useState<string | null>(getShareTokenFromUrl);
+
+  // If ?share= param is present, show shared project view (no auth required)
+  if (shareToken) {
+    return (
+      <Suspense
+        fallback={
+          <div className="h-screen w-screen flex flex-col items-center justify-center bg-deep-navy text-slate-200 font-mono space-y-3">
+            <Loader2 className="w-8 h-8 animate-spin text-secondary-brand" />
+            <span className="text-sm font-semibold tracking-wider">LOADING SHARED PROJECT...</span>
+          </div>
+        }
+      >
+        <SharedProjectView token={shareToken} />
+      </Suspense>
+    );
+  }
 
   // Sync auth user to ProjectStorage for cloud sync
   useEffect(() => {

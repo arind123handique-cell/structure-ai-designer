@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useProjectStore } from '@/features/projects/projectStore';
 import { GlobalAutoDesignService, GlobalAutoDesignSummary } from '@/features/design/common/globalAutoDesignService';
 import { GlobalAutoDesignModal } from '@/features/design/common/GlobalAutoDesignModal';
+import { FirestoreProjectStorage } from '@/lib/firebase/firestore';
+import { useAuth } from '@/lib/firebase/AuthContext';
 import {
   Upload,
   FolderOpen,
@@ -22,6 +24,9 @@ import {
   Trash2,
   X,
   Zap,
+  Share2,
+  Link2,
+  Check,
 } from 'lucide-react';
 
 export const ProjectDashboard: React.FC = () => {
@@ -36,11 +41,34 @@ export const ProjectDashboard: React.FC = () => {
     setImportModalOpen,
     batchUpdateSections,
   } = useProjectStore();
+  const { user } = useAuth();
 
   const [projectToDelete, setProjectToDelete] = useState<{ id: string; name: string } | null>(null);
   const [isClearingInactive, setIsClearingInactive] = useState(false);
   const [globalSummary, setGlobalSummary] = useState<GlobalAutoDesignSummary | null>(null);
   const [isApplyingAutoFix, setIsApplyingAutoFix] = useState(false);
+  const [sharingProjectId, setSharingProjectId] = useState<string | null>(null);
+  const [shareLinkCopied, setShareLinkCopied] = useState<string | null>(null);
+
+  const handleShare = async (project: any) => {
+    if (!user) {
+      alert('Please sign in to share projects.');
+      return;
+    }
+    setSharingProjectId(project.metadata.id);
+    try {
+      const token = await FirestoreProjectStorage.createShareLink(user.uid, project);
+      const link = `${window.location.origin}/?share=${token}`;
+      await navigator.clipboard.writeText(link);
+      setShareLinkCopied(project.metadata.id);
+      setTimeout(() => setShareLinkCopied(null), 3000);
+    } catch (e) {
+      console.error('Share failed:', e);
+      alert('Failed to create share link. Please ensure you are connected to the internet.');
+    } finally {
+      setSharingProjectId(null);
+    }
+  };
 
   const handleRunGlobalAutoFix = () => {
     if (!activeModel) return;
@@ -117,6 +145,27 @@ export const ProjectDashboard: React.FC = () => {
               <Upload className="w-3.5 h-3.5 text-slate-500" />
               Import ANL
             </button>
+
+            {activeProject && (
+              <button
+                onClick={() => handleShare(activeProject)}
+                disabled={sharingProjectId === activeProject.metadata.id}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-indigo-200 hover:bg-indigo-50 text-indigo-700 font-mono text-xs font-semibold rounded shadow-sm transition-colors disabled:opacity-50"
+                title="Copy share link to clipboard"
+              >
+                {shareLinkCopied === activeProject.metadata.id ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    Link Copied!
+                  </>
+                ) : (
+                  <>
+                    <Share2 className="w-3.5 h-3.5" />
+                    Share
+                  </>
+                )}
+              </button>
+            )}
 
             <button
               onClick={() => setActiveView('3d-model')}
@@ -355,12 +404,30 @@ export const ProjectDashboard: React.FC = () => {
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-4 text-xs font-mono text-slate-600">
+                    <div className="flex items-center gap-2 text-xs font-mono text-slate-600">
                       <div className="hidden sm:flex items-center gap-2">
                         <span>{prj.model.nodes.length} Nodes</span>
                         <span>•</span>
                         <span>{prj.model.members.length} Members</span>
                       </div>
+
+                      {/* Share Project Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleShare(prj);
+                        }}
+                        disabled={sharingProjectId === prj.metadata.id}
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded border border-transparent hover:border-indigo-200 transition-all disabled:opacity-50"
+                        title={`Share "${prj.metadata.name}" via link`}
+                      >
+                        {shareLinkCopied === prj.metadata.id ? (
+                          <Check className="w-4 h-4 text-emerald-600" />
+                        ) : (
+                          <Share2 className="w-4 h-4" />
+                        )}
+                      </button>
 
                       {/* Delete Project Button */}
                       <button
