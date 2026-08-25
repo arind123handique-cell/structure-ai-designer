@@ -173,7 +173,53 @@ export class ColumnDesignEngine {
     }
 
     // Detailed Calculation Report
-    const calculationReport: DetailedCalculationReport = {
+    const calculationReport = ColumnDesignEngine.buildReport(memberId, b, D, unsupportedHeight, fck, fy, Pu, Mux_design, Muy_design, emin_x, emin_y, heightMm, Ag, rebar, ductility, finalBiaxialCheck, axialCheck, status, governingLoadCase, cover);
+
+    return {
+      memberId,
+      dimensions: `${b} × ${D} mm`,
+      height: unsupportedHeight,
+      factoredDemandPu: Pu,
+      factoredDemandMux: Mux,
+      factoredDemandMuy: Muy,
+      axialCheck,
+      biaxialCheck: finalBiaxialCheck,
+      rebar,
+      availableRebarOptions,
+      ductility,
+      governingLoadCase,
+      status,
+      calculationReport,
+    };
+  }
+
+  public static rebuildReportWithRebar(design: ColumnDesignOutput, newRebar: ColumnRebarOption): DetailedCalculationReport {
+    const { memberId, height, factoredDemandPu, factoredDemandMux, factoredDemandMuy, axialCheck, biaxialCheck, ductility, governingLoadCase, status } = design;
+    const parts = design.dimensions.replace(' mm', '').split('×').map((s) => parseInt(s.trim()));
+    const b = parts[0] || 450;
+    const D = parts[1] || 550;
+    const fck = 25;
+    const fy = 500;
+    const cover = 40;
+    const heightMm = height * 1000;
+    const emin_x = IS456ColumnAxial.calculateEmin(heightMm, D);
+    const emin_y = IS456ColumnAxial.calculateEmin(heightMm, b);
+    const Mux_design = Math.max(Math.abs(factoredDemandMux), (Math.abs(factoredDemandPu) * emin_x) / 1000);
+    const Muy_design = Math.max(Math.abs(factoredDemandMuy), (Math.abs(factoredDemandPu) * emin_y) / 1000);
+    const Ag = b * D;
+
+    return ColumnDesignEngine.buildReport(memberId, b, D, height, fck, fy, factoredDemandPu, Mux_design, Muy_design, emin_x, emin_y, heightMm, Ag, newRebar, ductility, biaxialCheck, axialCheck, status, governingLoadCase, cover);
+  }
+
+  private static buildReport(
+    memberId: number, b: number, D: number, unsupportedHeight: number,
+    fck: number, fy: number, Pu: number, Mux_design: number, Muy_design: number,
+    emin_x: number, emin_y: number, heightMm: number, Ag: number,
+    rebar: ColumnRebarOption, ductility: ColumnDuctileResult,
+    finalBiaxialCheck: ColumnBiaxialResult, axialCheck: ColumnAxialResult,
+    status: 'PASS' | 'WARNING' | 'FAIL', governingLoadCase: number, cover: number
+  ): DetailedCalculationReport {
+    return {
       elementId: memberId,
       elementType: 'COLUMN',
       title: `COLUMN C-${memberId} (${b} × ${D} mm) DESIGN CALCULATION SHEET`,
@@ -341,23 +387,6 @@ export class ColumnDesignEngine {
           ],
         },
       ],
-    };
-
-    return {
-      memberId,
-      dimensions: `${b} × ${D} mm`,
-      height: unsupportedHeight,
-      factoredDemandPu: Pu,
-      factoredDemandMux: Mux,
-      factoredDemandMuy: Muy,
-      axialCheck,
-      biaxialCheck: finalBiaxialCheck,
-      rebar,
-      availableRebarOptions,
-      ductility,
-      governingLoadCase,
-      status,
-      calculationReport,
     };
   }
 }

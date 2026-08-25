@@ -23,13 +23,14 @@ export const ReportsView: React.FC = () => {
     manualMergedPileCapGroups: activeProject.manualMergedPileCapGroups,
     detachedCombinedCapNodeIds: activeProject.detachedCombinedCapNodeIds,
     customCombinedCapOverrides: activeProject.customCombinedCapOverrides,
-    projectPileTypes: activeProject.projectPileTypes,       // ← live BBS pile sync
+    projectPileTypes: activeProject.projectPileTypes,
     savedColumnDesigns: activeProject.savedColumnDesigns,
     savedBeamDesigns: activeProject.savedBeamDesigns,
     savedShearWallDesigns: activeProject.savedShearWallDesigns,
     savedGradeBeamDesigns: activeProject.savedGradeBeamDesigns,
     savedFootingDesigns: activeProject.savedFootingDesigns,
     universalRebarSelection: activeProject.universalRebarSelection,
+    customColumnRebarOverrides: activeProject.customColumnRebarOverrides,
   }), [activeProject, activeModel]);
 
   const reportData = useMemo(() => {

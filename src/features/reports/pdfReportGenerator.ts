@@ -1247,6 +1247,7 @@ export class PDFReportGenerator {
     const cols = Array.from(model.members.values()).filter((m: any) => m.classification === 'COLUMN');
     let colsConcreteM3 = 0;
     const columnsSummary: any[] = [];
+    const customColRebar = (dataset as any).customColumnRebarOverrides || {};
 
     cols.forEach((c: any) => {
       // Check for user-saved column design
@@ -1299,6 +1300,10 @@ export class PDFReportGenerator {
         allowedDiameters: allowedLongDias,
       });
 
+      // Apply user's custom rebar override if present
+      const userRebar = customColRebar[c.id];
+      const finalRebar = userRebar || des.rebar;
+
       columnsSummary.push({
         id: c.id,
         label: `C${c.id}`,
@@ -1307,8 +1312,8 @@ export class PDFReportGenerator {
         Mux: Math.round(maxMux),
         Muy: Math.round(maxMuy),
         IR: des.biaxialCheck?.interactionRatio || 0.74,
-        pt: des.rebar.pt_prov,
-        rebarCallout: des.rebar.callout,
+        pt: finalRebar.pt_prov,
+        rebarCallout: finalRebar.callout,
       });
     });
 

@@ -350,6 +350,7 @@ export const ColumnDesignView: React.FC = () => {
           memberDesign = {
             ...memberDesign,
             rebar: memberCustomRebar,
+            calculationReport: ColumnDesignEngine.rebuildReportWithRebar(memberDesign, memberCustomRebar),
           };
         }
 

@@ -17,6 +17,7 @@ export interface ProjectReportDataset {
   };
   allowedColumnRebarDiameters?: number[];
   allowedBeamRebarDiameters?: number[];
+  customColumnRebarOverrides?: Record<number, any>;
 }
 
 export class ExcelWorkbookExporter {
