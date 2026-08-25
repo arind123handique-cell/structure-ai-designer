@@ -559,29 +559,69 @@ export const ColumnDesignView: React.FC = () => {
   }, [groundColumns, designedColumns]);
 
   const rows = useMemo(() => {
-    return groundColumns
-      .map((col) => {
-        const design = designedColumns.get(col.id);
-        const mapping = columnMapping.get(col.id);
-        const colLabel = mapping?.columnLabel || `C-${col.id}`;
-        const colSlNo = mapping?.columnSlNo || col.id;
+    const allRows = groundColumns.map((col) => {
+      const design = designedColumns.get(col.id);
+      const mapping = columnMapping.get(col.id);
+      const colLabel = mapping?.columnLabel || `C-${col.id}`;
+      const colSlNo = mapping?.columnSlNo || col.id;
 
-        const b_mm = Math.round((col.section.zd || 0.45) * 1000);
-        const D_mm = Math.round((col.section.yd || 0.55) * 1000);
-        const fck = activeProject?.metadata.designSettings.concreteGrade === 'M30' ? 30 : 25;
-        const fy = activeProject?.metadata.designSettings.steelGrade === 'Fe500D' ? 500 : 500;
-        const wbsc = IS13920WeakBeamStrongColumn.evaluateForColumn(b_mm, D_mm, fck, fy, 850, 300, 450);
+      const b_mm = Math.round((col.section.zd || 0.45) * 1000);
+      const D_mm = Math.round((col.section.yd || 0.55) * 1000);
+      const fck = activeProject?.metadata.designSettings.concreteGrade === 'M30' ? 30 : 25;
+      const fy = activeProject?.metadata.designSettings.steelGrade === 'Fe500D' ? 500 : 500;
+      const wbsc = IS13920WeakBeamStrongColumn.evaluateForColumn(b_mm, D_mm, fck, fy, 850, 300, 450);
 
-        return {
-          memberId: col.id,
-          columnSlNo: colSlNo,
-          columnLabel: colLabel,
-          dimensions: col.section.name || `${b_mm}x${D_mm} mm`,
-          height: col.length,
-          wbsc,
-          design,
-        };
-      })
+      return {
+        memberId: col.id,
+        columnSlNo: colSlNo,
+        columnLabel: colLabel,
+        dimensions: col.section.name || `${b_mm}x${D_mm} mm`,
+        height: col.length,
+        wbsc,
+        design,
+        b_mm,
+        D_mm,
+        rebarCallout: design?.rebar.callout || '',
+      };
+    });
+
+    // Group by same section (b×D) + same rebar callout
+    const groupMap = new Map<string, typeof allRows>();
+    for (const row of allRows) {
+      const key = `${row.b_mm}x${row.D_mm}_${row.rebarCallout}`;
+      if (!groupMap.has(key)) groupMap.set(key, []);
+      groupMap.get(key)!.push(row);
+    }
+
+    // Build grouped rows
+    const grouped: {
+      memberIds: number[];
+      columnLabels: string[];
+      columnSlNo: number;
+      dimensions: string;
+      height: number;
+      wbsc: any;
+      design: any;
+      count: number;
+    }[] = [];
+
+    for (const group of groupMap.values()) {
+      const sorted = group.sort((a, b) => a.columnSlNo - b.columnSlNo);
+      const representative = sorted[0];
+      grouped.push({
+        memberIds: sorted.map((r) => r.memberId),
+        columnLabels: sorted.map((r) => r.columnLabel),
+        columnSlNo: representative.columnSlNo,
+        dimensions: representative.dimensions,
+        height: representative.height,
+        wbsc: representative.wbsc,
+        design: representative.design,
+        count: sorted.length,
+      });
+    }
+
+    return grouped
+      .sort((a, b) => a.columnSlNo - b.columnSlNo)
       .filter((r) => {
         if (filterStatus === 'ALL') return true;
         return r.design?.status === filterStatus;
@@ -590,26 +630,38 @@ export const ColumnDesignView: React.FC = () => {
 
   const columns: ColumnDef<any>[] = [
     {
-      header: 'COLUMN SL NO (MEMBER #)',
+      header: 'COLUMNS (GROUPED)',
       accessorKey: 'columnSlNo',
       sortable: true,
       cell: (r) => (
-        <div className="font-mono flex items-center gap-1.5">
-          <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-            {r.columnLabel}
-          </span>
-          <span className="text-[10px] text-slate-500 font-normal">
-            (Mem #{r.memberId})
-          </span>
+        <div className="font-mono">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {r.columnLabels.map((label: string, i: number) => (
+              <span key={label} className="font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 text-[11px]">
+                {label}
+              </span>
+            ))}
+          </div>
+          {r.count > 1 && (
+            <span className="text-[9px] text-slate-500 mt-0.5 block">
+              {r.count} cols · Mem #{r.memberIds.join(', ')}
+            </span>
+          )}
+          {r.count === 1 && (
+            <span className="text-[9px] text-slate-500 mt-0.5 block">
+              Mem #{r.memberIds[0]}
+            </span>
+          )}
         </div>
       ),
-      width: '175px',
+      width: '200px',
     },
     {
       header: 'SIZE (b × D)',
       accessorKey: 'dimensions',
       cell: (r) => {
-        const col = allColumns.find((c) => c.id === r.memberId);
+        const representativeId = r.memberIds[0];
+        const col = allColumns.find((c) => c.id === representativeId);
         const curZd = col?.section.zd || 0.45;
         const curYd = col?.section.yd || 0.55;
 
@@ -619,7 +671,10 @@ export const ColumnDesignView: React.FC = () => {
               value={`${curZd.toFixed(2)}_${curYd.toFixed(2)}`}
               onChange={(e) => {
                 const [zd, yd] = e.target.value.split('_').map(Number);
-                handleQuickChangeColumnSection(r.memberId, zd, yd);
+                // Apply to ALL members in the group
+                for (const mid of r.memberIds) {
+                  handleQuickChangeColumnSection(mid, zd, yd);
+                }
               }}
               className="px-1.5 py-0.5 bg-white border border-ui-border rounded text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-secondary-brand shadow-2xs hover:border-slate-400"
             >
@@ -631,15 +686,17 @@ export const ColumnDesignView: React.FC = () => {
             </select>
             <button
               type="button"
-              onClick={() => handleRotateSingleColumn(r.memberId)}
+              onClick={() => {
+                for (const mid of r.memberIds) handleRotateSingleColumn(mid);
+              }}
               className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
-              title="Rotate 90° (Swap width and depth to resist major bending moment)"
+              title="Rotate 90° (Swap width and depth)"
             >
               <RotateCw className="w-3.5 h-3.5" />
             </button>
             <button
               type="button"
-              onClick={() => setEditMemberId(r.memberId)}
+              onClick={() => setEditMemberId(representativeId)}
               className="p-1 text-slate-400 hover:text-secondary-brand rounded hover:bg-slate-100 transition-colors"
               title="Custom Dimensions & WBSC Sizing"
             >
@@ -789,7 +846,9 @@ export const ColumnDesignView: React.FC = () => {
       cell: (r) => (
         <div className="flex items-center gap-1 justify-center">
           <button
-            onClick={() => handleRotateSingleColumn(r.memberId)}
+            onClick={() => {
+              for (const mid of r.memberIds) handleRotateSingleColumn(mid);
+            }}
             className="p-1 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded text-[10px] font-mono shadow-xs transition-colors flex items-center gap-0.5"
             title="Rotate 90° orientation"
           >
@@ -815,7 +874,7 @@ export const ColumnDesignView: React.FC = () => {
             </button>
           ) : (
             <button
-              onClick={() => setEditMemberId(r.memberId)}
+              onClick={() => setEditMemberId(r.memberIds[0])}
               className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded border border-amber-200 text-[11px] font-mono shadow-xs transition-colors"
               title="Modify Section Size / WBSC Optimization"
             >
@@ -856,8 +915,8 @@ export const ColumnDesignView: React.FC = () => {
   const handleExport = () => {
     exportToCsv(
       rows.map((r) => ({
-        ColumnSlNo: r.columnLabel,
-        MemberId: r.memberId,
+        Columns: r.columnLabels.join(', '),
+        MemberIds: r.memberIds.join(', '),
         Size: r.dimensions,
         Height_m: r.height,
         InteractionRatio: r.design?.biaxialCheck.interactionRatio || 0,
@@ -1060,8 +1119,8 @@ export const ColumnDesignView: React.FC = () => {
             title="RCC COLUMN SCHEDULE & BIAXIAL INTERACTION RATIOS"
             searchPlaceholder="Search by column # (e.g. C-1), member #, or size..."
             searchFilter={(item, q) =>
-              item.columnLabel.toLowerCase().includes(q) ||
-              String(item.memberId).includes(q) ||
+              item.columnLabels.some((l: string) => l.toLowerCase().includes(q)) ||
+              item.memberIds.some((id: number) => String(id).includes(q)) ||
               item.dimensions.toLowerCase().includes(q) ||
               String(item.design?.rebar.callout || '').toLowerCase().includes(q)
             }
