@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
+import { getFirestore, enableMultiTabIndexedDbPersistence } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyDUD9M74Mg87j7JvVFSdTl0jao9EGSil_4',
@@ -18,7 +18,7 @@ export const googleProvider = new GoogleAuthProvider();
 export const db = getFirestore(app);
 
 // Enable offline persistence (IndexedDB-backed)
-enableIndexedDbPersistence(db).catch((err) => {
+enableMultiTabIndexedDbPersistence(db).catch((err) => {
   if (err.code === 'failed-precondition') {
     console.warn('Firestore offline persistence unavailable: multiple tabs open');
   } else if (err.code === 'unimplemented') {

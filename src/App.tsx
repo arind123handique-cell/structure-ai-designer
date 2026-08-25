@@ -22,23 +22,9 @@ const AppInner: React.FC = () => {
     }
   }, [user]);
 
-  // Show login page while checking auth state
-  if (authLoading) {
-    return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center bg-deep-navy text-slate-200 font-mono space-y-3">
-        <Loader2 className="w-8 h-8 animate-spin text-secondary-brand" />
-        <span className="text-sm font-semibold tracking-wider">LOADING...</span>
-      </div>
-    );
-  }
-
-  // Not logged in → show login page
-  if (!user) {
-    return <LoginPage />;
-  }
-
-  // Logged in → load the app
+  // Load the app when authenticated
   useEffect(() => {
+    if (!user) return;
     const bootstrap = async () => {
       await initializeStore();
       const current = useProjectStore.getState().activeProject;
@@ -59,7 +45,22 @@ const AppInner: React.FC = () => {
       }
     };
     bootstrap();
-  }, [initializeStore, importANL]);
+  }, [user, initializeStore, importANL]);
+
+  // Show login page while checking auth state
+  if (authLoading) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-deep-navy text-slate-200 font-mono space-y-3">
+        <Loader2 className="w-8 h-8 animate-spin text-secondary-brand" />
+        <span className="text-sm font-semibold tracking-wider">LOADING...</span>
+      </div>
+    );
+  }
+
+  // Not logged in → show login page
+  if (!user) {
+    return <LoginPage />;
+  }
 
   if (isLoading && !activeProject) {
     return (
