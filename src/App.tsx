@@ -1,15 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { useProjectStore } from '@/features/projects/projectStore';
 import { AppLayout } from '@/app/layout/AppLayout';
 import { AuthProvider, useAuth } from '@/lib/firebase/AuthContext';
-import { AuthModal } from '@/features/auth/AuthModal';
+import { LoginPage } from '@/features/auth/LoginPage';
 import { ProjectStorage } from '@/features/projects/projectStorage';
 import { Loader2 } from 'lucide-react';
 
 const AppInner: React.FC = () => {
   const { initializeStore, activeProject, importANL, isLoading } = useProjectStore();
   const { user, loading: authLoading } = useAuth();
-  const [showAuthModal, setShowAuthModal] = useState(false);
 
   // Sync auth user to ProjectStorage for cloud sync
   useEffect(() => {
@@ -23,6 +22,22 @@ const AppInner: React.FC = () => {
     }
   }, [user]);
 
+  // Show login page while checking auth state
+  if (authLoading) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-deep-navy text-slate-200 font-mono space-y-3">
+        <Loader2 className="w-8 h-8 animate-spin text-secondary-brand" />
+        <span className="text-sm font-semibold tracking-wider">LOADING...</span>
+      </div>
+    );
+  }
+
+  // Not logged in → show login page
+  if (!user) {
+    return <LoginPage />;
+  }
+
+  // Logged in → load the app
   useEffect(() => {
     const bootstrap = async () => {
       await initializeStore();
@@ -55,12 +70,7 @@ const AppInner: React.FC = () => {
     );
   }
 
-  return (
-    <>
-      <AppLayout onShowAuth={() => setShowAuthModal(true)} user={user} />
-      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
-    </>
-  );
+  return <AppLayout />;
 };
 
 export const App: React.FC = () => {

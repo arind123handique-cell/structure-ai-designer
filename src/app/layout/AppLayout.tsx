@@ -4,8 +4,7 @@ import { Sidebar } from './Sidebar';
 import { TopHeader } from './TopHeader';
 import { ANLImportModal } from '@/features/anl/ANLImportModal';
 import { UniversalRebarModal } from '@/features/design/common/UniversalRebarModal';
-import { Loader2, PanelLeftOpen, PanelTopOpen, Eye, EyeOff, LogIn, User, LogOut } from 'lucide-react';
-import { User as FirebaseUser } from 'firebase/auth';
+import { Loader2, PanelLeftOpen, PanelTopOpen, Eye, EyeOff, LogOut } from 'lucide-react';
 import { useAuth } from '@/lib/firebase/AuthContext';
 
 const ProjectDashboard = lazy(() => import('@/features/projects/ProjectDashboard').then(m => ({ default: m.ProjectDashboard })));
@@ -35,15 +34,10 @@ const ViewFallback: React.FC = () => (
   </div>
 );
 
-interface AppLayoutProps {
-  onShowAuth: () => void;
-  user: FirebaseUser | null;
-}
-
-export const AppLayout: React.FC<AppLayoutProps> = ({ onShowAuth, user }) => {
+export const AppLayout: React.FC = () => {
   const activeView = useProjectStore(s => s.activeView);
   const selectedMemberId = useProjectStore(s => s.selectedMemberId);
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   // Navigation panel visibility (persisted)
@@ -121,9 +115,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ onShowAuth, user }) => {
         {headerVisible ? (
           <div className="relative">
             <TopHeader onHide={() => setHeaderVisible(false)} />
-            {/* Cloud Auth Badge — top-right corner */}
-            <div className="absolute right-3 top-2 z-50">
-              {user ? (
+            {/* User Badge — top-right corner */}
+            {user && (
+              <div className="absolute right-3 top-2 z-50">
                 <div className="relative">
                   <button
                     type="button"
@@ -153,39 +147,20 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ onShowAuth, user }) => {
                     </div>
                   )}
                 </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={onShowAuth}
-                  className="flex items-center gap-1.5 px-2 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-md text-[11px] font-mono text-slate-600 transition-colors"
-                  title="Sign in to sync projects to cloud"
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Sign In</span>
-                  <span className="px-1 py-0.5 bg-slate-300 text-white rounded text-[8px] font-bold">OFFLINE</span>
-                </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="h-8 bg-surface-card border-b border-ui-border flex items-center justify-between px-3 shrink-0">
             <span className="text-[10px] font-mono text-slate-400">Header hidden</span>
             <div className="flex items-center gap-2">
-              {user ? (
+              {user && (
                 <span className="text-[10px] font-mono text-emerald-600 flex items-center gap-1">
                   <div className="w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center text-white text-[7px] font-bold">
                     {user.email?.[0]?.toUpperCase() || 'U'}
                   </div>
                   SYNCED
                 </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={onShowAuth}
-                  className="flex items-center gap-1 px-2 py-0.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded text-[10px] font-mono text-slate-500"
-                >
-                  <LogIn className="w-3 h-3" /> Sign In
-                </button>
               )}
               <button
                 type="button"
