@@ -341,7 +341,8 @@ export const PileCapDesignView: React.FC = () => {
   const rows = useMemo(() => {
     const standaloneSupportNodes = supportNodes.filter((sup) => !absorbedNodeMap.has(sup.nodeId));
 
-    return standaloneSupportNodes.map((sup) => {
+    // Build flat rows first
+    const flatRows = standaloneSupportNodes.map((sup) => {
       const design = designedCaps.get(sup.nodeId);
       const supInfo = columnSupportMapping.get(sup.nodeId);
       const colLabel = supInfo?.columnLabel || `C${sup.nodeId}`;
@@ -359,47 +360,96 @@ export const PileCapDesignView: React.FC = () => {
         isCustomized: !!customPileCapOverrides[sup.nodeId],
       };
     });
+
+    // Group by pile count — batchDesignAndStandardize normalizes L×B×D within same pile count
+    const groupMap = new Map<string, typeof flatRows>();
+    for (const row of flatRows) {
+      const pileCount = row.design?.pileCount || 4;
+      const key = `${pileCount}`;
+      if (!groupMap.has(key)) groupMap.set(key, []);
+      groupMap.get(key)!.push(row);
+    }
+
+    // Build grouped rows: governing design = highest Pu in each group
+    const grouped: {
+      nodeIds: number[];
+      columnLabels: string[];
+      colSlNo: number;
+      mark: string;
+      assignedTypeId: string;
+      design: any;
+      count: number;
+      isCustomized: boolean;
+    }[] = [];
+
+    for (const group of groupMap.values()) {
+      const sorted = group.sort((a, b) => a.colSlNo - b.colSlNo);
+      // Representative = pile cap with highest axial load (governing design)
+      const governing = sorted.reduce((best, r) => {
+        const pu = r.design?.factoredVerticalLoad || 0;
+        const bestPu = best.design?.factoredVerticalLoad || 0;
+        return pu > bestPu ? r : best;
+      }, sorted[0]);
+      grouped.push({
+        nodeIds: sorted.map((r) => r.nodeId),
+        columnLabels: sorted.map((r) => r.columnLabel),
+        colSlNo: governing.colSlNo,
+        mark: governing.mark,
+        assignedTypeId: governing.assignedTypeId,
+        design: governing.design,
+        count: sorted.length,
+        isCustomized: sorted.some((r) => r.isCustomized),
+      });
+    }
+
+    return grouped.sort((a, b) => a.colSlNo - b.colSlNo);
   }, [supportNodes, designedCaps, columnSupportMapping, availablePileTypes, supportPileAssignments, absorbedNodeMap, pileCountMarkMap, customPileCapOverrides]);
 
   const columns: ColumnDef<any>[] = [
     {
       header: 'SELECT',
-      accessorKey: 'nodeId',
-      cell: (r) => {
-        const isSelected = selectedSupportNodeIds.includes(r.nodeId);
-        return (
-          <div className="flex items-center justify-center">
-            <input
-              type="checkbox"
-              checked={isSelected}
-              onChange={() => selectSupportNode(r.nodeId, true)}
-              className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
-              title="Select to merge into a combined pile cap"
-            />
-          </div>
-        );
-      },
+      accessorKey: 'nodeIds',
+      cell: (r) => (
+        <div className="flex items-center justify-center">
+          <span className="text-[9px] font-mono text-slate-500">
+            {r.nodeIds.length > 1 ? `${r.nodeIds.length} caps` : `#${r.nodeIds[0]}`}
+          </span>
+        </div>
+      ),
       width: '60px',
       align: 'center',
     },
     {
-      header: 'MARK (COLUMN / JOINT)',
+      header: 'MARK (GROUPED)',
       accessorKey: 'colSlNo',
       sortable: true,
       cell: (r) => (
-        <div className="font-mono flex items-center gap-1.5">
-          <span className="font-bold text-sky-800 bg-sky-50 px-2 py-0.5 rounded border border-sky-200 text-xs">
-            {r.mark}
-          </span>
-          <span className="font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 text-xs">
-            {r.columnLabel}
-          </span>
-          <span className="text-[10px] text-slate-500 font-normal">
-            (Joint #{r.nodeId})
-          </span>
+        <div className="font-mono">
+          <div className="flex items-center gap-1.5">
+            <span className="font-bold text-sky-800 bg-sky-50 px-2 py-0.5 rounded border border-sky-200 text-xs">
+              {r.mark}
+            </span>
+            <div className="flex items-center gap-1 flex-wrap">
+              {r.columnLabels.map((label: string, i: number) => (
+                <span key={label} className="font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 text-[11px]">
+                  {label}
+                </span>
+              ))}
+            </div>
+          </div>
+          {r.count > 1 && (
+            <span className="text-[9px] text-slate-500 mt-0.5 block">
+              {r.count} caps · Joints #{r.nodeIds.join(', ')}
+            </span>
+          )}
+          {r.count === 1 && (
+            <span className="text-[9px] text-slate-500 mt-0.5 block">
+              Joint #{r.nodeIds[0]}
+            </span>
+          )}
         </div>
       ),
-      width: '210px',
+      width: '240px',
     },
     {
       header: 'MAX AXIAL Pu (GOV. LC)',
@@ -431,6 +481,11 @@ export const PileCapDesignView: React.FC = () => {
             <span className="font-mono text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
               {r.design.pileCount}-Pile Cap ({r.mark})
             </span>
+            {r.count > 1 && (
+              <span className="text-[9px] px-1 bg-slate-100 text-slate-600 rounded font-mono font-bold">
+                ×{r.count}
+              </span>
+            )}
             {r.isCustomized && (
               <span className="text-[9px] px-1 bg-amber-100 text-amber-800 rounded font-mono font-bold" title="Manually edited">
                 Manual
@@ -439,7 +494,7 @@ export const PileCapDesignView: React.FC = () => {
           </div>
         );
       },
-      width: '160px',
+      width: '180px',
     },
     {
       header: 'CAP SIZE (L × B × D)',
@@ -564,8 +619,8 @@ export const PileCapDesignView: React.FC = () => {
     exportToCsv(
       rows.map((r) => ({
         PileCapMark: r.mark,
-        ColumnLabel: r.columnLabel,
-        SupportJoint: r.nodeId,
+        ColumnLabels: r.columnLabels.join(', '),
+        SupportJoints: r.nodeIds.join(', '),
         AssignedPileType: r.assignedTypeId,
         FactoredAxialPu_kN: r.design?.factoredVerticalLoad || 0,
         GoverningLoadCase: r.design?.governingLoadCase || 1,
@@ -581,6 +636,7 @@ export const PileCapDesignView: React.FC = () => {
         TopMatRebar: r.design?.topRebarCallout || '',
         SideFaceRebar: r.design?.sideFaceRebarCallout || '',
         Status: r.design?.status || 'PENDING',
+        GroupCount: r.count,
       })),
       'IS456_PileCap_Design_Schedule.csv'
     );
@@ -897,10 +953,10 @@ export const PileCapDesignView: React.FC = () => {
           title="RCC INDIVIDUAL & COMPONENT PILE CAP SCHEDULE"
           searchPlaceholder="Search by Mark (e.g. PC1), Column (e.g. C1), or Joint #..."
           searchFilter={(item, q) =>
-            item.columnLabel.toLowerCase().includes(q) ||
+            item.columnLabels.some((l: string) => l.toLowerCase().includes(q)) ||
             item.mark.toLowerCase().includes(q) ||
             item.assignedTypeId.toLowerCase().includes(q) ||
-            String(item.nodeId).includes(q)
+            item.nodeIds.some((id: number) => String(id).includes(q))
           }
           onExportCsv={handleExport}
         />
