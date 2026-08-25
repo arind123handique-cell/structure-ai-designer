@@ -585,10 +585,10 @@ export const ColumnDesignView: React.FC = () => {
       };
     });
 
-    // Group by same section (b×D) + same rebar callout
+    // Group by same section (b×D) — governing rebar (highest Pu) shown for the group
     const groupMap = new Map<string, typeof allRows>();
     for (const row of allRows) {
-      const key = `${row.b_mm}x${row.D_mm}_${row.rebarCallout}`;
+      const key = `${row.b_mm}x${row.D_mm}`;
       if (!groupMap.has(key)) groupMap.set(key, []);
       groupMap.get(key)!.push(row);
     }
@@ -606,16 +606,22 @@ export const ColumnDesignView: React.FC = () => {
     }[] = [];
 
     for (const group of groupMap.values()) {
+      // Sort by SlNo for label ordering
       const sorted = group.sort((a, b) => a.columnSlNo - b.columnSlNo);
-      const representative = sorted[0];
+      // Representative = column with highest axial load (governing design)
+      const governing = sorted.reduce((best, r) => {
+        const pu = r.design?.factoredDemandPu || 0;
+        const bestPu = best.design?.factoredDemandPu || 0;
+        return pu > bestPu ? r : best;
+      }, sorted[0]);
       grouped.push({
         memberIds: sorted.map((r) => r.memberId),
         columnLabels: sorted.map((r) => r.columnLabel),
-        columnSlNo: representative.columnSlNo,
-        dimensions: representative.dimensions,
-        height: representative.height,
-        wbsc: representative.wbsc,
-        design: representative.design,
+        columnSlNo: governing.columnSlNo,
+        dimensions: governing.dimensions,
+        height: governing.height,
+        wbsc: governing.wbsc,
+        design: governing.design,
         count: sorted.length,
       });
     }
