@@ -15,6 +15,7 @@ import { exportToCsv } from '@/utils/exportUtils';
 import { ColumnNumberingService } from '@/features/model/columnNumbering';
 import { PileDesignEngine, ProjectPileType } from '@/features/design/pile/pileDesignEngine';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
+import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
 import {
   Play,
   Box,
@@ -31,6 +32,10 @@ import {
   Layers,
   ShieldCheck,
   RotateCw,
+  Eye,
+  EyeOff,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 export const PileCapDesignView: React.FC = () => {
@@ -581,66 +586,109 @@ export const PileCapDesignView: React.FC = () => {
     );
   };
 
+  // Hide toggles for each panel group
+  const [showBanner, setShowBanner] = useState(true);
+  const [showRebar, setShowRebar] = useState(true);
+  const [showCombined, setShowCombined] = useState(true);
+  const [showTable, setShowTable] = useState(true);
+
   return (
-    <div className="flex flex-col h-full space-y-4 p-5 bg-ui-background overflow-hidden font-sans">
-      {/* Top Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-surface-card p-4 rounded-md border border-ui-border shadow-2xs">
-        <div>
-          <h2 className="font-mono text-base font-bold text-deep-navy flex items-center gap-2">
-            <Box className="w-5 h-5 text-indigo-600" />
-            IS 456:2000 & SP:34 RIGID PILE CAP DESIGN ENGINE
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Auto-configured by single pile capacity $Q_{'{'}safe{'}'}$, two-way column & pile punching shear, flexural bottom mats, and top shrinkage grids.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* 1-Click Auto Design Button */}
-          <button
-            onClick={() => handleTriggerAutoDesign()}
-            disabled={isOptimizing}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white font-mono text-xs font-bold rounded shadow-2xs transition-all disabled:opacity-50"
-            title="Automatically size pile cap thickness & rebars for maximum economy"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-            <span>{isOptimizing ? 'Optimizing...' : 'Auto Design (Economical)'}</span>
-          </button>
-
-          {designedCaps.size > 0 && (
-            <button
-              onClick={handleExport}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-slate-700 bg-white hover:bg-slate-50 border border-ui-border rounded transition-colors shadow-2xs"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Export CSV
-            </button>
-          )}
-
-          {/* Save Pile Cap Designs Button */}
-          <button
-            onClick={handleSaveAll}
-            disabled={isSaving}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-mono text-xs font-bold rounded shadow-2xs transition-all disabled:opacity-50"
-            title="Save all pile cap sizes, pile assignments, and manual edits to project database and 3D model"
-          >
-            <Save className="w-3.5 h-3.5 text-blue-100" />
-            <span>{isSaving ? 'Saving...' : '💾 Save Designs'}</span>
-          </button>
-
-          <button
-            onClick={handleDesignAll}
-            disabled={isDesigning}
-            className="flex items-center gap-2 px-4 py-1.5 bg-secondary-brand hover:bg-blue-700 text-white font-mono text-xs font-semibold rounded shadow transition-all disabled:opacity-50"
-          >
-            <Play className="w-3.5 h-3.5" />
-            <span>{isDesigning ? 'Designing...' : 'Re-calculate All'}</span>
-          </button>
-        </div>
+    <div className="flex flex-col h-full space-y-4 p-5 bg-ui-background overflow-y-auto font-sans">
+      {/* Global Hide / Show All */}
+      <div className="flex items-center justify-end gap-1.5 -mb-1">
+        <span className="text-[10px] font-mono text-slate-500 font-semibold uppercase tracking-wider">Panels:</span>
+        <button
+          type="button"
+          onClick={() => { setShowBanner(true); setShowRebar(true); setShowCombined(true); setShowTable(true); }}
+          className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
+        >
+          <Eye className="w-3 h-3" /> Show All
+        </button>
+        <button
+          type="button"
+          onClick={() => { setShowBanner(false); setShowRebar(false); setShowCombined(false); }}
+          className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
+        >
+          <EyeOff className="w-3 h-3" /> Hide All
+        </button>
       </div>
 
+      {/* Top Banner */}
+      <CollapsiblePanel
+        title="IS 456:2000 & SP:34 RIGID PILE CAP DESIGN ENGINE"
+        icon={<Box className="w-4 h-4 text-indigo-600" />}
+        storageKey="pilecap-banner"
+        open={showBanner}
+        onToggle={setShowBanner}
+        contentClassName="p-4"
+        variant="card"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xs text-slate-500">
+              Auto-configured by single pile capacity $Q_{'{'}safe{'}'}$, two-way column & pile punching shear, flexural bottom mats, and top shrinkage grids.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* 1-Click Auto Design Button */}
+            <button
+              onClick={() => handleTriggerAutoDesign()}
+              disabled={isOptimizing}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white font-mono text-xs font-bold rounded shadow-2xs transition-all disabled:opacity-50"
+              title="Automatically size pile cap thickness & rebars for maximum economy"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>{isOptimizing ? 'Optimizing...' : 'Auto Design (Economical)'}</span>
+            </button>
+
+            {designedCaps.size > 0 && (
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-slate-700 bg-white hover:bg-slate-50 border border-ui-border rounded transition-colors shadow-2xs"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Export CSV
+              </button>
+            )}
+
+            {/* Save Pile Cap Designs Button */}
+            <button
+              onClick={handleSaveAll}
+              disabled={isSaving}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-mono text-xs font-bold rounded shadow-2xs transition-all disabled:opacity-50"
+              title="Save all pile cap sizes, pile assignments, and manual edits to project database and 3D model"
+            >
+              <Save className="w-3.5 h-3.5 text-blue-100" />
+              <span>{isSaving ? 'Saving...' : '💾 Save Designs'}</span>
+            </button>
+
+            <button
+              onClick={handleDesignAll}
+              disabled={isDesigning}
+              className="flex items-center gap-2 px-4 py-1.5 bg-secondary-brand hover:bg-blue-700 text-white font-mono text-xs font-semibold rounded shadow transition-all disabled:opacity-50"
+            >
+              <Play className="w-3.5 h-3.5" />
+              <span>{isDesigning ? 'Designing...' : 'Re-calculate All'}</span>
+            </button>
+          </div>
+        </div>
+      </CollapsiblePanel>
+
       {/* Universal Rebar Master Selection Toolbar */}
-      <UniversalRebarBar moduleName="Foundation Pile Cap" />
+      <CollapsiblePanel
+        title="UNIVERSAL REBAR SELECTION (Foundation Pile Cap)"
+        icon={<Layers className="w-4 h-4 text-emerald-600" />}
+        storageKey="pilecap-rebar"
+        open={showRebar}
+        onToggle={setShowRebar}
+        contentClassName="p-0"
+        variant="card"
+      >
+        <div className="p-3">
+          <UniversalRebarBar moduleName="Foundation Pile Cap" />
+        </div>
+      </CollapsiblePanel>
 
       {/* Save Success Alert */}
       {saveSuccessMessage && (
@@ -688,35 +736,45 @@ export const PileCapDesignView: React.FC = () => {
       {/* COMBINED & SHEAR WALL PILE CAPS SECTION (IS 2911 / IS 456)                */}
       {/* ========================================================================= */}
       {combinedPileCaps.length > 0 && (
-        <div className="bg-surface-card border border-ui-border rounded-lg p-4 space-y-3 shadow-xs font-sans">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-rose-600" />
-              <h3 className="font-mono text-xs font-bold text-deep-navy">
-                COMBINED &amp; SHEAR WALL PILE CAPS ({combinedPileCaps.length} ACTIVE GROUPS)
-              </h3>
-              <span className="text-[10px] font-mono text-slate-500">
-                IS 2911:2010 &amp; IS 456:2000 Rigid Combined Foundation Schedules
-              </span>
-            </div>
-
-            {detachedCombinedCapNodeIds.length > 0 && (
+        <CollapsiblePanel
+          title={`COMBINED & SHEAR WALL PILE CAPS (${combinedPileCaps.length} ACTIVE GROUPS) — IS 2911:2010 & IS 456:2000`}
+          icon={<Layers className="w-4 h-4 text-rose-600" />}
+          storageKey="pilecap-combined"
+          open={showCombined}
+          onToggle={setShowCombined}
+          contentClassName="p-4"
+          headerActions={
+            detachedCombinedCapNodeIds.length > 0 ? (
               <button
                 type="button"
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   clearDetachedCombinedCapNodes();
                   handleDesignAll();
                 }}
-                className="text-[11px] font-mono text-indigo-600 hover:text-indigo-800 flex items-center gap-1 hover:underline"
+                className="text-[11px] font-mono text-indigo-600 hover:text-indigo-800 flex items-center gap-1 hover:underline bg-white px-2 py-1 rounded border border-indigo-200"
                 title="Reset all manual splits back to auto-detected combined groupings"
               >
                 <RotateCw className="w-3 h-3" />
-                <span>Reset Detached Columns ({detachedCombinedCapNodeIds.length}) to Auto</span>
+                <span>Reset ({detachedCombinedCapNodeIds.length})</span>
               </button>
-            )}
-          </div>
+            ) : undefined
+          }
+        >
+          <div className="space-y-3 font-sans">
+            <div className="flex items-center justify-between hidden">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-rose-600" />
+                <h3 className="font-mono text-xs font-bold text-deep-navy">
+                  COMBINED &amp; SHEAR WALL PILE CAPS ({combinedPileCaps.length} ACTIVE GROUPS)
+                </h3>
+                <span className="text-[10px] font-mono text-slate-500">
+                  IS 2911:2010 &amp; IS 456:2000 Rigid Combined Foundation Schedules
+                </span>
+              </div>
+            </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             {combinedPileCaps.map((grp) => {
               const isShearWall = grp.reason === 'SHEAR_WALL';
               const loadPerPileWork = Math.round(grp.totalWorkingLoad / grp.pileCount);
@@ -817,11 +875,22 @@ export const PileCapDesignView: React.FC = () => {
               );
             })}
           </div>
-        </div>
+          </div>
+        </CollapsiblePanel>
       )}
 
       {/* Main Table */}
-      <div className="flex-1 overflow-hidden">
+      <CollapsiblePanel
+        title="RCC INDIVIDUAL & COMPONENT PILE CAP SCHEDULE"
+        icon={<Layers className="w-4 h-4 text-sky-700" />}
+        storageKey="pilecap-table"
+        open={showTable}
+        onToggle={setShowTable}
+        contentClassName="p-0"
+        className="flex-1 flex flex-col min-h-[420px]"
+        variant="card"
+      >
+        <div className="flex-1 min-h-[380px] flex flex-col overflow-hidden">
         <DataTable
           data={rows}
           columns={columns}
@@ -835,7 +904,8 @@ export const PileCapDesignView: React.FC = () => {
           }
           onExportCsv={handleExport}
         />
-      </div>
+        </div>
+      </CollapsiblePanel>
 
       {/* Split Combined Pile Cap Modal */}
       <SplitPileCapModal

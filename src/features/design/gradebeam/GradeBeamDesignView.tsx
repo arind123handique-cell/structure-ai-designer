@@ -215,7 +215,7 @@ export const GradeBeamDesignView: React.FC = () => {
   const maxTieForce = Math.max(...designedGradeBeams.map((g) => g.factoredTensionTiePu), 0);
 
   return (
-    <div className="flex flex-col h-full space-y-4 p-5 bg-ui-background overflow-hidden font-sans">
+    <div className="flex flex-col h-full space-y-4 p-5 bg-ui-background overflow-y-auto font-sans">
       {/* Top Banner */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-surface-card p-4 rounded-md border border-ui-border shadow-xs">
         <div>

@@ -625,7 +625,7 @@ export const ShearWallDesignView: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full space-y-4 p-5 bg-ui-background overflow-hidden font-sans">
+    <div className="flex flex-col h-full space-y-4 p-5 bg-ui-background overflow-y-auto font-sans">
       {/* Top Banner */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-surface-card p-4 rounded-md border border-ui-border shadow-sm">
         <div>
