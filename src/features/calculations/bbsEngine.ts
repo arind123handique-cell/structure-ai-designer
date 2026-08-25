@@ -437,7 +437,8 @@ export class BbsEngine {
           }
 
           const lapLengthMm = Math.round(50 * mainDia); // 50d lap as per IS 13920 / IS 456
-          const colCutM = (storeyHeightM * 1000 + lapLengthMm + 150) / 1000;
+          const bearingMm = col.isGroundSupport ? 150 : 0; // 150mm bearing only at foundation
+          const colCutM = (storeyHeightM * 1000 + lapLengthMm + bearingMm) / 1000;
 
           items.push({
             barNo: barIndex++,
