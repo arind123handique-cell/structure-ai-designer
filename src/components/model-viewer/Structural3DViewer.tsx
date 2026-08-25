@@ -442,12 +442,15 @@ export const Structural3DViewer: React.FC = () => {
       memberMeshesRef.current.set(member.id, mesh);
 
       if (isCol && showLabels) {
-        const colInfo = columnMemberMapping.get(member.id);
-        const colLabel = colInfo?.columnLabel || `C${member.id}`;
-        const sprite = createTextBadgeSprite(colLabel, `Mem #${member.id}`, '#064e3b', '#10b981', '#ffffff');
-        sprite.position.copy(midpoint);
-        sprite.position.y += 0.3;
-        dynamicGroup.add(sprite);
+        const isGroundCol = model.supports.has(member.startNodeId) || model.supports.has(member.endNodeId);
+        if (isGroundCol) {
+          const colInfo = columnMemberMapping.get(member.id);
+          const colLabel = colInfo?.columnLabel || `C${member.id}`;
+          const sprite = createTextBadgeSprite(colLabel, `Mem #${member.id}`, '#064e3b', '#10b981', '#ffffff');
+          sprite.position.copy(midpoint);
+          sprite.position.y += 0.3;
+          dynamicGroup.add(sprite);
+        }
       }
     });
 
