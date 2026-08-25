@@ -364,6 +364,7 @@ export class BbsEngine {
     // 2. EXTRACT COLUMNS
     // ── READ FROM SAVED COLUMN DESIGNS first (live sync with Column Design workspace) ──
     const savedColDesigns: Record<number, any> = project?.savedColumnDesigns || {};
+    const customColOverrides: Record<number, any> = project?.customColumnRebarOverrides || {};
     if (floorPlans.length > 0) {
       const colProcessed = new Set<string>();
       floorPlans.forEach((fp) => {
@@ -377,8 +378,10 @@ export class BbsEngine {
           const storeyHeightM = 3.5;
           const cover = 40;
 
-          // Prefer saved design result; fall back to live design engine
-          const savedDes = savedColDesigns[col.memberId || col.columnSlNo];
+          const colKeyLookup = col.memberId || col.columnSlNo;
+          // Prefer saved design result; fall back to custom overrides; then live design engine
+          const savedDes = savedColDesigns[colKeyLookup];
+          const customOverride = customColOverrides[colKeyLookup];
           let mainDia: number;
           let mainCount: number;
           let tieDia: number;
@@ -391,10 +394,17 @@ export class BbsEngine {
             // Ensure selected diameters are within allowed rebar inventory
             if (!allowedLong.includes(mainDia)) mainDia = getBestLongDia([mainDia, 16, 12, 20]);
             if (!allowedTies.includes(tieDia)) tieDia = getBestTieDia([tieDia, 8, 10]);
+          } else if (customOverride) {
+            // User overrode rebar but didn't save full design
+            mainDia = customOverride.diameter || getBestLongDia([16, 12, 20]);
+            mainCount = customOverride.count || 8;
+            tieDia = customOverride.tieDiameter || getBestTieDia([8, 10]);
+            if (!allowedLong.includes(mainDia)) mainDia = getBestLongDia([mainDia, 16, 12, 20]);
+            if (!allowedTies.includes(tieDia)) tieDia = getBestTieDia([tieDia, 8, 10]);
           } else {
             // Run Column Design with allowed longitudinal diameters
             const colDes = ColumnDesignEngine.design({
-              memberId: col.memberId || col.columnSlNo,
+              memberId: colKeyLookup,
               b: bMm,
               D: DMm,
               unsupportedHeight: storeyHeightM,

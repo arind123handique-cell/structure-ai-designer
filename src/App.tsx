@@ -14,7 +14,10 @@ const AppInner: React.FC = () => {
   useEffect(() => {
     ProjectStorage.setCloudUser(user?.uid || null);
     if (user) {
-      ProjectStorage.syncFromCloud().then((count) => {
+      // Push pre-existing local projects to cloud, then pull cloud → local
+      ProjectStorage.syncToCloud().then(() =>
+        ProjectStorage.syncFromCloud()
+      ).then((count) => {
         if (count > 0) {
           useProjectStore.getState().reloadProjects();
         }

@@ -18,6 +18,9 @@ export interface ProjectReportDataset {
   allowedColumnRebarDiameters?: number[];
   allowedBeamRebarDiameters?: number[];
   customColumnRebarOverrides?: Record<number, any>;
+  savedColumnDesigns?: Record<number, any>;
+  savedBeamDesigns?: Record<number, any>;
+  savedShearWallDesigns?: Record<number, any>;
 }
 
 export class ExcelWorkbookExporter {
@@ -123,7 +126,7 @@ export class ExcelWorkbookExporter {
     );
 
     // Sheet 5: Bar Bending Schedule (BBS) - All Beams, Columns, Pile Caps
-    const bbs = BbsEngine.generateBuildingBbs(model, { metadata, warnings } as any);
+    const bbs = BbsEngine.generateBuildingBbs(model, dataset as any);
     const bbsRows: (string | number)[][] = bbs.items.map((item) => [
       item.barNo,
       item.elementTag,

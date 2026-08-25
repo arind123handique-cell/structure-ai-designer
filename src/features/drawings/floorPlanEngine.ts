@@ -321,6 +321,7 @@ export class FloorPlanEngine {
           const pileCap = designedPileCaps.get(sup.nodeId);
 
           floorColumns.push({
+            memberId: supInfo?.columnMemberId,
             columnSlNo: supInfo?.columnSlNo || sup.nodeId,
             label: supInfo?.columnLabel || `C${sup.nodeId}`,
             nodeId: sup.nodeId,
