@@ -101,11 +101,10 @@ export const ColumnDesignView: React.FC = () => {
     return ColumnNumberingService.getColumnMemberMapping(activeModel);
   }, [activeModel]);
 
-  // Ground-level support columns only — one row per support node (excluding lift core)
+  // Ground-level support columns only — one row per support node (excluding lift core / shear wall)
   const groundColumns = useMemo(() => {
     if (!activeModel) return [];
 
-    // Step 1: Identify lift core supports — tight cluster of 3+ supports within 2.5m of each other near wall plates
     const supportNodeIds = Array.from(activeModel.supports.keys());
     const supportInfo: { nodeId: number; x: number; z: number }[] = [];
     for (const nodeId of supportNodeIds) {
@@ -113,32 +112,8 @@ export const ColumnDesignView: React.FC = () => {
       if (node) supportInfo.push({ nodeId, x: node.x, z: node.z });
     }
 
-    // Find tight clusters of supports (lift core = densest cluster of 3+)
+    // Lift core supports = any support node that has a WALL-classification plate sitting on it
     const liftCoreNodeIds = new Set<number>();
-    if (supportInfo.length >= 3) {
-      // For each support, count how many other supports are within 2.5m
-      let bestClusterCenter: { x: number; z: number } | null = null;
-      let bestClusterSize = 0;
-      for (const a of supportInfo) {
-        const nearby = supportInfo.filter(
-          (b) => Math.hypot(a.x - b.x, a.z - b.z) <= 2.5
-        );
-        if (nearby.length > bestClusterSize) {
-          bestClusterSize = nearby.length;
-          bestClusterCenter = { x: a.x, z: a.z };
-        }
-      }
-      // Lift core = the tightest cluster with 3+ supports
-      if (bestClusterCenter && bestClusterSize >= 3) {
-        for (const s of supportInfo) {
-          if (Math.hypot(s.x - bestClusterCenter.x, s.z - bestClusterCenter.z) <= 2.5) {
-            liftCoreNodeIds.add(s.nodeId);
-          }
-        }
-      }
-    }
-
-    // Step 2: Also exclude supports that have wall plates (classification='WALL') sitting on them
     if (activeModel.plates) {
       for (const plate of activeModel.plates.values()) {
         if ((plate as any).classification !== 'WALL') continue;
@@ -151,7 +126,7 @@ export const ColumnDesignView: React.FC = () => {
       }
     }
 
-    // Step 3: For each non-lift-core support, find the ground column member connected to it
+    // For each non-lift-core support, find the ground column member connected to it
     const cols = Array.from(activeModel.members.values()).filter(
       (m) => m.classification === 'COLUMN'
     );
@@ -160,7 +135,6 @@ export const ColumnDesignView: React.FC = () => {
     for (const sup of supportInfo) {
       if (liftCoreNodeIds.has(sup.nodeId)) continue;
 
-      // Find the column member connected to this support node
       const groundCol = cols.find(
         (c) => c.startNodeId === sup.nodeId || c.endNodeId === sup.nodeId
       );
