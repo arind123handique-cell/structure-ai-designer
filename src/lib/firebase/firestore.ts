@@ -38,11 +38,12 @@ function sanitizeForFirestore(value: unknown): unknown {
       }
       return obj;
     }
-    return value.map(sanitizeForFirestore);
+    return value.map(sanitizeForFirestore).filter((v) => v !== undefined);
   }
   if (typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v === undefined) continue; // Firestore rejects undefined field values
       out[k] = sanitizeForFirestore(v);
     }
     return out;
