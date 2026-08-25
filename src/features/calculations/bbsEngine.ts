@@ -369,14 +369,28 @@ export class BbsEngine {
       const colProcessed = new Set<string>();
       floorPlans.forEach((fp) => {
         fp.columns.forEach((col) => {
-          const colKey = `${fp.levelIndex}_${col.columnSlNo}`;
+          // Dedup by memberId (unique per physical column member) to prevent
+          // double-counting when the same member appears on two floor plans
+          const colKey = String(col.memberId || `${fp.levelIndex}_${col.columnSlNo}`);
           if (colProcessed.has(colKey)) return;
           colProcessed.add(colKey);
 
           const bMm = Math.round((col.width || 0.45) * 1000);
           const DMm = Math.round((col.depth || 0.55) * 1000);
-          const storeyHeightM = 3.5;
           const cover = 40;
+
+          // Compute actual storey height from model geometry
+          let storeyHeightM = 3.5; // fallback
+          if (model && col.memberId) {
+            const member = model.members.get(col.memberId);
+            if (member) {
+              const n1 = model.nodes.get(member.startNodeId);
+              const n2 = model.nodes.get(member.endNodeId);
+              if (n1 && n2) {
+                storeyHeightM = Math.abs(n2.y - n1.y);
+              }
+            }
+          }
 
           const colKeyLookup = col.memberId || col.columnSlNo;
           // Prefer saved design result; fall back to custom overrides; then live design engine
