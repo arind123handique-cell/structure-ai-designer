@@ -1,10 +1,27 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useProjectStore } from '@/features/projects/projectStore';
 import { AppLayout } from '@/app/layout/AppLayout';
+import { AuthProvider, useAuth } from '@/lib/firebase/AuthContext';
+import { AuthModal } from '@/features/auth/AuthModal';
+import { ProjectStorage } from '@/features/projects/projectStorage';
 import { Loader2 } from 'lucide-react';
 
-export const App: React.FC = () => {
+const AppInner: React.FC = () => {
   const { initializeStore, activeProject, importANL, isLoading } = useProjectStore();
+  const { user, loading: authLoading } = useAuth();
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
+  // Sync auth user to ProjectStorage for cloud sync
+  useEffect(() => {
+    ProjectStorage.setCloudUser(user?.uid || null);
+    if (user) {
+      ProjectStorage.syncFromCloud().then((count) => {
+        if (count > 0) {
+          useProjectStore.getState().reloadProjects();
+        }
+      });
+    }
+  }, [user]);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -38,7 +55,20 @@ export const App: React.FC = () => {
     );
   }
 
-  return <AppLayout />;
+  return (
+    <>
+      <AppLayout onShowAuth={() => setShowAuthModal(true)} user={user} />
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+    </>
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <AppInner />
+    </AuthProvider>
+  );
 };
 
 export default App;

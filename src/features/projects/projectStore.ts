@@ -85,6 +85,7 @@ export interface ProjectState {
   openProject: (id: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   deleteInactiveProjects: () => Promise<void>;
+  reloadProjects: () => Promise<void>;
   importANL: (fileName: string, content: string, customMetadata?: Partial<ProjectMetadata>) => Promise<StoredProject>;
   selectMember: (id: number | null) => void;
   selectNode: (id: number | null) => void;
@@ -376,6 +377,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     const updated = await ProjectStorage.getAllProjects();
     set({ projects: updated });
+  },
+
+  reloadProjects: async () => {
+    const allProjects = await ProjectStorage.getAllProjects();
+    set({ projects: allProjects });
   },
 
   importANL: async (fileName, content, customMetadata) => {
