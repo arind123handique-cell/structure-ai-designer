@@ -616,9 +616,10 @@ export class SlabDesignEngine {
   private static calculateBarSpacing(dia: number, astReq: number, d: number, maxMultiplier: number = 3): number {
     const barArea = (Math.PI / 4) * dia * dia;
     const rawSpacing = (barArea * 1000) / astReq;
-    const maxAllowedSpacing = Math.min(maxMultiplier * d, 300);
+    // Cap maximum allowed slab bar spacing at 150mm c/c as per code standard detailing
+    const maxAllowedSpacing = Math.min(maxMultiplier * d, 150);
     const spacing = Math.min(rawSpacing, maxAllowedSpacing);
-    // Round down to nearest 25mm increment (e.g. 150, 175, 200)
+    // Round down to nearest 25mm increment (e.g. 100, 125, 150)
     return Math.max(75, Math.floor(spacing / 25) * 25);
   }
 
