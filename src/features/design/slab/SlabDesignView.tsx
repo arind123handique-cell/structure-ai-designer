@@ -94,6 +94,7 @@ export const SlabDesignView: React.FC = () => {
   const [selectedPanelId, setSelectedPanelId] = useState<string>('S1');
   const [selectedReportOutput, setSelectedReportOutput] = useState<SlabDesignOutput | null>(null);
   const [showDrawing, setShowDrawing] = useState<boolean>(false);
+  const [showPanelSummary, setShowPanelSummary] = useState<boolean>(false);
   const [activeFloorFilter, setActiveFloorFilter] = useState<string>('ALL');
 
   const availableFloorLevels = useMemo(() => {
@@ -300,6 +301,20 @@ export const SlabDesignView: React.FC = () => {
               Import {modelSlabPanels.length} Panels from STAAD Model
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => setShowPanelSummary(!showPanelSummary)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-bold transition-all border ${
+              showPanelSummary
+                ? 'bg-indigo-600 text-white border-indigo-500 shadow'
+                : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+            }`}
+            title="Toggle Panel Detailing Summary Card"
+          >
+            {showPanelSummary ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5 text-indigo-400" />}
+            <span>{showPanelSummary ? 'Hide Detailing Summary' : 'Show Detailing Summary'}</span>
+          </button>
 
           <button
             onClick={handleAddPanel}
@@ -645,7 +660,7 @@ export const SlabDesignView: React.FC = () => {
       </div>
 
       {/* Selected Panel Detail Section & Optional Rebar Diagram */}
-      {activeOutput && (
+      {showPanelSummary && activeOutput && (
         <div className={`grid grid-cols-1 ${showDrawing ? 'md:grid-cols-2' : ''} gap-4`}>
           {/* Rebar Detailing Summary Card */}
           <div className="bg-slate-900 p-4 rounded-lg border border-slate-800 space-y-3 text-xs">
