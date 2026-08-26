@@ -44,7 +44,7 @@ export const SlabDesignView: React.FC = () => {
   const [panelsInput, setPanelsInput] = useState<SlabDesignInput[]>([
     {
       panelId: 'S1',
-      floorLevel: 'GROUND FLOOR SLAB (+2.8m)',
+      floorLevel: '3.2m First Floor Slab',
       lx: 3.5,
       ly: 4.5,
       boundaryCondition: 'TWO_ADJACENT_DISCONTINUOUS',
@@ -54,7 +54,7 @@ export const SlabDesignView: React.FC = () => {
     },
     {
       panelId: 'S2',
-      floorLevel: '1ST FLOOR SLAB (+5.6m)',
+      floorLevel: '6.4m Second Floor Slab',
       lx: 3.5,
       ly: 5.0,
       boundaryCondition: 'ONE_LONG_DISCONTINUOUS',
@@ -64,7 +64,7 @@ export const SlabDesignView: React.FC = () => {
     },
     {
       panelId: 'S3',
-      floorLevel: '1ST FLOOR SLAB (+5.6m)',
+      floorLevel: '6.4m Second Floor Slab',
       lx: 3.0,
       ly: 4.5,
       boundaryCondition: 'INTERIOR',
@@ -74,7 +74,7 @@ export const SlabDesignView: React.FC = () => {
     },
     {
       panelId: 'S4',
-      floorLevel: '2ND FLOOR SLAB (+8.4m)',
+      floorLevel: '9.6m Third Floor Slab',
       lx: 2.5,
       ly: 5.5,
       boundaryCondition: 'ONE_WAY_CONTINUOUS',
@@ -84,7 +84,7 @@ export const SlabDesignView: React.FC = () => {
     },
     {
       panelId: 'S5',
-      floorLevel: 'ROOF SLAB (+11.2m)',
+      floorLevel: '12.8m Fourth Floor Slab',
       lx: 1.5,
       ly: 3.0,
       boundaryCondition: 'CANTILEVER',
@@ -110,7 +110,7 @@ export const SlabDesignView: React.FC = () => {
   const [activeFloorFilter, setActiveFloorFilter] = useState<string>('ALL');
 
   const availableFloorLevels = useMemo(() => {
-    return Array.from(new Set(panelsInput.map((p) => p.floorLevel || '1ST FLOOR SLAB (+2.8m)')));
+    return Array.from(new Set(panelsInput.map((p) => p.floorLevel || '3.2m First Floor Slab')));
   }, [panelsInput]);
 
   // Extract floor slab panels directly from imported STAAD .std / .anl model plates (EXCLUDING shear wall plates)
@@ -137,15 +137,15 @@ export const SlabDesignView: React.FC = () => {
     const panels: SlabDesignInput[] = [];
     let idx = 1;
     const sortedElevations = Array.from(floorMap.keys()).sort((a, b) => a - b);
+    const ordinals = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth'];
 
     sortedElevations.forEach((yElev, flIdx) => {
       const platesAtFloor = floorMap.get(yElev)!;
-      const floorLabel =
-        yElev <= 3.2
-          ? `GROUND FLOOR SLAB (+${yElev}m)`
-          : flIdx === sortedElevations.length - 1
-          ? `ROOF SLAB (+${yElev}m)`
-          : `FLOOR ${flIdx} SLAB (+${yElev}m)`;
+      const ordinal = ordinals[flIdx] || `${flIdx + 1}th`;
+      const isRoof = flIdx === sortedElevations.length - 1 && flIdx > 0;
+      const floorLabel = isRoof
+        ? `${yElev.toFixed(1)}m Roof Slab`
+        : `${yElev.toFixed(1)}m ${ordinal} Floor Slab`;
 
       platesAtFloor.forEach((p: Plate3D) => {
         const pNodes = p.nodeIds.map((id) => activeModel.nodes.get(id)).filter(Boolean) as Node3D[];
