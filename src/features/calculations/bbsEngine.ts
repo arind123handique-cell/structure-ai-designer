@@ -1206,6 +1206,92 @@ export class BbsEngine {
       }
     }
 
+    // 5b. EXTRACT FLOOR SLABS (Grouped by panel mark & floor level)
+    const savedSlabDesigns: Record<string, any> = project?.savedSlabDesigns || {};
+    const slabEntries = Object.values(savedSlabDesigns);
+
+    if (slabEntries.length > 0) {
+      slabEntries.forEach((slab) => {
+        const tag = `SLAB PANEL ${slab.panelId} (${slab.floorLevel || 'FLOOR'})`;
+        const lx = slab.lx || 3.5;
+        const ly = slab.ly || 4.5;
+        const barDiaX = slab.barDiaX || 10;
+        const barSpacingX = slab.barSpacingX || 150;
+        const barDiaY = slab.barDiaY || 10;
+        const barSpacingY = slab.barSpacingY || 175;
+        const thickness = slab.thickness || 130;
+        const cover = 20;
+
+        // 1. Bottom Main Steel Short Way (Lx) - U Bar
+        const numBarsX = Math.round((ly * 1000) / barSpacingX) + 1;
+        const cutLenX = (2 * (thickness - 2 * cover) + (lx * 1000 - 2 * cover) - 4 * barDiaX) / 1000;
+        items.push({
+          barNo: barIndex++,
+          elementCategory: 'SLAB',
+          elementTag: tag,
+          barDescription: `Bottom Main Rebar — Short Way (T${barDiaX}@${barSpacingX} c/c)`,
+          shapeType: 'U_BAR',
+          a: thickness - 2 * cover,
+          b: Math.round(lx * 1000 - 2 * cover),
+          c: thickness - 2 * cover,
+          diameter: barDiaX,
+          spacing: barSpacingX,
+          cuttingLengthM: Number(cutLenX.toFixed(2)),
+          numElements: 1,
+          barsPerElement: numBarsX,
+          totalCount: numBarsX,
+          totalLengthM: Number((numBarsX * cutLenX).toFixed(2)),
+          lengthByDia: { [barDiaX]: Number((numBarsX * cutLenX).toFixed(2)) },
+        });
+
+        // 2. Bottom Main Steel Long Way (Ly) - U Bar
+        const numBarsY = Math.round((lx * 1000) / barSpacingY) + 1;
+        const cutLenY = (2 * (thickness - 2 * cover) + (ly * 1000 - 2 * cover) - 4 * barDiaY) / 1000;
+        items.push({
+          barNo: barIndex++,
+          elementCategory: 'SLAB',
+          elementTag: tag,
+          barDescription: `Bottom Main Rebar — Long Way (T${barDiaY}@${barSpacingY} c/c)`,
+          shapeType: 'U_BAR',
+          a: thickness - 2 * cover,
+          b: Math.round(ly * 1000 - 2 * cover),
+          c: thickness - 2 * cover,
+          diameter: barDiaY,
+          spacing: barSpacingY,
+          cuttingLengthM: Number(cutLenY.toFixed(2)),
+          numElements: 1,
+          barsPerElement: numBarsY,
+          totalCount: numBarsY,
+          totalLengthM: Number((numBarsY * cutLenY).toFixed(2)),
+          lengthByDia: { [barDiaY]: Number((numBarsY * cutLenY).toFixed(2)) },
+        });
+
+        // 3. Top Negative Support Steel (if present)
+        if (slab.Mux_neg > 0) {
+          const topBarsX = Math.round(numBarsX * 0.5);
+          const topCutLenX = Number((lx / 4 + 2 * (thickness - 2 * cover) / 1000).toFixed(2));
+          items.push({
+            barNo: barIndex++,
+            elementCategory: 'SLAB',
+            elementTag: tag,
+            barDescription: `Top Negative Support Steel X-Dir (T${barDiaX}@${barSpacingX} c/c over L/4)`,
+            shapeType: 'L_BAR',
+            a: thickness - 2 * cover,
+            b: Math.round((lx / 4) * 1000),
+            c: 0,
+            diameter: barDiaX,
+            spacing: barSpacingX,
+            cuttingLengthM: topCutLenX,
+            numElements: 1,
+            barsPerElement: topBarsX,
+            totalCount: topBarsX,
+            totalLengthM: Number((topBarsX * topCutLenX).toFixed(2)),
+            lengthByDia: { [barDiaX]: Number((topBarsX * topCutLenX).toFixed(2)) },
+          });
+        }
+      });
+    }
+
     // 6. CALCULATE DIAMETER TOTALS & CATEGORY MATRIX
     const summaryMap = new Map<number, { totalLen: number }>();
     this.STANDARD_DIAMETERS.forEach((d) => summaryMap.set(d, { totalLen: 0 }));

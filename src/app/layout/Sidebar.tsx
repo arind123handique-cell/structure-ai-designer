@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronUp,
   PanelLeftClose,
+  Grid,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -59,6 +60,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({ onHide }) => {
     { label: 'Grade Beam Design', view: 'gradebeams-design', icon: Compass },
     { label: 'Footing Design', view: 'footings-design', icon: Building },
     { label: 'Shear Wall Design', view: 'shearwalls-design', icon: Layers },
+    { label: 'Slab Design', view: 'slabs-design', icon: Grid },
     { label: '2D Floor Plans', view: 'floor-plans', icon: Layers },
     { label: 'CAD Drawing Sheets', view: 'drawings', icon: FileText },
     { label: 'Reports & BOQ Export', view: 'reports', icon: FileSpreadsheet },

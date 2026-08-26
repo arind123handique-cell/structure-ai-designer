@@ -22,6 +22,7 @@ export type ViewTab =
   | 'gradebeams-design'
   | 'footings-design'
   | 'shearwalls-design'
+  | 'slabs-design'
   | 'floor-plans'
   | 'drawings'
   | 'reports'
@@ -126,9 +127,11 @@ export interface ProjectState {
   savedFootingDesigns: Record<number, any>;
   savedPileCapDesigns: Record<number, any>;
   savedCombinedCapDesigns: any[];
+  savedSlabDesigns: Record<string, any>;
   customColumnRebarOverrides: Record<number, any>;
   customBeamRebarOverrides: Record<number, any>;
   customShearWallOverrides: Record<number, any>;
+  customSlabOverrides: Record<string, any>;
 
   // Component Design Persistence Actions
   saveColumnDesigns: (designs: Map<number, any> | Record<number, any>, overrides?: Map<number, any> | Record<number, any>) => Promise<void>;
@@ -138,6 +141,7 @@ export interface ProjectState {
   saveFootingDesigns: (designs: Map<number, any> | Record<number, any>) => Promise<void>;
   savePileCapDesigns: (designedCaps?: Map<number, any> | Record<number, any>, combinedCaps?: any[]) => Promise<void>;
   savePileDesigns: (types: any[]) => Promise<void>;
+  saveSlabDesigns: (designs: Map<string, any> | Record<string, any>, overrides?: Record<string, any>) => Promise<void>;
 }
 
 const DEFAULT_DESIGN_SETTINGS: DesignParameters = {
@@ -195,9 +199,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   savedFootingDesigns: {},
   savedPileCapDesigns: {},
   savedCombinedCapDesigns: [],
+  savedSlabDesigns: {},
   customColumnRebarOverrides: {},
   customBeamRebarOverrides: {},
   customShearWallOverrides: {},
+  customSlabOverrides: {},
 
   // Rebar Configuration States
   universalRebarSelection: {
@@ -240,9 +246,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           savedFootingDesigns: first.savedFootingDesigns || {},
           savedPileCapDesigns: first.savedPileCapDesigns || {},
           savedCombinedCapDesigns: first.savedCombinedCapDesigns || [],
+          savedSlabDesigns: first.savedSlabDesigns || {},
           customColumnRebarOverrides: first.customColumnRebarOverrides || {},
           customBeamRebarOverrides: first.customBeamRebarOverrides || {},
           customShearWallOverrides: first.customShearWallOverrides || {},
+          customSlabOverrides: first.customSlabOverrides || {},
           universalRebarSelection: uRebar,
           allowedColumnRebarDiameters: uRebar.longitudinalDiameters,
           allowedBeamRebarDiameters: uRebar.longitudinalDiameters,
@@ -340,9 +348,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           savedFootingDesigns: project.savedFootingDesigns || {},
           savedPileCapDesigns: project.savedPileCapDesigns || {},
           savedCombinedCapDesigns: project.savedCombinedCapDesigns || [],
+          savedSlabDesigns: project.savedSlabDesigns || {},
           customColumnRebarOverrides: project.customColumnRebarOverrides || {},
           customBeamRebarOverrides: project.customBeamRebarOverrides || {},
           customShearWallOverrides: project.customShearWallOverrides || {},
+          customSlabOverrides: project.customSlabOverrides || {},
           universalRebarSelection: uRebar,
           allowedColumnRebarDiameters: uRebar.longitudinalDiameters,
           allowedBeamRebarDiameters: uRebar.longitudinalDiameters,
@@ -1219,5 +1229,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await ProjectStorage.saveProject(updatedProject);
     set({ activeProject: updatedProject, projectPileTypes: types });
   },
-}));
 
+  saveSlabDesigns: async (designs: Map<string, any> | Record<string, any>, overrides?: Record<string, any>) => {
+    const currentProj = get().activeProject;
+    if (!currentProj) return;
+
+    const slabObj: Record<string, any> = { ...(get().savedSlabDesigns || {}) };
+    if (designs) {
+      if (designs instanceof Map) {
+        designs.forEach((val, key) => {
+          slabObj[key] = val;
+        });
+      } else {
+        Object.assign(slabObj, designs);
+      }
+    }
+
+    const ovObj = overrides || get().customSlabOverrides || {};
+
+    const updatedProject: StoredProject = {
+      ...currentProj,
+      savedSlabDesigns: slabObj,
+      customSlabOverrides: ovObj,
+      metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+    };
+
+    await ProjectStorage.saveProject(updatedProject);
+    set({
+      activeProject: updatedProject,
+      savedSlabDesigns: slabObj,
+      customSlabOverrides: ovObj,
+    });
+  },
+}));
