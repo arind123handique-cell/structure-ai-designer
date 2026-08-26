@@ -1744,16 +1744,16 @@ export class PDFReportGenerator {
 
     // Grand Totals across all diameters
     const grandTotals = {
-      dia8: pilesDia8 + capsDia8 + gbDia8 + colsDia8 + beamsDia8 + wallsDia8,
-      dia10: pilesDia10 + capsDia10 + gbDia10 + colsDia10 + beamsDia10 + wallsDia10,
-      dia12: pilesDia12 + capsDia12 + gbDia12 + colsDia12 + beamsDia12 + wallsDia12,
-      dia16: pilesDia16 + capsDia16 + gbDia16 + colsDia16 + beamsDia16 + wallsDia16,
+      dia8: slabsDia8 + pilesDia8 + capsDia8 + gbDia8 + colsDia8 + beamsDia8 + wallsDia8,
+      dia10: slabsDia10 + pilesDia10 + capsDia10 + gbDia10 + colsDia10 + beamsDia10 + wallsDia10,
+      dia12: slabsDia12 + pilesDia12 + capsDia12 + gbDia12 + colsDia12 + beamsDia12 + wallsDia12,
+      dia16: slabsDia16 + pilesDia16 + capsDia16 + gbDia16 + colsDia16 + beamsDia16 + wallsDia16,
       dia20: pilesDia20 + capsDia20 + gbDia20 + colsDia20 + beamsDia20 + wallsDia20,
       dia25: pilesDia25 + capsDia25 + gbDia25 + colsDia25 + beamsDia25 + wallsDia25,
       dia32: pilesDia32 + capsDia32 + gbDia32 + colsDia32 + beamsDia32 + wallsDia32,
-      grandTotalKg: pilesTotalSteelKg + capsTotalSteelKg + gbTotalSteelKg + colsTotalSteelKg + beamsTotalSteelKg + wallsTotalSteelKg,
-      grandTotalMT: (pilesTotalSteelKg + capsTotalSteelKg + gbTotalSteelKg + colsTotalSteelKg + beamsTotalSteelKg + wallsTotalSteelKg) / 1000,
-      totalConcreteM3: pilesConcreteM3 + capsConcreteM3 + gbConcreteM3 + colsConcreteM3 + beamsConcreteM3 + wallsConcreteM3,
+      grandTotalKg: slabsTotalSteelKg + pilesTotalSteelKg + capsTotalSteelKg + gbTotalSteelKg + colsTotalSteelKg + beamsTotalSteelKg + wallsTotalSteelKg,
+      grandTotalMT: (slabsTotalSteelKg + pilesTotalSteelKg + capsTotalSteelKg + gbTotalSteelKg + colsTotalSteelKg + beamsTotalSteelKg + wallsTotalSteelKg) / 1000,
+      totalConcreteM3: slabsConcreteM3 + pilesConcreteM3 + capsConcreteM3 + gbConcreteM3 + colsConcreteM3 + beamsConcreteM3 + wallsConcreteM3,
     };
 
     return {

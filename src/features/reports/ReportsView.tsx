@@ -30,6 +30,7 @@ export const ReportsView: React.FC = () => {
     savedShearWallDesigns: activeProject.savedShearWallDesigns,
     savedGradeBeamDesigns: activeProject.savedGradeBeamDesigns,
     savedFootingDesigns: activeProject.savedFootingDesigns,
+    savedSlabDesigns: activeProject.savedSlabDesigns,
     universalRebarSelection: activeProject.universalRebarSelection,
     customColumnRebarOverrides: activeProject.customColumnRebarOverrides,
   }), [activeProject, activeModel]);

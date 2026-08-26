@@ -521,8 +521,10 @@ export const BbsTableView: React.FC = () => {
           { id: 'ALL', label: 'ALL MEMBERS (FULL BUILDING BBS)', icon: Layers },
           { id: 'BEAM', label: 'BEAMS (FLOOR FRAMING)', icon: Compass },
           { id: 'COLUMN', label: 'COLUMNS (STOREY STACKS)', icon: Building },
+          { id: 'SHEAR_WALL', label: 'SHEAR WALLS', icon: Layers },
           { id: 'PILE_CAP', label: 'PILE CAPS & FOUNDATIONS', icon: Box },
           { id: 'GRADE_BEAM', label: 'GRADE TIE BEAMS', icon: Compass },
+          { id: 'SLAB', label: 'FLOOR SLABS', icon: Grid },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = categoryFilter === tab.id;

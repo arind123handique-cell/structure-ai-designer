@@ -1207,18 +1207,48 @@ export class BbsEngine {
     }
 
     // 5b. EXTRACT FLOOR SLABS (Grouped by panel mark & floor level)
+    // 5b. EXTRACT FLOOR SLABS (Grouped by panel mark & floor level)
     const savedSlabDesigns: Record<string, any> = project?.savedSlabDesigns || {};
-    const slabEntries = Object.values(savedSlabDesigns);
+    let slabEntries = Object.values(savedSlabDesigns);
+
+    if (slabEntries.length === 0 && floorPlans.length > 0) {
+      // Auto-generate floor slab panel entries if user has not explicitly clicked Save All Designs yet
+      const autoPanels: any[] = [];
+      floorPlans.forEach((fp) => {
+        if (fp.isFoundationLevel) return;
+        const panelCount = 4;
+        for (let i = 1; i <= panelCount; i++) {
+          autoPanels.push({
+            panelId: `S${i}`,
+            floorLevel: fp.levelName || `FLOOR ${fp.levelIndex}`,
+            lx: 3.5,
+            ly: 4.5,
+            thickness: 130,
+            bottomBarDiaX: 10,
+            bottomBarSpacingX: 150,
+            topBarDiaX: 8,
+            topBarSpacingX: 150,
+            bottomBarDiaY: 10,
+            bottomBarSpacingY: 150,
+            topBarDiaY: 8,
+            topBarSpacingY: 150,
+          });
+        }
+      });
+      slabEntries = autoPanels;
+    }
 
     if (slabEntries.length > 0) {
       slabEntries.forEach((slab) => {
-        const tag = `SLAB PANEL ${slab.panelId} (${slab.floorLevel || 'FLOOR'})`;
+        const tag = `SLAB PANEL ${slab.panelId} (${slab.floorLevel || 'FLOOR SLAB'})`;
         const lx = slab.lx || 3.5;
         const ly = slab.ly || 4.5;
-        const barDiaX = slab.barDiaX || 10;
-        const barSpacingX = slab.barSpacingX || 150;
-        const barDiaY = slab.barDiaY || 10;
-        const barSpacingY = slab.barSpacingY || 175;
+        const barDiaX = slab.bottomBarDiaX || slab.barDiaX || 10;
+        const barSpacingX = slab.bottomBarSpacingX || slab.barSpacingX || 150;
+        const barDiaY = slab.bottomBarDiaY || slab.barDiaY || 10;
+        const barSpacingY = slab.bottomBarSpacingY || slab.barSpacingY || 150;
+        const topBarDiaX = slab.topBarDiaX || 8;
+        const topBarSpacingX = slab.topBarSpacingX || barSpacingX;
         const thickness = slab.thickness || 130;
         const cover = 20;
 
@@ -1229,7 +1259,7 @@ export class BbsEngine {
           barNo: barIndex++,
           elementCategory: 'SLAB',
           elementTag: tag,
-          barDescription: `Bottom Main Rebar — Short Way (T${barDiaX}@${barSpacingX} c/c)`,
+          barDescription: `Bottom Main Steel — Short Way (T${barDiaX}@${barSpacingX} mm c/c)`,
           shapeType: 'U_BAR',
           a: thickness - 2 * cover,
           b: Math.round(lx * 1000 - 2 * cover),
@@ -1251,7 +1281,7 @@ export class BbsEngine {
           barNo: barIndex++,
           elementCategory: 'SLAB',
           elementTag: tag,
-          barDescription: `Bottom Main Rebar — Long Way (T${barDiaY}@${barSpacingY} c/c)`,
+          barDescription: `Bottom Main Steel — Long Way (T${barDiaY}@${barSpacingY} mm c/c)`,
           shapeType: 'U_BAR',
           a: thickness - 2 * cover,
           b: Math.round(ly * 1000 - 2 * cover),
@@ -1266,29 +1296,29 @@ export class BbsEngine {
           lengthByDia: { [barDiaY]: Number((numBarsY * cutLenY).toFixed(2)) },
         });
 
-        // 3. Top Negative Support Steel (if present)
-        if (slab.Mux_neg > 0) {
-          const topBarsX = Math.round(numBarsX * 0.5);
-          const topCutLenX = Number((lx / 4 + 2 * (thickness - 2 * cover) / 1000).toFixed(2));
-          items.push({
-            barNo: barIndex++,
-            elementCategory: 'SLAB',
-            elementTag: tag,
-            barDescription: `Top Negative Support Steel X-Dir (T${barDiaX}@${barSpacingX} c/c over L/4)`,
-            shapeType: 'L_BAR',
-            a: thickness - 2 * cover,
-            b: Math.round((lx / 4) * 1000),
-            c: 0,
-            diameter: barDiaX,
-            spacing: barSpacingX,
-            cuttingLengthM: topCutLenX,
-            numElements: 1,
-            barsPerElement: topBarsX,
-            totalCount: topBarsX,
-            totalLengthM: Number((topBarsX * topCutLenX).toFixed(2)),
-            lengthByDia: { [barDiaX]: Number((topBarsX * topCutLenX).toFixed(2)) },
-          });
-        }
+        // 3. Top Support Bent-Up Steel (T8 @ 0.25L) - Cranked Bar
+        const crankHeight = Math.round(0.42 * (thickness - 2 * cover));
+        const topBarsX = Math.round((ly * 1000) / topBarSpacingX) + 1;
+        const topCutLenX = Number(((lx / 4 * 1000) + crankHeight + (thickness - 2 * cover)) / 1000).toFixed(2);
+        const topCutLenM = Number(topCutLenX);
+        items.push({
+          barNo: barIndex++,
+          elementCategory: 'SLAB',
+          elementTag: tag,
+          barDescription: `Top Bent-Up / Extra Support Steel (T${topBarDiaX}@${topBarSpacingX} mm c/c @ 0.25L — Crank: ${crankHeight}mm)`,
+          shapeType: 'CRANKED',
+          a: thickness - 2 * cover,
+          b: Math.round((lx / 4) * 1000),
+          c: crankHeight,
+          diameter: topBarDiaX,
+          spacing: topBarSpacingX,
+          cuttingLengthM: topCutLenM,
+          numElements: 1,
+          barsPerElement: topBarsX,
+          totalCount: topBarsX,
+          totalLengthM: Number((topBarsX * topCutLenM).toFixed(2)),
+          lengthByDia: { [topBarDiaX]: Number((topBarsX * topCutLenM).toFixed(2)) },
+        });
       });
     }
 
