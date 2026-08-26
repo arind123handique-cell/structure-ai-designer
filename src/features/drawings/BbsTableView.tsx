@@ -2,13 +2,39 @@ import React, { useState, useMemo } from 'react';
 import { useProjectStore } from '@/features/projects/projectStore';
 import { BbsEngine, BbsItem, BbsProjectOutput } from '@/features/calculations/bbsEngine';
 import { BbsShapeSvg } from './BbsShapeSvg';
-import { FileSpreadsheet, Printer, Download, Filter, Search, Layers, Box, Compass, Building } from 'lucide-react';
+import {
+  FileSpreadsheet,
+  Printer,
+  Download,
+  Search,
+  Layers,
+  Box,
+  Compass,
+  Building,
+  ChevronDown,
+  ChevronRight,
+  FolderPlus,
+  FolderMinus,
+  ListTree,
+  Grid,
+} from 'lucide-react';
+
+export interface BbsGroup {
+  tag: string;
+  category: string;
+  items: BbsItem[];
+  totalLengthM: number;
+  totalWeightKg: number;
+  lengthByDia: { [dia: number]: number };
+}
 
 export const BbsTableView: React.FC = () => {
   const { activeProject, activeModel } = useProjectStore();
   const [unit, setUnit] = useState<'mm' | 'm'>('m');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [groupBy, setGroupBy] = useState<'MEMBER' | 'CATEGORY' | 'FLAT'>('MEMBER');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   const bbsData: BbsProjectOutput = useMemo(() => {
     return BbsEngine.generateBuildingBbs(activeModel, activeProject);
@@ -31,6 +57,77 @@ export const BbsTableView: React.FC = () => {
       return true;
     });
   }, [bbsData.items, categoryFilter, searchTerm]);
+
+  // Group-Wise Hierarchy Construction
+  const groups: BbsGroup[] = useMemo(() => {
+    if (groupBy === 'FLAT') {
+      const unitWt = (item: BbsItem) => (item.diameter * item.diameter) / 162.2;
+      return [
+        {
+          tag: 'ALL BAR ITEMS',
+          category: categoryFilter,
+          items: filteredItems,
+          totalLengthM: filteredItems.reduce((s, i) => s + i.totalLengthM, 0),
+          totalWeightKg: filteredItems.reduce((s, i) => s + i.totalLengthM * unitWt(i), 0),
+          lengthByDia: filteredItems.reduce((acc, i) => {
+            acc[i.diameter] = (acc[i.diameter] || 0) + i.totalLengthM;
+            return acc;
+          }, {} as { [dia: number]: number }),
+        },
+      ];
+    }
+
+    const map = new Map<string, BbsGroup>();
+
+    filteredItems.forEach((item) => {
+      let key = item.elementTag;
+      if (groupBy === 'CATEGORY') {
+        key =
+          item.elementCategory === 'PILE_CAP'
+            ? 'PILE CAPS & FOUNDATIONS'
+            : item.elementCategory === 'COLUMN'
+            ? 'COLUMNS & STARTER DOWELS'
+            : item.elementCategory === 'BEAM'
+            ? 'BEAMS & FRAMING'
+            : item.elementCategory === 'GRADE_BEAM'
+            ? 'GRADE TIE BEAMS'
+            : item.elementCategory;
+      }
+
+      if (!map.has(key)) {
+        map.set(key, {
+          tag: key,
+          category: item.elementCategory,
+          items: [],
+          totalLengthM: 0,
+          totalWeightKg: 0,
+          lengthByDia: {},
+        });
+      }
+
+      const grp = map.get(key)!;
+      grp.items.push(item);
+      grp.totalLengthM += item.totalLengthM;
+      const unitWt = (item.diameter * item.diameter) / 162.2;
+      const wtKg = item.totalLengthM * unitWt;
+      grp.totalWeightKg += wtKg;
+      grp.lengthByDia[item.diameter] = (grp.lengthByDia[item.diameter] || 0) + item.totalLengthM;
+    });
+
+    return Array.from(map.values());
+  }, [filteredItems, groupBy, categoryFilter]);
+
+  const toggleGroup = (tag: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  };
+
+  const handleExpandAll = () => setCollapsedGroups(new Set());
+  const handleCollapseAll = () => setCollapsedGroups(new Set(groups.map((g) => g.tag)));
 
   // Recalculate summary totals for filtered items
   const filteredDiameterTotals = useMemo(() => {
@@ -78,8 +175,8 @@ export const BbsTableView: React.FC = () => {
   const handleExportCsv = () => {
     const headers = [
       'Bar No',
-      'Element',
-      'Description',
+      'Element Group',
+      'Bar Description',
       'Shape',
       `a (${unit})`,
       `b (${unit})`,
@@ -135,38 +232,67 @@ export const BbsTableView: React.FC = () => {
     document.body.removeChild(link);
   };
 
-  // Export to Professional Printable HTML Document / PDF
+  // Export to Professional Group-Wise Printable HTML Document / PDF
   const handleExportPdf = () => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
-    const tableRowsHtml = filteredItems.map((item, idx) => {
-      const unitMultiplier = unit === 'mm' ? 1000 : 1;
-      const formattedLen = (item.totalLengthM * unitMultiplier).toFixed(unit === 'mm' ? 0 : 1);
-      const bg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
-
-      return `
-        <tr style="background-color: ${bg};">
-          <td style="text-align: center; font-weight: bold; border: 1px solid #cbd5e1; padding: 4px;">${item.barNo}</td>
-          <td style="border: 1px solid #cbd5e1; padding: 4px; font-weight: bold;">
-            <div>${item.elementTag}</div>
-            <div style="font-size: 9px; color: #64748b; font-weight: normal;">${item.barDescription}</div>
+    const groupSectionsHtml = groups
+      .map((grp) => {
+        const groupHeader = `
+        <tr style="background-color: #1e293b; color: #ffffff; font-weight: bold;">
+          <td colspan="${10 + BbsEngine.STANDARD_DIAMETERS.length}" style="padding: 7px 10px; font-size: 11px;">
+            <span style="background: #3b82f6; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; margin-right: 8px;">${grp.category}</span>
+            ${grp.tag} &mdash; (${grp.items.length} Bar Types &bull; Total Weight: ${grp.totalWeightKg.toFixed(1)} kg)
           </td>
-          <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px; font-weight: bold; color: #2563eb;">${item.shapeType}</td>
-          <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px;">${formatDim(item.a)}</td>
-          <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px;">${formatDim(item.b)}</td>
-          <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px;">${formatDim(item.c)}</td>
-          <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px; font-weight: bold; color: #1d4ed8;">${item.diameter}</td>
-          <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px;">${item.spacing || '-'}</td>
-          <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px; font-weight: bold;">${formatCutLen(item.cuttingLengthM)}</td>
-          <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px; font-weight: bold; color: #1d4ed8;">${item.totalCount}</td>
-          ${BbsEngine.STANDARD_DIAMETERS.map((dia) => {
-            const isMatch = item.diameter === dia;
-            return `<td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px; font-weight: bold; color: ${isMatch ? '#dc2626' : '#cbd5e1'}; background-color: ${isMatch ? '#fef2f2' : 'transparent'};">${isMatch ? formattedLen : ''}</td>`;
+        </tr>
+      `;
+
+        const itemRows = grp.items
+          .map((item, idx) => {
+            const unitMultiplier = unit === 'mm' ? 1000 : 1;
+            const formattedLen = (item.totalLengthM * unitMultiplier).toFixed(unit === 'mm' ? 0 : 1);
+            const bg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
+
+            return `
+          <tr style="background-color: ${bg};">
+            <td style="text-align: center; font-weight: bold; border: 1px solid #cbd5e1; padding: 4px;">${item.barNo}</td>
+            <td style="border: 1px solid #cbd5e1; padding: 4px; font-weight: bold;">
+              <div>${item.elementTag}</div>
+              <div style="font-size: 9px; color: #64748b; font-weight: normal;">${item.barDescription}</div>
+            </td>
+            <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px; font-weight: bold; color: #2563eb;">${item.shapeType}</td>
+            <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px;">${formatDim(item.a)}</td>
+            <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px;">${formatDim(item.b)}</td>
+            <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px;">${formatDim(item.c)}</td>
+            <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px; font-weight: bold; color: #1d4ed8;">${item.diameter}</td>
+            <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px;">${item.spacing || '-'}</td>
+            <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px; font-weight: bold;">${formatCutLen(item.cuttingLengthM)}</td>
+            <td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px; font-weight: bold; color: #1d4ed8;">${item.totalCount}</td>
+            ${BbsEngine.STANDARD_DIAMETERS.map((dia) => {
+              const isMatch = item.diameter === dia;
+              return `<td style="text-align: center; border: 1px solid #cbd5e1; padding: 4px; font-weight: bold; color: ${isMatch ? '#dc2626' : '#cbd5e1'}; background-color: ${isMatch ? '#fef2f2' : 'transparent'};">${isMatch ? formattedLen : ''}</td>`;
+            }).join('')}
+          </tr>
+        `;
+          })
+          .join('');
+
+        const groupSubtotal = `
+        <tr style="background-color: #f1f5f9; font-weight: bold; border-bottom: 2px solid #334155;">
+          <td colspan="10" style="text-align: right; padding: 5px 8px; font-size: 10px; color: #1e293b;">
+            SUBTOTAL [${grp.tag}]:
+          </td>
+          ${BbsEngine.STANDARD_DIAMETERS.map((d) => {
+            const len = (grp.lengthByDia[d] || 0) * (unit === 'mm' ? 1000 : 1);
+            return `<td style="text-align: center; border: 1px solid #cbd5e1; padding: 5px; color: #0284c7;">${len > 0 ? (unit === 'mm' ? Math.round(len).toLocaleString() : len.toFixed(1)) : '-'}</td>`;
           }).join('')}
         </tr>
       `;
-    }).join('');
+
+        return groupHeader + itemRows + groupSubtotal;
+      })
+      .join('');
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -192,7 +318,7 @@ export const BbsTableView: React.FC = () => {
       </head>
       <body>
         <div class="header-box">
-          <div class="title">Bar Bending Schedule (IS:2502 / SP:34 Standard Detailing)</div>
+          <div class="title">Group-Wise Bar Bending Schedule (IS:2502 / SP:34 Standard Detailing)</div>
           <div class="meta-grid">
             <div class="meta-cell"><b>Project:</b> <span style="color:#1d4ed8;">${bbsData.projectName}</span><br><b>Ref Dwg:</b> ${bbsData.refDwgNo}</div>
             <div class="meta-cell"><b>Engineer:</b> <span style="color:#1d4ed8;">${bbsData.engineer}</span><br><b>Approver:</b> Project Manager</div>
@@ -221,7 +347,7 @@ export const BbsTableView: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            ${tableRowsHtml}
+            ${groupSectionsHtml}
           </tbody>
           <tfoot>
             <tr style="background: #e2e8f0;">
@@ -276,13 +402,67 @@ export const BbsTableView: React.FC = () => {
               BAR BENDING SCHEDULE (BBS) — IS 2502 / SP:34
             </h2>
             <p className="text-xs text-slate-400">
-              Total Members: {filteredItems.length} entries • Steel Takeoff: {filteredDiameterTotals.grandWtKg.toLocaleString()} kg ({filteredDiameterTotals.grandWtMT} MT)
+              {groups.length} Member Groups • {filteredItems.length} Bar Types • Steel Takeoff: {filteredDiameterTotals.grandWtKg.toLocaleString()} kg ({filteredDiameterTotals.grandWtMT} MT)
             </p>
           </div>
         </div>
 
         {/* Controls */}
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          {/* Grouping Mode Selector */}
+          <div className="flex items-center bg-slate-950 p-1 rounded border border-slate-700">
+            <span className="text-slate-400 px-2 font-semibold flex items-center gap-1">
+              <ListTree className="w-3.5 h-3.5 text-sky-400" /> GROUP:
+            </span>
+            <button
+              onClick={() => setGroupBy('MEMBER')}
+              className={`px-2.5 py-1 rounded text-xs font-bold transition-all ${
+                groupBy === 'MEMBER' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+              title="Group items by individual member / element tag"
+            >
+              MEMBER WISE
+            </button>
+            <button
+              onClick={() => setGroupBy('CATEGORY')}
+              className={`px-2.5 py-1 rounded text-xs font-bold transition-all ${
+                groupBy === 'CATEGORY' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+              title="Group items by component category (Beams, Columns, Pile Caps)"
+            >
+              CATEGORY WISE
+            </button>
+            <button
+              onClick={() => setGroupBy('FLAT')}
+              className={`px-2.5 py-1 rounded text-xs font-bold transition-all ${
+                groupBy === 'FLAT' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+              title="View flat list of all bar entries"
+            >
+              FLAT LIST
+            </button>
+          </div>
+
+          {/* Expand / Collapse All */}
+          {groupBy !== 'FLAT' && (
+            <div className="flex items-center bg-slate-950 p-1 rounded border border-slate-700 gap-1">
+              <button
+                onClick={handleExpandAll}
+                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-bold flex items-center gap-1"
+                title="Expand all member groups"
+              >
+                <FolderPlus className="w-3.5 h-3.5 text-emerald-400" /> Expand All
+              </button>
+              <button
+                onClick={handleCollapseAll}
+                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-bold flex items-center gap-1"
+                title="Collapse all member groups"
+              >
+                <FolderMinus className="w-3.5 h-3.5 text-amber-400" /> Collapse All
+              </button>
+            </div>
+          )}
+
           {/* Unit Toggle */}
           <div className="flex items-center bg-slate-950 p-1 rounded border border-slate-700">
             <span className="text-slate-400 px-2 font-semibold">UNIT:</span>
@@ -335,8 +515,8 @@ export const BbsTableView: React.FC = () => {
         </div>
       </div>
 
-      {/* Category Tabs */}
-      <div className="flex flex-wrap items-center gap-2 bg-slate-900/80 p-2 rounded-lg border border-slate-800 text-xs">
+      {/* Category Tabs Bar */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
         {[
           { id: 'ALL', label: 'ALL MEMBERS (FULL BUILDING BBS)', icon: Layers },
           { id: 'BEAM', label: 'BEAMS (FLOOR FRAMING)', icon: Compass },
@@ -367,7 +547,7 @@ export const BbsTableView: React.FC = () => {
       <div className="w-full bg-white text-slate-900 rounded-lg shadow-2xl overflow-x-auto border-2 border-slate-800">
         {/* BBS Header Banner (CivilDigital / IS 2502 Standard) */}
         <div className="w-full bg-slate-300 border-b-2 border-slate-800 py-1.5 text-center font-bold text-sm text-slate-900 uppercase tracking-wide">
-          Bar Bending Schedule (IS:2502 / SP:34 Detailing)
+          Bar Bending Schedule (IS:2502 / SP:34 Standard Detailing)
         </div>
 
         {/* Project Meta Details Header Grid */}
@@ -422,16 +602,36 @@ export const BbsTableView: React.FC = () => {
           <thead>
             {/* Multi-Level Table Header */}
             <tr className="bg-slate-200 text-slate-900 border-b-2 border-slate-800 text-center font-bold">
-              <th rowSpan={2} className="border-r border-slate-400 p-2 w-12">Bar no.</th>
-              <th rowSpan={2} className="border-r border-slate-400 p-2 w-28 text-left">Element Tag</th>
-              <th rowSpan={2} className="border-r border-slate-400 p-2 w-36 text-center">Bar Shape</th>
-              <th rowSpan={2} className="border-r border-slate-400 p-2 w-16">a ({unit})</th>
-              <th rowSpan={2} className="border-r border-slate-400 p-2 w-20">b ({unit})</th>
-              <th rowSpan={2} className="border-r border-slate-400 p-2 w-16">c ({unit})</th>
-              <th rowSpan={2} className="border-r border-slate-400 p-2 w-14">Dia (mm)</th>
-              <th rowSpan={2} className="border-r border-slate-400 p-2 w-16">Spacing (mm)</th>
-              <th rowSpan={2} className="border-r border-slate-400 p-2 w-20">Cutting Length ({unit})</th>
-              <th rowSpan={2} className="border-r-2 border-slate-800 p-2 w-12">no's</th>
+              <th rowSpan={2} className="border-r border-slate-400 p-2 w-12">
+                Bar no.
+              </th>
+              <th rowSpan={2} className="border-r border-slate-400 p-2 w-32 text-left">
+                Element Tag
+              </th>
+              <th rowSpan={2} className="border-r border-slate-400 p-2 w-36 text-center">
+                Bar Shape
+              </th>
+              <th rowSpan={2} className="border-r border-slate-400 p-2 w-16">
+                a ({unit})
+              </th>
+              <th rowSpan={2} className="border-r border-slate-400 p-2 w-20">
+                b ({unit})
+              </th>
+              <th rowSpan={2} className="border-r border-slate-400 p-2 w-16">
+                c ({unit})
+              </th>
+              <th rowSpan={2} className="border-r border-slate-400 p-2 w-14">
+                Dia (mm)
+              </th>
+              <th rowSpan={2} className="border-r border-slate-400 p-2 w-16">
+                Spacing (mm)
+              </th>
+              <th rowSpan={2} className="border-r border-slate-400 p-2 w-20">
+                Cutting Length ({unit})
+              </th>
+              <th rowSpan={2} className="border-r-2 border-slate-800 p-2 w-12">
+                no's
+              </th>
               <th colSpan={8} className="border-b border-slate-400 p-1 text-center bg-slate-300">
                 Length of Bar ({unit})
               </th>
@@ -446,69 +646,149 @@ export const BbsTableView: React.FC = () => {
           </thead>
 
           <tbody className="divide-y divide-slate-300">
-            {filteredItems.map((item, idx) => {
-              const unitMultiplier = unit === 'mm' ? 1000 : 1;
-              const formattedLen = (item.totalLengthM * unitMultiplier).toFixed(unit === 'mm' ? 0 : 1);
+            {groups.map((grp) => {
+              const isCollapsed = collapsedGroups.has(grp.tag);
 
               return (
-                <tr key={item.barNo} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70 hover:bg-sky-50/50'}>
-                  <td className="border-r border-slate-300 p-2 text-center font-bold text-slate-700">
-                    {item.barNo}
-                  </td>
-                  <td className="border-r border-slate-300 p-2 text-left font-bold text-slate-900">
-                    <div className="text-[11px] text-slate-900">{item.elementTag}</div>
-                    <div className="text-[9.5px] text-slate-500 font-sans">{item.barDescription}</div>
-                  </td>
-                  <td className="border-r border-slate-300 p-1 text-center bg-slate-50/50">
-                    <div className="flex justify-center">
-                      <BbsShapeSvg
-                        shapeType={item.shapeType}
-                        a={item.a}
-                        b={item.b}
-                        c={item.c}
-                        unit={unit}
-                        width={90}
-                        height={46}
-                      />
-                    </div>
-                  </td>
-                  <td className="border-r border-slate-300 p-2 text-center text-slate-700 font-medium">
-                    {formatDim(item.a)}
-                  </td>
-                  <td className="border-r border-slate-300 p-2 text-center text-slate-700 font-medium">
-                    {formatDim(item.b)}
-                  </td>
-                  <td className="border-r border-slate-300 p-2 text-center text-slate-700 font-medium">
-                    {formatDim(item.c)}
-                  </td>
-                  <td className="border-r border-slate-300 p-2 text-center font-bold text-blue-700">
-                    {item.diameter}
-                  </td>
-                  <td className="border-r border-slate-300 p-2 text-center text-blue-700">
-                    {item.spacing || '-'}
-                  </td>
-                  <td className="border-r border-slate-300 p-2 text-center font-bold text-slate-900">
-                    {formatCutLen(item.cuttingLengthM)}
-                  </td>
-                  <td className="border-r-2 border-slate-800 p-2 text-center font-bold text-blue-700">
-                    {item.totalCount}
-                  </td>
+                <React.Fragment key={grp.tag}>
+                  {/* Group Header Banner Row */}
+                  {groupBy !== 'FLAT' && (
+                    <tr className="bg-slate-800 text-white font-sans text-xs border-b border-slate-700 hover:bg-slate-750 transition-colors">
+                      <td colSpan={10 + BbsEngine.STANDARD_DIAMETERS.length} className="p-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <button
+                              type="button"
+                              onClick={() => toggleGroup(grp.tag)}
+                              className="p-1 hover:bg-slate-700 rounded text-slate-300 transition-colors"
+                              title={isCollapsed ? 'Expand Group' : 'Collapse Group'}
+                            >
+                              {isCollapsed ? (
+                                <ChevronRight className="w-4 h-4 text-sky-400" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4 text-sky-400" />
+                              )}
+                            </button>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold tracking-wide uppercase ${
+                                grp.category === 'PILE_CAP'
+                                  ? 'bg-indigo-600 text-white'
+                                  : grp.category === 'COLUMN'
+                                  ? 'bg-emerald-600 text-white'
+                                  : grp.category === 'BEAM'
+                                  ? 'bg-amber-600 text-white'
+                                  : 'bg-purple-600 text-white'
+                              }`}
+                            >
+                              {grp.category}
+                            </span>
+                            <span className="font-bold text-sm text-white tracking-tight">{grp.tag}</span>
+                            <span className="text-[11px] text-slate-400 font-mono">
+                              ({grp.items.length} {grp.items.length === 1 ? 'bar type' : 'bar types'})
+                            </span>
+                          </div>
 
-                  {/* Length by Diameter Columns */}
-                  {BbsEngine.STANDARD_DIAMETERS.map((dia) => {
-                    const isMatching = item.diameter === dia;
-                    return (
-                      <td
-                        key={`len_${item.barNo}_${dia}`}
-                        className={`border-r border-slate-300 p-2 text-center ${
-                          isMatching ? 'text-red-600 font-bold bg-red-50/40' : 'text-slate-300'
-                        }`}
-                      >
-                        {isMatching ? formattedLen : ''}
+                          <div className="flex items-center gap-4 text-[11px] font-mono">
+                            <span className="text-slate-300">
+                              Len: <strong className="text-sky-300">{grp.totalLengthM.toFixed(1)} m</strong>
+                            </span>
+                            <span className="text-slate-300">
+                              Weight: <strong className="text-emerald-300">{grp.totalWeightKg.toFixed(1)} kg</strong>
+                            </span>
+                            <span className="text-slate-400">
+                              ({(grp.totalWeightKg / 1000).toFixed(3)} MT)
+                            </span>
+                          </div>
+                        </div>
                       </td>
-                    );
-                  })}
-                </tr>
+                    </tr>
+                  )}
+
+                  {/* Group Items */}
+                  {!isCollapsed &&
+                    grp.items.map((item, idx) => {
+                      const unitMultiplier = unit === 'mm' ? 1000 : 1;
+                      const formattedLen = (item.totalLengthM * unitMultiplier).toFixed(unit === 'mm' ? 0 : 1);
+
+                      return (
+                        <tr key={item.barNo} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70 hover:bg-sky-50/50'}>
+                          <td className="border-r border-slate-300 p-2 text-center font-bold text-slate-700">
+                            {item.barNo}
+                          </td>
+                          <td className="border-r border-slate-300 p-2 text-left font-bold text-slate-900">
+                            <div className="text-[11px] text-slate-900">{item.elementTag}</div>
+                            <div className="text-[9.5px] text-slate-500 font-sans">{item.barDescription}</div>
+                          </td>
+                          <td className="border-r border-slate-300 p-1 text-center bg-slate-50/50">
+                            <div className="flex justify-center">
+                              <BbsShapeSvg
+                                shapeType={item.shapeType}
+                                a={item.a}
+                                b={item.b}
+                                c={item.c}
+                                unit={unit}
+                                width={90}
+                                height={46}
+                              />
+                            </div>
+                          </td>
+                          <td className="border-r border-slate-300 p-2 text-center text-slate-700 font-medium">
+                            {formatDim(item.a)}
+                          </td>
+                          <td className="border-r border-slate-300 p-2 text-center text-slate-700 font-medium">
+                            {formatDim(item.b)}
+                          </td>
+                          <td className="border-r border-slate-300 p-2 text-center text-slate-700 font-medium">
+                            {formatDim(item.c)}
+                          </td>
+                          <td className="border-r border-slate-300 p-2 text-center font-bold text-blue-700">
+                            {item.diameter}
+                          </td>
+                          <td className="border-r border-slate-300 p-2 text-center text-blue-700">
+                            {item.spacing || '-'}
+                          </td>
+                          <td className="border-r border-slate-300 p-2 text-center font-bold text-slate-900">
+                            {formatCutLen(item.cuttingLengthM)}
+                          </td>
+                          <td className="border-r-2 border-slate-800 p-2 text-center font-bold text-blue-700">
+                            {item.totalCount}
+                          </td>
+
+                          {/* Length by Diameter Columns */}
+                          {BbsEngine.STANDARD_DIAMETERS.map((dia) => {
+                            const isMatching = item.diameter === dia;
+                            return (
+                              <td
+                                key={`len_${item.barNo}_${dia}`}
+                                className={`border-r border-slate-300 p-2 text-center ${
+                                  isMatching ? 'text-red-600 font-bold bg-red-50/40' : 'text-slate-300'
+                                }`}
+                              >
+                                {isMatching ? formattedLen : ''}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+
+                  {/* Group Subtotal Row */}
+                  {!isCollapsed && groupBy !== 'FLAT' && (
+                    <tr className="bg-sky-50/80 border-b-2 border-slate-400 font-bold text-xs">
+                      <td colSpan={10} className="border-r-2 border-slate-800 p-2 text-right uppercase tracking-wider text-slate-800">
+                        Subtotal [{grp.tag}] ({grp.totalWeightKg.toFixed(1)} kg):
+                      </td>
+                      {BbsEngine.STANDARD_DIAMETERS.map((dia) => {
+                        const len = (grp.lengthByDia[dia] || 0) * (unit === 'mm' ? 1000 : 1);
+                        return (
+                          <td key={`subtot_${grp.tag}_${dia}`} className="border-r border-slate-400 p-2 text-center text-sky-800 font-bold bg-sky-100/50">
+                            {len > 0 ? (unit === 'mm' ? Math.round(len).toLocaleString() : len.toFixed(1)) : '-'}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  )}
+                </React.Fragment>
               );
             })}
           </tbody>
