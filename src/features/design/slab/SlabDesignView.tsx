@@ -238,7 +238,7 @@ export const SlabDesignView: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col w-full space-y-4 font-mono select-none">
+    <div className="flex flex-col h-full w-full p-4 space-y-4 font-mono overflow-y-auto bg-slate-950 text-slate-100 select-none">
       {/* Workspace Action Banner */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900 p-4 rounded-lg border border-slate-800 shadow-xl">
         <div className="flex items-center gap-3">
