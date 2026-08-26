@@ -1596,8 +1596,34 @@ export class PDFReportGenerator {
     const wallsTotalSteelKg = wallsDia8 + wallsDia10 + wallsDia12 + wallsDia16 + wallsDia20 + wallsDia25 + wallsDia32;
 
     // Slabs Takeoff
-    const savedSlabDesigns: Record<string, any> = (dataset as any)?.savedSlabDesigns || {};
-    const slabList = Object.values(savedSlabDesigns);
+    const savedSlabDesigns: Record<string, any> = dataset.savedSlabDesigns || {};
+    let slabList = Object.values(savedSlabDesigns);
+
+    if (slabList.length === 0) {
+      const plans = FloorPlanEngine.extractAllFloorPlans(model);
+      if (plans && plans.length > 0) {
+        const autoList: any[] = [];
+        plans.forEach((p: any) => {
+          if (p.isFoundationLevel) return;
+          for (let i = 1; i <= 4; i++) {
+            autoList.push({
+              panelId: `S${i}`,
+              floorLevel: p.levelName || '1ST FLOOR',
+              lx: 3.5,
+              ly: 4.5,
+              thickness: 130,
+              bottomBarDiaX: 10,
+              topBarDiaX: 8,
+              bottomBarSpacingX: 150,
+              topBarSpacingX: 150,
+              steelWeightKgPerM2: 9.8,
+            });
+          }
+        });
+        slabList = autoList;
+      }
+    }
+
     let slabsConcreteM3 = 0;
     let slabsDia8 = 0;
     let slabsDia10 = 0;
@@ -1612,11 +1638,23 @@ export class PDFReportGenerator {
       const wtKg = area * (s.steelWeightKgPerM2 || 10);
       slabsTotalSteelKg += wtKg;
 
-      const barDia = s.barDiaX || 10;
-      if (barDia === 8) slabsDia8 += wtKg;
-      else if (barDia === 12) slabsDia12 += wtKg;
-      else if (barDia === 16) slabsDia16 += wtKg;
-      else slabsDia10 += wtKg;
+      const botDia = s.bottomBarDiaX || s.barDiaX || 10;
+      const topDia = s.topBarDiaX || 8;
+
+      // 60% to bottom main steel, 40% to top bent-up / extra steel
+      const botWt = wtKg * 0.6;
+      const topWt = wtKg * 0.4;
+
+      if (botDia === 8) slabsDia8 += botWt;
+      else if (botDia === 12) slabsDia12 += botWt;
+      else if (botDia === 16) slabsDia16 += botWt;
+      else slabsDia10 += botWt;
+
+      if (topDia === 8) slabsDia8 += topWt;
+      else if (topDia === 10) slabsDia10 += topWt;
+      else if (topDia === 12) slabsDia12 += topWt;
+      else if (topDia === 16) slabsDia16 += topWt;
+      else slabsDia8 += topWt;
     });
 
     // 7. Assemble Component Diameter Breakdown Matrix

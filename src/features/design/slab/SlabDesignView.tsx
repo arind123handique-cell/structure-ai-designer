@@ -182,13 +182,42 @@ export const SlabDesignView: React.FC = () => {
     return panels;
   }, [activeModel, fck, fy]);
 
-  // Auto-populate from STAAD model plates on initial load if present
+  // Auto-populate from saved project slab designs or STAAD model plates on initial load
   useEffect(() => {
-    if (modelSlabPanels.length > 0) {
+    if (activeProject?.savedSlabDesigns && Object.keys(activeProject.savedSlabDesigns).length > 0) {
+      const savedList = Object.values(activeProject.savedSlabDesigns);
+      const loadedPanels: SlabDesignInput[] = savedList.map((out: any) => ({
+        panelId: out.panelId,
+        floorLevel: out.floorLevel,
+        lx: out.lx,
+        ly: out.ly,
+        thickness: out.thickness,
+        boundaryCondition: out.boundaryCondition,
+        liveLoad: out.liveLoad || 2.0,
+        bottomBarDia: out.bottomBarDiaX || 10,
+        topBarDia: out.topBarDiaX || 8,
+        manualOverride: out.isManualOverride
+          ? {
+              isManual: true,
+              bottomBarDiaX: out.bottomBarDiaX,
+              bottomBarSpacingX: out.bottomBarSpacingX,
+              bottomBarDiaY: out.bottomBarDiaY,
+              bottomBarSpacingY: out.bottomBarSpacingY,
+              topBarDiaX: out.topBarDiaX,
+              topBarSpacingX: out.topBarSpacingX,
+              topBarDiaY: out.topBarDiaY,
+              topBarSpacingY: out.topBarSpacingY,
+              thickness: out.thickness,
+            }
+          : undefined,
+      }));
+      setPanelsInput(loadedPanels);
+      if (loadedPanels.length > 0) setSelectedPanelId(loadedPanels[0].panelId);
+    } else if (modelSlabPanels.length > 0) {
       setPanelsInput(modelSlabPanels);
-      setSelectedPanelId(modelSlabPanels[0].panelId);
+      if (modelSlabPanels[0]) setSelectedPanelId(modelSlabPanels[0].panelId);
     }
-  }, [modelSlabPanels]);
+  }, [activeProject?.savedSlabDesigns, modelSlabPanels]);
 
   // Initialize from project design settings
   useEffect(() => {
