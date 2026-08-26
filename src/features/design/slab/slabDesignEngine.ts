@@ -14,14 +14,27 @@ export type SlabBoundaryCondition =
   | 'ONE_WAY_SIMPLY_SUPPORTED'
   | 'CANTILEVER';
 
+export interface SlabManualOverride {
+  isManual: boolean;
+  bottomBarDiaX?: number; // e.g. 10mm
+  bottomBarSpacingX?: number; // e.g. 100mm, 125mm, 150mm
+  bottomBarDiaY?: number;
+  bottomBarSpacingY?: number;
+  topBarDiaX?: number; // e.g. 8mm
+  topBarSpacingX?: number;
+  topBarDiaY?: number;
+  topBarSpacingY?: number;
+  thickness?: number;
+}
+
 export interface SlabDesignInput {
   panelId: string;
-  floorLevel: string; // e.g. "1ST FLOOR"
+  floorLevel?: string; // e.g. "1ST FLOOR"
   lx: number; // Short span in meters (e.g. 3.5)
   ly: number; // Long span in meters (e.g. 4.5)
   thickness?: number; // Proposed thickness in mm (default: auto 125-150)
-  fck: number; // Concrete Grade N/mm2 (e.g. 25)
-  fy: number; // Steel Grade N/mm2 (e.g. 500)
+  fck?: number; // Concrete Grade N/mm2 (e.g. 25)
+  fy?: number; // Steel Grade N/mm2 (e.g. 500)
   clearCover?: number; // Clear cover in mm (default: 20)
   liveLoad: number; // Live load in kN/m2 (e.g. 2.0, 3.0)
   floorFinishLoad?: number; // Floor finish load in kN/m2 (default: 1.0)
@@ -32,6 +45,7 @@ export interface SlabDesignInput {
   bottomBarDia?: number; // Bottom main bar diameter in mm (default: 10)
   distributionBarDia?: number; // Distribution bar diameter in mm (default: 8)
   permittedBarSizes?: number[]; // Allowed rebar sizes e.g. [8, 10, 12]
+  manualOverride?: SlabManualOverride;
 }
 
 export interface SlabDesignOutput {
@@ -48,6 +62,9 @@ export interface SlabDesignOutput {
   deadLoad: number; // gk in kN/m2
   liveLoad: number; // qk in kN/m2
   totalFactoredLoad: number; // wu in kN/m2
+
+  isManualOverride?: boolean;
+  manualAstCheck?: 'PASS' | 'FAIL';
 
   // Design Moments (kNm/m)
   Mux_pos: number;
@@ -186,11 +203,11 @@ export class SlabDesignEngine {
   public static design(input: SlabDesignInput): SlabDesignOutput {
     const {
       panelId,
-      floorLevel,
+      floorLevel = 'GROUND FLOOR SLAB',
       lx,
       ly,
-      fck,
-      fy,
+      fck = 25,
+      fy = 500,
       liveLoad,
       floorFinishLoad = 1.0,
       partitionLoad = 1.0,
@@ -340,14 +357,29 @@ export class SlabDesignEngine {
     }
 
     // Callout Strings
-    const botRebarXCallout = `T${bottomBarDiaX} @ ${bottomBarSpacingX} mm c/c (Main Bottom Short Way — Ast prov: ${astProvX} mm²/m)`;
-    const botRebarYCallout = `T${bottomBarDiaY} @ ${bottomBarSpacingY} mm c/c (Main Bottom Long Way — Ast prov: ${astProvY} mm²/m)`;
-    const topRebarXCallout = `T${topBarDiaX} @ ${topBarSpacingX} mm c/c (Top Support Extra / Bent-Up @ 0.25L — Crank ht: ${crankLengthMm}mm)`;
-    const topRebarYCallout = `T${topBarDiaY} @ ${topBarSpacingY} mm c/c (Top Support Extra / Bent-Up @ 0.25L — Crank ht: ${crankLengthMm}mm)`;
+    const isManualOverride = !!input.manualOverride?.isManual;
+    const finalBotDiaX = isManualOverride && input.manualOverride?.bottomBarDiaX ? input.manualOverride.bottomBarDiaX : bottomBarDiaX;
+    const finalBotSpacingX = isManualOverride && input.manualOverride?.bottomBarSpacingX ? input.manualOverride.bottomBarSpacingX : bottomBarSpacingX;
+    const finalTopDiaX = isManualOverride && input.manualOverride?.topBarDiaX ? input.manualOverride.topBarDiaX : topBarDiaX;
+    const finalTopSpacingX = isManualOverride && input.manualOverride?.topBarSpacingX ? input.manualOverride.topBarSpacingX : topBarSpacingX;
+
+    const finalBotDiaY = isManualOverride && input.manualOverride?.bottomBarDiaY ? input.manualOverride.bottomBarDiaY : bottomBarDiaY;
+    const finalBotSpacingY = isManualOverride && input.manualOverride?.bottomBarSpacingY ? input.manualOverride.bottomBarSpacingY : bottomBarSpacingY;
+    const finalTopDiaY = isManualOverride && input.manualOverride?.topBarDiaY ? input.manualOverride.topBarDiaY : topBarDiaY;
+    const finalTopSpacingY = isManualOverride && input.manualOverride?.topBarSpacingY ? input.manualOverride.topBarSpacingY : topBarSpacingY;
+
+    const astProvX_actual = Math.round(((Math.PI / 4) * finalBotDiaX * finalBotDiaX * 1000) / finalBotSpacingX);
+    const astProvY_actual = Math.round(((Math.PI / 4) * finalBotDiaY * finalBotDiaY * 1000) / finalBotSpacingY);
+    const manualAstCheck: 'PASS' | 'FAIL' = astProvX_actual >= astReqX && astProvY_actual >= astReqY ? 'PASS' : 'FAIL';
+
+    const botRebarXCallout = `T${finalBotDiaX} @ ${finalBotSpacingX} mm c/c (Main Bottom Short Way — Ast prov: ${astProvX_actual} mm²/m)`;
+    const botRebarYCallout = `T${finalBotDiaY} @ ${finalBotSpacingY} mm c/c (Main Bottom Long Way — Ast prov: ${astProvY_actual} mm²/m)`;
+    const topRebarXCallout = `T${finalTopDiaX} @ ${finalTopSpacingX} mm c/c (Top Support Extra / Bent-Up @ 0.25L — Crank ht: ${crankLengthMm}mm)`;
+    const topRebarYCallout = `T${finalTopDiaY} @ ${finalTopSpacingY} mm c/c (Top Support Extra / Bent-Up @ 0.25L — Crank ht: ${crankLengthMm}mm)`;
 
     // 5. Deflection Check (IS 456 Cl 23.2.1 & Fig. 4)
-    const ptProvided = (100 * astProvX) / (1000 * dx);
-    const fs = 0.58 * fy * (astReqX / astProvX);
+    const ptProvided = (100 * astProvX_actual) / (1000 * dx);
+    const fs = 0.58 * fy * (astReqX / astProvX_actual);
     // IS 456 Fig. 4 Modification Factor F1
     const F1 = Math.min(2.0, Math.max(1.0, Number((1.6 / (0.8 + fs / 580 + 0.05 * ptProvided)).toFixed(2))));
     const deflectionRatioLimit = Number((basicLdRatio * F1).toFixed(1));
@@ -379,21 +411,23 @@ export class SlabDesignEngine {
     const shearCheck: 'PASS' | 'FAIL' = shearStressTauV <= shearStrengthTauC ? 'PASS' : 'FAIL';
 
     // Serviceability Crack Width Check (IS 456 Cl 35.3.2 & Annex F)
-    const fsService = 0.58 * fy * (astReqX / Math.max(1, astProvX));
+    const fsService = 0.58 * fy * (astReqX / Math.max(1, astProvX_actual));
     const es = 200000; // N/mm2
     const epsilon_m = Math.max(0.0001, fsService / es);
-    const acr = Math.sqrt(Math.pow(barSpacingX / 2, 2) + Math.pow(clearCover + barDiaX / 2, 2));
+    const acr = Math.sqrt(Math.pow(finalBotSpacingX / 2, 2) + Math.pow(clearCover + finalBotDiaX / 2, 2));
     const crackWidthMm = Number(Math.min(0.30, Math.max(0.04, 3 * acr * epsilon_m)).toFixed(2));
     const crackWidthLimitMm = 0.30;
     const crackWidthCheck: 'PASS' | 'FAIL' = crackWidthMm <= crackWidthLimitMm ? 'PASS' : 'FAIL';
 
     // Overall Status
     const status: SlabDesignOutput['status'] =
-      deflectionCheck === 'PASS' && shearCheck === 'PASS' && crackWidthCheck === 'PASS' ? 'PASS' : 'FAIL';
+      deflectionCheck === 'PASS' && shearCheck === 'PASS' && crackWidthCheck === 'PASS' && (isManualOverride ? manualAstCheck === 'PASS' : true)
+        ? 'PASS'
+        : 'FAIL';
 
     // Steel Weight Calculation (kg/m2)
-    const weightX = (astProvX / 1e6) * 1 * 7850;
-    const weightY = (astProvY / 1e6) * 1 * 7850;
+    const weightX = (astProvX_actual / 1e6) * 1 * 7850;
+    const weightY = (astProvY_actual / 1e6) * 1 * 7850;
     const steelWeightKgPerM2 = Number((weightX + weightY).toFixed(2));
 
     // Detailed Calculation Report
@@ -517,6 +551,8 @@ export class SlabDesignEngine {
       deadLoad: Number(deadLoad.toFixed(2)),
       liveLoad,
       totalFactoredLoad,
+      isManualOverride,
+      manualAstCheck,
       Mux_pos,
       Mux_neg,
       Muy_pos,

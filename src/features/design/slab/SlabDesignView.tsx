@@ -6,6 +6,7 @@ import {
   SlabDesignInput,
   SlabDesignOutput,
   SlabBoundaryCondition,
+  SlabManualOverride,
 } from './slabDesignEngine';
 import {
   Layers,
@@ -24,6 +25,8 @@ import {
   Eye,
   EyeOff,
   Building,
+  Edit2,
+  RotateCcw,
 } from 'lucide-react';
 
 export const SlabDesignView: React.FC = () => {
@@ -103,6 +106,7 @@ export const SlabDesignView: React.FC = () => {
   const [topBarDia, setTopBarDia] = useState<number>(8);
   const [bottomBarDia, setBottomBarDia] = useState<number>(10);
   const [permittedBarSizes, setPermittedBarSizes] = useState<number[]>([8, 10, 12, 16]);
+  const [editingManualPanelId, setEditingManualPanelId] = useState<string | null>(null);
   const [activeFloorFilter, setActiveFloorFilter] = useState<string>('ALL');
 
   const availableFloorLevels = useMemo(() => {
@@ -251,6 +255,38 @@ export const SlabDesignView: React.FC = () => {
           const out = designedSlabs[id];
           const currentThk = p.thickness || out?.thickness || 130;
           return { ...p, thickness: currentThk + 15 };
+        }
+        return p;
+      })
+    );
+  };
+
+  // Manual Design Override Handlers
+  const handleUpdateManualOverride = (panelId: string, overrideData: Record<string, any>) => {
+    setPanelsInput((prev) =>
+      prev.map((p) => {
+        if (p.panelId === panelId) {
+          const current = p.manualOverride || { isManual: false };
+          return {
+            ...p,
+            manualOverride: {
+              ...current,
+              ...overrideData,
+              isManual: true,
+            },
+          };
+        }
+        return p;
+      })
+    );
+  };
+
+  const handleResetToAutoDesign = (panelId: string) => {
+    setPanelsInput((prev) =>
+      prev.map((p) => {
+        if (p.panelId === panelId) {
+          const { manualOverride, ...rest } = p;
+          return rest;
         }
         return p;
       })
@@ -943,15 +979,28 @@ export const SlabDesignView: React.FC = () => {
                         <td className="border-r border-slate-300 p-2 text-center">
                           <span
                             className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              out.status === 'PASS' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-red-100 text-red-800 border border-red-300'
+                              out.status === 'PASS'
+                                ? out.isManualOverride
+                                  ? 'bg-amber-100 text-amber-900 border border-amber-400 shadow-sm'
+                                  : 'bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-sm'
+                                : 'bg-red-100 text-red-800 border border-red-300 shadow-sm'
                             }`}
                           >
-                            {out.status}
+                            {out.isManualOverride ? `MANUAL ${out.status}` : out.status}
                           </span>
                         </td>
 
                         <td className="p-2 text-center">
                           <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => setEditingManualPanelId(panel.panelId)}
+                              className="px-2 py-0.5 bg-indigo-700 hover:bg-indigo-600 text-white rounded text-[10px] font-bold shadow transition-all flex items-center gap-1"
+                              title="Manually custom design rebar & spacing (Checked by IS 456 Code Engine)"
+                            >
+                              <Edit2 className="w-3 h-3 text-amber-300" />
+                              <span>Custom</span>
+                            </button>
+
                             {out.status === 'FAIL' && (
                               <button
                                 onClick={() => handleFixSinglePanel(panel.panelId)}
@@ -961,6 +1010,7 @@ export const SlabDesignView: React.FC = () => {
                                 Fix
                               </button>
                             )}
+
                             <button
                               onClick={() => setSelectedReportOutput(out)}
                               className="p-1 text-indigo-600 hover:bg-indigo-100 rounded"
@@ -1267,6 +1317,191 @@ export const SlabDesignView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Interactive Manual Slab Rebar Customizer Modal */}
+      {editingManualPanelId && (() => {
+        const panel = panelsInput.find((p) => p.panelId === editingManualPanelId);
+        const out = designedSlabs[editingManualPanelId];
+        if (!panel || !out) return null;
+        const curOverride = (panel.manualOverride || {}) as SlabManualOverride;
+
+        const curBotDiaX = curOverride.bottomBarDiaX || out.bottomBarDiaX || 10;
+        const curBotSpacingX = curOverride.bottomBarSpacingX || out.bottomBarSpacingX || 150;
+        const curTopDiaX = curOverride.topBarDiaX || out.topBarDiaX || 8;
+        const curTopSpacingX = curOverride.topBarSpacingX || out.topBarSpacingX || 150;
+        const curThk = curOverride.thickness || panel.thickness || out.thickness || 130;
+
+        return (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-lg w-full max-w-xl shadow-2xl overflow-hidden font-mono">
+              <div className="flex items-center justify-between p-4 bg-slate-950 border-b border-slate-800">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Edit2 className="w-4 h-4 text-amber-400" />
+                  CUSTOM REBAR &amp; SPACING DESIGN OVERRIDE — PANEL {panel.panelId}
+                </h3>
+                <button
+                  onClick={() => setEditingManualPanelId(null)}
+                  className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4 text-xs font-sans">
+                <div className="bg-slate-950 p-3 rounded border border-slate-800 flex items-center justify-between font-mono">
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Panel Dimensions &amp; Code Limit:</span>
+                    <strong className="text-white text-xs">{panel.lx}m × {panel.ly}m ({panel.floorLevel || 'L1'})</strong>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-slate-400 block text-[11px]">System Code Check:</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${out.status === 'PASS' ? 'bg-emerald-950 text-emerald-300 border border-emerald-700' : 'bg-red-950 text-red-300 border border-red-700'}`}>
+                      {out.isManualOverride ? `MANUAL ${out.status}` : out.status}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Bottom Main Steel */}
+                  <div className="bg-slate-950/80 p-3 rounded border border-amber-900/60 space-y-2">
+                    <label className="text-amber-400 font-bold block text-xs font-mono uppercase">
+                      Bottom Main Steel (X-Dir):
+                    </label>
+                    <div>
+                      <span className="text-slate-400 text-[11px] block mb-1">Bar Diameter:</span>
+                      <select
+                        value={curBotDiaX}
+                        onChange={(e) => handleUpdateManualOverride(panel.panelId, { bottomBarDiaX: Number(e.target.value) })}
+                        className="w-full bg-slate-900 border border-slate-700 text-amber-300 font-bold px-2 py-1.5 rounded focus:border-amber-400 text-xs font-mono"
+                      >
+                        <option value={8}>T8 (8mm)</option>
+                        <option value={10}>T10 (10mm)</option>
+                        <option value={12}>T12 (12mm)</option>
+                        <option value={16}>T16 (16mm)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 text-[11px] block mb-1">Spacing (c/c):</span>
+                      <select
+                        value={curBotSpacingX}
+                        onChange={(e) => handleUpdateManualOverride(panel.panelId, { bottomBarSpacingX: Number(e.target.value) })}
+                        className="w-full bg-slate-900 border border-slate-700 text-amber-300 font-bold px-2 py-1.5 rounded focus:border-amber-400 text-xs font-mono"
+                      >
+                        <option value={100}>100 mm c/c (Min Allowed Code Spacing)</option>
+                        <option value={125}>125 mm c/c</option>
+                        <option value={150}>150 mm c/c (Standard Code Spacing)</option>
+                        <option value={175}>175 mm c/c</option>
+                        <option value={200}>200 mm c/c</option>
+                        <option value={225}>225 mm c/c</option>
+                        <option value={250}>250 mm c/c</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Top Extra Steel */}
+                  <div className="bg-slate-950/80 p-3 rounded border border-sky-900/60 space-y-2">
+                    <label className="text-sky-400 font-bold block text-xs font-mono uppercase">
+                      Top Bent-Up / Extra Steel:
+                    </label>
+                    <div>
+                      <span className="text-slate-400 text-[11px] block mb-1">Bar Diameter:</span>
+                      <select
+                        value={curTopDiaX}
+                        onChange={(e) => handleUpdateManualOverride(panel.panelId, { topBarDiaX: Number(e.target.value) })}
+                        className="w-full bg-slate-900 border border-slate-700 text-sky-300 font-bold px-2 py-1.5 rounded focus:border-sky-400 text-xs font-mono"
+                      >
+                        <option value={8}>T8 (8mm)</option>
+                        <option value={10}>T10 (10mm)</option>
+                        <option value={12}>T12 (12mm)</option>
+                        <option value={16}>T16 (16mm)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 text-[11px] block mb-1">Spacing (c/c):</span>
+                      <select
+                        value={curTopSpacingX}
+                        onChange={(e) => handleUpdateManualOverride(panel.panelId, { topBarSpacingX: Number(e.target.value) })}
+                        className="w-full bg-slate-900 border border-slate-700 text-sky-300 font-bold px-2 py-1.5 rounded focus:border-sky-400 text-xs font-mono"
+                      >
+                        <option value={100}>100 mm c/c (Min Allowed Code Spacing)</option>
+                        <option value={125}>125 mm c/c</option>
+                        <option value={150}>150 mm c/c</option>
+                        <option value={175}>175 mm c/c</option>
+                        <option value={200}>200 mm c/c</option>
+                        <option value={225}>225 mm c/c</option>
+                        <option value={250}>250 mm c/c</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Slab Thickness Customizer */}
+                <div className="bg-slate-950/80 p-3 rounded border border-slate-800 flex items-center justify-between font-mono">
+                  <div>
+                    <label className="text-slate-300 font-bold text-xs block">Slab Depth / Thickness D (mm):</label>
+                    <span className="text-slate-400 text-[11px] font-sans">Required min depth: {Math.ceil((panel.lx * 1000) / 32)}mm</span>
+                  </div>
+                  <input
+                    type="number"
+                    step="5"
+                    value={curThk}
+                    onChange={(e) => handleUpdatePanel(panel.panelId, 'thickness', Number(e.target.value))}
+                    className="w-20 bg-slate-900 border border-slate-700 text-indigo-400 font-bold text-center px-2 py-1 rounded text-sm focus:border-indigo-500"
+                  />
+                </div>
+
+                {/* Instant IS 456 Realtime Verification Status */}
+                <div className="bg-slate-950 p-3 rounded border border-slate-800 space-y-1.5 font-mono text-[11px]">
+                  <div className="text-slate-400 font-bold border-b border-slate-800 pb-1 flex justify-between">
+                    <span>IS 456:2000 REALTIME CODE VERIFICATION:</span>
+                    <span className={out.status === 'PASS' ? 'text-emerald-400' : 'text-red-400'}>
+                      {out.status === 'PASS' ? '✓ ALL CODE CHECKS PASSED' : '✗ CODE CHECK FAILURE'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Provided Ast: <strong className="text-amber-300">{out.astProvX} mm²/m</strong></span>
+                    <span>Required Ast: <strong className="text-slate-300">{out.astReqX} mm²/m</strong></span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Deflection L/d Check:</span>
+                    <span className={out.deflectionCheck === 'PASS' ? 'text-emerald-400' : 'text-red-400'}>
+                      {out.deflectionRatioActual} ≤ {out.deflectionRatioLimit} ({out.deflectionCheck})
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Crack Width Check:</span>
+                    <span className={out.crackWidthCheck === 'PASS' ? 'text-emerald-400' : 'text-red-400'}>
+                      {out.crackWidthMm}mm ≤ 0.30mm ({out.crackWidthCheck})
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-950 border-t border-slate-800 flex justify-between items-center text-xs">
+                <button
+                  onClick={() => {
+                    handleResetToAutoDesign(panel.panelId);
+                    setEditingManualPanelId(null);
+                  }}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-bold flex items-center gap-1.5"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset to Auto Design</span>
+                </button>
+
+                <button
+                  onClick={() => setEditingManualPanelId(null)}
+                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-bold shadow"
+                >
+                  Apply &amp; Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
