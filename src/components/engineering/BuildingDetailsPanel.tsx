@@ -313,6 +313,43 @@ export const BuildingDetailsPanel: React.FC = () => {
         </div>
       </div>
 
+      {/* Per-Floor Centerline Quick Reference Cards */}
+      <div className="bg-indigo-950/30 p-4 rounded-lg border border-indigo-800/60 shadow-xl space-y-3 font-mono">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-bold text-indigo-300 flex items-center gap-2">
+            <Ruler className="w-4 h-4 text-indigo-400 animate-pulse" />
+            INDIVIDUAL FLOOR ELEVATION CENTERLINE LENGTHS (0.0m, 3.2m, 6.4m, 9.6m, 12.8m, ROOF)
+          </h3>
+          <span className="text-[11px] text-indigo-400 font-semibold">
+            Separately Computed per Elevation
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          {floorCenterlineData.map((f, idx) => (
+            <div
+              key={`card_cl_${idx}`}
+              className="bg-slate-900 p-3 rounded-lg border border-indigo-900/60 shadow flex flex-col justify-between hover:border-indigo-500 transition-all"
+            >
+              <div className="text-[11px] font-bold text-white truncate" title={f.levelName}>
+                {f.levelName.split(' (')[0]}
+              </div>
+              <div className="mt-1.5">
+                <div className="text-lg font-bold text-indigo-300">
+                  {f.totalCenterlineM} m
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">
+                  Beam CL: <span className="text-slate-200 font-bold">{f.beamCenterlineM}m</span>
+                </div>
+                <div className="text-[10px] text-slate-400">
+                  Wall CL: <span className="text-slate-200 font-bold">{f.wallCenterlineM}m</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Main Floor-by-Floor Centerline Breakdown Table */}
       <div className="bg-slate-900 rounded-lg border border-slate-800 p-4 shadow-xl space-y-3">
         <div className="flex items-center justify-between">

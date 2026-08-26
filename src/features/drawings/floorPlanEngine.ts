@@ -309,18 +309,17 @@ export class FloorPlanEngine {
       let levelName = '';
       let sheetNumber = '';
 
+      const ordinals = ['Ground Plinth', 'First Floor', 'Second Floor', 'Third Floor', 'Fourth Floor', 'Fifth Floor', 'Sixth Floor'];
+      const ordName = ordinals[index] || `${index}th Floor`;
+
       if (isFoundation) {
-        levelName = `FOUNDATION & PILE CAPS LAYOUT PLAN (EL. ${elevY.toFixed(3)} m)`;
+        levelName = `0.0m Ground Plinth Level (EL. ${elevY.toFixed(3)} m)`;
         sheetNumber = 'STR-100';
-      } else if (index === 1) {
-        levelName = `1ST FLOOR STRUCTURAL FRAMING PLAN (EL. +${elevY.toFixed(3)} m)`;
-        sheetNumber = `STR-10${index}`;
-      } else if (index === yCoordinates.length - 1) {
-        levelName = `ROOF & TERRACE FRAMING PLAN (EL. +${elevY.toFixed(3)} m)`;
+      } else if (index === yCoordinates.length - 1 && index > 1) {
+        levelName = `${elevY.toFixed(1)}m Roof Level (EL. +${elevY.toFixed(3)} m)`;
         sheetNumber = `STR-10${index}`;
       } else {
-        const floorNum = index;
-        levelName = `${floorNum}${floorNum === 2 ? 'ND' : floorNum === 3 ? 'RD' : 'TH'} FLOOR STRUCTURAL FRAMING PLAN (EL. +${elevY.toFixed(3)} m)`;
+        levelName = `${elevY.toFixed(1)}m ${ordName} Level (EL. +${elevY.toFixed(3)} m)`;
         sheetNumber = `STR-10${index}`;
       }
 
