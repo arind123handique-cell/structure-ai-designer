@@ -1,6 +1,7 @@
 import React from 'react';
 import { DetailedCalculationReport } from './types';
-import { X, Printer, CheckCircle2, AlertTriangle, XCircle, FileText, Compass, Layers } from 'lucide-react';
+import { CalculationPdfService } from './calculationPdfService';
+import { X, Printer, Download, CheckCircle2, AlertTriangle, XCircle, FileText, Compass, Layers } from 'lucide-react';
 
 interface CalculationModalProps {
   report: DetailedCalculationReport | null;
@@ -15,6 +16,10 @@ export const CalculationModal: React.FC<CalculationModalProps> = ({ report, onCl
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleDownloadPdf = () => {
+    CalculationPdfService.exportSingleCalculationPdf(report);
   };
 
   return (
@@ -41,6 +46,14 @@ export const CalculationModal: React.FC<CalculationModalProps> = ({ report, onCl
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownloadPdf}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-white bg-indigo-700 hover:bg-indigo-800 rounded transition-colors shadow-2xs font-bold"
+              title="Download direct vector A4 PDF of this calculation sheet"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download PDF
+            </button>
             <button
               onClick={handlePrint}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-slate-700 bg-white hover:bg-slate-100 border border-ui-border rounded transition-colors shadow-sm"

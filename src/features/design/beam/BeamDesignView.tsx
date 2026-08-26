@@ -16,6 +16,7 @@ import {
 import { BeamAutoDesignModal } from './BeamAutoDesignModal';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
 import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
+import { CalculationPdfService } from '@/features/calculations/calculationPdfService';
 import { Member3D } from '@/features/model/types';
 import {
   Play,
@@ -822,7 +823,7 @@ export const BeamDesignView: React.FC = () => {
         </button>
         <button
           type="button"
-          onClick={() => { setShowBanner(false); setShowRebar(false); setShowFloors(false); setShowAudit(false); }}
+          onClick={() => { setShowBanner(false); setShowRebar(false); setShowFloors(false); setShowAudit(false); setShowFilters(false); setShowTable(false); }}
           className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
         >
           <EyeOff className="w-3 h-3" /> Hide All
@@ -844,7 +845,7 @@ export const BeamDesignView: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {/* ⚡ 1-Click Auto-Design All Beams Button */}
             <button
               onClick={() => handleRunAutoDesign(allBeams)}
@@ -868,13 +869,28 @@ export const BeamDesignView: React.FC = () => {
             )}
 
             {designedBeams.size > 0 && (
-              <button
-                onClick={handleExport}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-slate-700 bg-white hover:bg-slate-50 border border-ui-border rounded transition-colors shadow-sm"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Export Floor CSV
-              </button>
+              <>
+                <button
+                  onClick={() => {
+                    if (activeModel && activeProject) {
+                      CalculationPdfService.exportBeamsCalculationsPdf(activeModel, activeProject);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded transition-colors shadow-2xs font-semibold"
+                  title="Export Detailed Step-by-Step Beam Calculations PDF (IS 456 & IS 13920)"
+                >
+                  <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                  Calculations PDF
+                </button>
+
+                <button
+                  onClick={handleExport}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-slate-700 bg-white hover:bg-slate-50 border border-ui-border rounded transition-colors shadow-sm"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Export Floor CSV
+                </button>
+              </>
             )}
 
             <button

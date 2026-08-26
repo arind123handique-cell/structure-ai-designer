@@ -2,8 +2,9 @@ import React, { useMemo } from 'react';
 import { useProjectStore } from '@/features/projects/projectStore';
 import { ExcelWorkbookExporter } from './excelExport';
 import { PDFReportGenerator } from './pdfReportGenerator';
+import { CalculationPdfService } from '@/features/calculations/calculationPdfService';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
-import { FileSpreadsheet, Printer, Download, CheckCircle2, Layers, Building, Box, ShieldCheck, FileText, Sparkles, Hash } from 'lucide-react';
+import { FileSpreadsheet, Printer, Download, CheckCircle2, Layers, Building, Box, ShieldCheck, FileText, Sparkles, Hash, BookOpen } from 'lucide-react';
 
 export const ReportsView: React.FC = () => {
   const { activeProject, activeModel } = useProjectStore();
@@ -49,6 +50,26 @@ export const ReportsView: React.FC = () => {
     PDFReportGenerator.exportA4PdfReport(dataset as any);
   };
 
+  const handleDownloadAllCalculationsPdf = () => {
+    CalculationPdfService.exportAllDesignCalculationsPdf(activeModel, activeProject);
+  };
+
+  const handleDownloadColumnsPdf = () => {
+    CalculationPdfService.exportColumnsCalculationsPdf(activeModel, activeProject);
+  };
+
+  const handleDownloadBeamsPdf = () => {
+    CalculationPdfService.exportBeamsCalculationsPdf(activeModel, activeProject);
+  };
+
+  const handleDownloadPilesPdf = () => {
+    CalculationPdfService.exportPilesCalculationsPdf(activeModel, activeProject);
+  };
+
+  const handleDownloadPileCapsPdf = () => {
+    CalculationPdfService.exportPileCapsCalculationsPdf(activeModel, activeProject);
+  };
+
   const handlePrintReport = () => {
     PDFReportGenerator.printProjectReport(dataset as any);
   };
@@ -68,14 +89,24 @@ export const ReportsView: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* 1-Tap Master Design Calculations PDF */}
+            <button
+              onClick={handleDownloadAllCalculationsPdf}
+              className="flex items-center gap-1.5 px-4 py-2 bg-indigo-700 hover:bg-indigo-800 text-white font-mono text-xs font-bold rounded shadow transition-all"
+              title="1-Tap Design Calculation PDF Export for ALL Columns, Beams, Piles & Pile Caps"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>1-Tap All Calculations PDF</span>
+            </button>
+
             <button
               onClick={handleDownloadA4Pdf}
               className="flex items-center gap-1.5 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-mono text-xs font-bold rounded shadow transition-all"
               title="Download direct vector A4 PDF with 2D drawings & calculations"
             >
               <Download className="w-3.5 h-3.5 text-amber-300" />
-              Download A4 PDF Report
+              Download A4 Summary PDF
             </button>
 
             <button
@@ -203,6 +234,125 @@ export const ReportsView: React.FC = () => {
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
+
+        {/* ONE-TAP STRUCTURAL DESIGN CALCULATION SHEETS */}
+        <div className="bg-surface-card rounded-md border border-indigo-200 shadow-sm overflow-hidden font-sans">
+          <div className="px-5 py-3.5 bg-gradient-to-r from-indigo-900 to-slate-900 border-b border-indigo-800 flex items-center justify-between text-white flex-wrap gap-3">
+            <div className="flex items-center gap-2.5">
+              <BookOpen className="w-5 h-5 text-amber-400 shrink-0" />
+              <div>
+                <h3 className="font-mono text-sm font-bold text-indigo-50">
+                  ONE-TAP STRUCTURAL DESIGN CALCULATION BOOKS (IS 456 / IS 13920 / IS 2911)
+                </h3>
+                <p className="text-[11px] text-indigo-200 font-sans mt-0.5">
+                  Export complete step-by-step mathematical engineering calculation sheets with formulas, substitutions, and clause verifications.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleDownloadAllCalculationsPdf}
+              className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono text-xs font-bold rounded shadow transition-all shrink-0"
+              title="1-Tap Export: All Columns, Beams, Piles & Pile Caps in a single master calculation book"
+            >
+              <Sparkles className="w-4 h-4 text-slate-950" />
+              <span>Download Master Calculation Book (All)</span>
+            </button>
+          </div>
+
+          <div className="p-5 grid grid-cols-1 md:grid-cols-4 gap-4 bg-slate-50/50">
+            {/* Columns Card */}
+            <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-2xs flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                    RCC COLUMNS
+                  </span>
+                  <span className="font-mono text-xs text-slate-500 font-semibold">{reportData.columnsSummary.length} Members</span>
+                </div>
+                <h4 className="font-bold text-xs text-slate-900 mt-2 font-mono">IS 456 &amp; IS 13920 Columns</h4>
+                <p className="text-[11px] text-slate-500 mt-1 font-sans">
+                  Biaxial interaction ratios, slenderness checks, Ast, and ductile confinement links.
+                </p>
+              </div>
+              <button
+                onClick={handleDownloadColumnsPdf}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 rounded font-mono text-xs font-semibold shadow-2xs transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Columns PDF
+              </button>
+            </div>
+
+            {/* Beams Card */}
+            <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-2xs flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold text-sky-800 bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
+                    RCC BEAMS
+                  </span>
+                  <span className="font-mono text-xs text-slate-500 font-semibold">{reportData.beamsSummary.length} Members</span>
+                </div>
+                <h4 className="font-bold text-xs text-slate-900 mt-2 font-mono">IS 456 &amp; IS 13920 Beams</h4>
+                <p className="text-[11px] text-slate-500 mt-1 font-sans">
+                  Support hogging &amp; midspan flexure, shear stress checks, and curtailment detailing.
+                </p>
+              </div>
+              <button
+                onClick={handleDownloadBeamsPdf}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white hover:bg-sky-50 text-sky-800 border border-sky-300 rounded font-mono text-xs font-semibold shadow-2xs transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Beams PDF
+              </button>
+            </div>
+
+            {/* Piles Card */}
+            <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-2xs flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold text-indigo-800 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                    RCC PILES
+                  </span>
+                  <span className="font-mono text-xs text-slate-500 font-semibold">{activeProject.projectPileTypes?.length || 1} Types</span>
+                </div>
+                <h4 className="font-bold text-xs text-slate-900 mt-2 font-mono">IS 2911:2010 Piles</h4>
+                <p className="text-[11px] text-slate-500 mt-1 font-sans">
+                  Structural axial capacity (Pc), safe working load (Qsafe), group efficiency, and spirals.
+                </p>
+              </div>
+              <button
+                onClick={handleDownloadPilesPdf}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white hover:bg-indigo-50 text-indigo-800 border border-indigo-300 rounded font-mono text-xs font-semibold shadow-2xs transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Piles PDF
+              </button>
+            </div>
+
+            {/* Pile Caps Card */}
+            <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-2xs flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                    PILE CAPS
+                  </span>
+                  <span className="font-mono text-xs text-slate-500 font-semibold">{activeModel.supports.size} Caps</span>
+                </div>
+                <h4 className="font-bold text-xs text-slate-900 mt-2 font-mono">IS 456 &amp; IS 2911 Caps</h4>
+                <p className="text-[11px] text-slate-500 mt-1 font-sans">
+                  Two-way punching shear, single pile loads, flexural bottom mesh &amp; shrinkage grid.
+                </p>
+              </div>
+              <button
+                onClick={handleDownloadPileCapsPdf}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white hover:bg-amber-50 text-amber-800 border border-amber-300 rounded font-mono text-xs font-semibold shadow-2xs transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Pile Caps PDF
+              </button>
+            </div>
           </div>
         </div>
 

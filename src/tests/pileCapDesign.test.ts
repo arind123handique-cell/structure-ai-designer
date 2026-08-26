@@ -342,6 +342,45 @@ describe('IS 456 & SP:34 Rigid Pile Cap Design Engine', () => {
     expect(cap4.capWidth).toBe(cap5.capWidth);
     expect(cap4.capDepth).toBe(cap5.capDepth);
   });
+
+  it('should correctly categorize and filter pile caps into distinct pile groups (3-pile, 4-pile, 5-pile, etc.)', () => {
+    const inputs = [
+      { supportNodeId: 101, factoredVerticalLoad: 900, customPileCount: 2, fck: 25, fy: 500 },
+      { supportNodeId: 102, factoredVerticalLoad: 1300, customPileCount: 3, fck: 25, fy: 500 },
+      { supportNodeId: 103, factoredVerticalLoad: 1800, customPileCount: 4, fck: 25, fy: 500 },
+      { supportNodeId: 104, factoredVerticalLoad: 2300, customPileCount: 5, fck: 25, fy: 500 },
+      { supportNodeId: 105, factoredVerticalLoad: 2700, customPileCount: 6, fck: 25, fy: 500 },
+      { supportNodeId: 106, factoredVerticalLoad: 1250, customPileCount: 3, fck: 25, fy: 500 },
+    ];
+
+    const designedMap = new Map<number, any>();
+    inputs.forEach((inp) => {
+      designedMap.set(inp.supportNodeId, PileCapDesignEngine.design(inp as any));
+    });
+
+    const allCaps = Array.from(designedMap.values());
+
+    // Filter by group
+    const filterByGroup = (group: 'ALL' | number) => {
+      if (group === 'ALL') return allCaps;
+      return allCaps.filter((c) => c.pileCount === group);
+    };
+
+    expect(filterByGroup('ALL').length).toBe(6);
+    expect(filterByGroup(2).length).toBe(1);
+    expect(filterByGroup(3).length).toBe(2);
+    expect(filterByGroup(4).length).toBe(1);
+    expect(filterByGroup(5).length).toBe(1);
+    expect(filterByGroup(6).length).toBe(1);
+
+    // Verify 3-pile cap items
+    const threePileCaps = filterByGroup(3);
+    expect(threePileCaps.every((c) => c.pileCount === 3 && c.capShape === 'TRIANGULAR')).toBe(true);
+
+    // Verify 5-pile cap items
+    const fivePileCaps = filterByGroup(5);
+    expect(fivePileCaps.every((c) => c.pileCount === 5 && c.capShape === 'PENTAGONAL')).toBe(true);
+  });
 });
 
 

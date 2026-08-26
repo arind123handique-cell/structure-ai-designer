@@ -9,6 +9,7 @@ import { IS2911PileGroup } from '@/features/codes/is2911/pileGroup';
 import { exportToCsv } from '@/utils/exportUtils';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
 import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
+import { CalculationPdfService } from '@/features/calculations/calculationPdfService';
 import {
   Building,
   FileText,
@@ -366,6 +367,19 @@ export const PileDesignView: React.FC = () => {
           >
             <Save className="w-3.5 h-3.5 text-blue-200" />
             <span>{isSaving ? 'Saving...' : '💾 Save Pile Types'}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              if (activeModel && activeProject) {
+                CalculationPdfService.exportPilesCalculationsPdf(activeModel, activeProject);
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded transition-colors shadow-2xs font-semibold"
+            title="Export Detailed Step-by-Step Pile Calculations PDF (IS 2911:2010)"
+          >
+            <FileText className="w-3.5 h-3.5 text-indigo-600" />
+            Calculations PDF
           </button>
 
           <button

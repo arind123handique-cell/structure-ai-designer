@@ -16,6 +16,7 @@ import { ColumnNumberingService } from '@/features/model/columnNumbering';
 import { PileDesignEngine, ProjectPileType } from '@/features/design/pile/pileDesignEngine';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
 import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
+import { CalculationPdfService } from '@/features/calculations/calculationPdfService';
 import {
   Play,
   Box,
@@ -36,6 +37,8 @@ import {
   EyeOff,
   ChevronDown,
   ChevronUp,
+  Sliders,
+  Filter,
 } from 'lucide-react';
 
 export const PileCapDesignView: React.FC = () => {
@@ -73,6 +76,11 @@ export const PileCapDesignView: React.FC = () => {
   const [isDesigning, setIsDesigning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
+
+  // Filter states
+  const [filterPileGroup, setFilterPileGroup] = useState<'ALL' | number | 'COMBINED'>('ALL');
+  const [filterStatus, setFilterStatus] = useState<'ALL' | 'PASS' | 'WARNING' | 'FAIL'>('ALL');
+  const [showFilters, setShowFilters] = useState(true);
 
   // Auto-design optimization state
   const [autoDesignSummary, setAutoDesignSummary] = useState<BatchPileCapOptimizationSummary | null>(null);
@@ -389,6 +397,75 @@ export const PileCapDesignView: React.FC = () => {
     return individual.sort((a, b) => a.colSlNo - b.colSlNo);
   }, [supportNodes, designedCaps, columnSupportMapping, availablePileTypes, supportPileAssignments, absorbedNodeMap, pileCountMarkMap, customPileCapOverrides]);
 
+  // Unique Pile Count Groups present in project (ensuring standard 2, 3, 4, 5, 6 plus any combined counts)
+  const pileGroupOptions = useMemo(() => {
+    const presentCounts = new Set<number>();
+    rows.forEach((r) => {
+      if (r.design?.pileCount) presentCounts.add(r.design.pileCount);
+    });
+    [2, 3, 4, 5, 6].forEach((c) => presentCounts.add(c));
+    combinedPileCaps.forEach((grp) => {
+      if (grp.pileCount) presentCounts.add(grp.pileCount);
+    });
+    return Array.from(presentCounts).sort((a, b) => a - b);
+  }, [rows, combinedPileCaps]);
+
+  // Filtered Standalone Pile Cap Rows
+  const filteredRows = useMemo(() => {
+    return rows.filter((r) => {
+      // Pile Group Filter
+      if (filterPileGroup === 'COMBINED') {
+        return false;
+      }
+      if (typeof filterPileGroup === 'number') {
+        if (r.design?.pileCount !== filterPileGroup) return false;
+      }
+
+      // Status Filter
+      if (filterStatus !== 'ALL') {
+        if (r.design?.status !== filterStatus) return false;
+      }
+
+      return true;
+    });
+  }, [rows, filterPileGroup, filterStatus]);
+
+  // Filtered Combined Pile Caps
+  const filteredCombinedPileCaps = useMemo(() => {
+    return combinedPileCaps.filter((grp) => {
+      // Pile Group Filter
+      if (typeof filterPileGroup === 'number') {
+        if (grp.pileCount !== filterPileGroup) return false;
+      }
+      // Status Filter
+      if (filterStatus !== 'ALL') {
+        const loadPerPileWork = Math.round(grp.totalWorkingLoad / grp.pileCount);
+        const isSafe = loadPerPileWork <= grp.safePileCapacity;
+        const status = isSafe ? 'PASS' : 'WARNING';
+        if (status !== filterStatus) return false;
+      }
+      return true;
+    });
+  }, [combinedPileCaps, filterPileGroup, filterStatus]);
+
+  // Dynamic Table Title with Active Filters
+  const tableTitle = useMemo(() => {
+    let title = 'RCC INDIVIDUAL & COMPONENT PILE CAP SCHEDULE';
+    if (filterPileGroup !== 'ALL') {
+      if (typeof filterPileGroup === 'number') {
+        title += ` — ${filterPileGroup}-PILE CAPS (${filteredRows.length} CAPS)`;
+      } else {
+        title += ` — COMBINED CAPS`;
+      }
+    } else {
+      title += ` (${filteredRows.length} CAPS)`;
+    }
+    if (filterStatus !== 'ALL') {
+      title += ` [STATUS: ${filterStatus}]`;
+    }
+    return title;
+  }, [filterPileGroup, filterStatus, filteredRows.length]);
+
   const columns: ColumnDef<any>[] = [
     {
       header: 'SELECT',
@@ -601,7 +678,7 @@ export const PileCapDesignView: React.FC = () => {
 
   const handleExport = () => {
     exportToCsv(
-      rows.map((r) => ({
+      filteredRows.map((r) => ({
         PileCapMark: r.mark,
         ColumnLabels: r.columnLabels.join(', '),
         SupportJoints: r.nodeIds.join(', '),
@@ -622,7 +699,7 @@ export const PileCapDesignView: React.FC = () => {
         Status: r.design?.status || 'PENDING',
         GroupCount: r.count,
       })),
-      'IS456_PileCap_Design_Schedule.csv'
+      `IS456_PileCap_${filterPileGroup !== 'ALL' ? `${filterPileGroup}Pile_` : ''}Design_Schedule.csv`
     );
   };
 
@@ -639,14 +716,14 @@ export const PileCapDesignView: React.FC = () => {
         <span className="text-[10px] font-mono text-slate-500 font-semibold uppercase tracking-wider">Panels:</span>
         <button
           type="button"
-          onClick={() => { setShowBanner(true); setShowRebar(true); setShowCombined(true); setShowTable(true); }}
+          onClick={() => { setShowBanner(true); setShowRebar(true); setShowFilters(true); setShowCombined(true); setShowTable(true); }}
           className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
         >
           <Eye className="w-3 h-3" /> Show All
         </button>
         <button
           type="button"
-          onClick={() => { setShowBanner(false); setShowRebar(false); setShowCombined(false); setShowTable(false); }}
+          onClick={() => { setShowBanner(false); setShowRebar(false); setShowFilters(false); setShowCombined(false); setShowTable(false); }}
           className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-[11px] font-mono shadow-2xs flex items-center gap-1"
         >
           <EyeOff className="w-3 h-3" /> Hide All
@@ -683,13 +760,28 @@ export const PileCapDesignView: React.FC = () => {
             </button>
 
             {designedCaps.size > 0 && (
-              <button
-                onClick={handleExport}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-slate-700 bg-white hover:bg-slate-50 border border-ui-border rounded transition-colors shadow-2xs"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Export CSV
-              </button>
+              <>
+                <button
+                  onClick={() => {
+                    if (activeModel && activeProject) {
+                      CalculationPdfService.exportPileCapsCalculationsPdf(activeModel, activeProject);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded transition-colors shadow-2xs font-semibold"
+                  title="Export Detailed Step-by-Step Pile Cap Calculations PDF (IS 456 & IS 2911)"
+                >
+                  <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                  Calculations PDF
+                </button>
+
+                <button
+                  onClick={handleExport}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-slate-700 bg-white hover:bg-slate-50 border border-ui-border rounded transition-colors shadow-2xs"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Export CSV
+                </button>
+              </>
             )}
 
             {/* Save Pile Cap Designs Button */}
@@ -772,17 +864,132 @@ export const PileCapDesignView: React.FC = () => {
         </div>
       )}
 
+      {/* Filter Panel: Filter by Pile Cap Group (2-Pile, 3-Pile, 4-Pile, 5-Pile, 6-Pile, Combined) & Status */}
+      <CollapsiblePanel
+        title="FILTER PILE CAPS (BY PILE GROUP & DESIGN STATUS)"
+        icon={<Sliders className="w-4 h-4 text-indigo-600" />}
+        storageKey="pilecap-filters"
+        open={showFilters}
+        onToggle={setShowFilters}
+        contentClassName="p-3.5 space-y-3"
+        variant="card"
+      >
+        {/* Row 1: Pile Cap Group Filter */}
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-mono text-slate-500 font-semibold uppercase flex items-center gap-1">
+              <Filter className="w-3.5 h-3.5 text-indigo-600" />
+              Pile Cap Group:
+            </span>
+            <button
+              onClick={() => setFilterPileGroup('ALL')}
+              className={`px-3 py-1 text-xs font-mono rounded border transition-all ${
+                filterPileGroup === 'ALL'
+                  ? 'bg-deep-navy text-white border-deep-navy shadow-xs font-bold'
+                  : 'bg-white text-slate-700 border-ui-border hover:bg-slate-50'
+              }`}
+            >
+              ALL ({rows.length + combinedPileCaps.length})
+            </button>
+            {pileGroupOptions.map((cnt) => {
+              const standaloneCount = rows.filter((r) => r.design?.pileCount === cnt).length;
+              const combCount = combinedPileCaps.filter((g) => g.pileCount === cnt).length;
+              const totalInGroup = standaloneCount + combCount;
+              return (
+                <button
+                  key={cnt}
+                  onClick={() => setFilterPileGroup(cnt)}
+                  className={`px-3 py-1 text-xs font-mono rounded border transition-all ${
+                    filterPileGroup === cnt
+                      ? 'bg-indigo-700 text-white border-indigo-700 shadow-xs font-bold'
+                      : totalInGroup > 0
+                      ? 'bg-white text-slate-700 border-ui-border hover:bg-slate-50'
+                      : 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {cnt}-Pile Cap ({totalInGroup})
+                </button>
+              );
+            })}
+            {combinedPileCaps.length > 0 && (
+              <button
+                onClick={() => setFilterPileGroup('COMBINED')}
+                className={`px-3 py-1 text-xs font-mono rounded border transition-all ${
+                  filterPileGroup === 'COMBINED'
+                    ? 'bg-rose-700 text-white border-rose-700 shadow-xs font-bold'
+                    : 'bg-white text-slate-700 border-ui-border hover:bg-slate-50'
+                }`}
+              >
+                Combined Mat ({combinedPileCaps.length})
+              </button>
+            )}
+          </div>
+
+          {(filterPileGroup !== 'ALL' || filterStatus !== 'ALL') && (
+            <button
+              onClick={() => {
+                setFilterPileGroup('ALL');
+                setFilterStatus('ALL');
+              }}
+              className="text-[11px] font-mono text-indigo-600 hover:text-indigo-800 flex items-center gap-1 hover:underline px-2.5 py-1 rounded border border-indigo-200 bg-indigo-50/60 transition-colors"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Reset Filters</span>
+            </button>
+          )}
+        </div>
+
+        {/* Row 2: Status Filter */}
+        <div className="flex items-center gap-1.5 flex-wrap pt-2.5 border-t border-slate-200/70">
+          <span className="text-xs font-mono text-slate-500 font-semibold uppercase">
+            Design Status:
+          </span>
+          {(['ALL', 'PASS', 'WARNING', 'FAIL'] as const).map((st) => {
+            const passCount = rows.filter((r) => r.design?.status === 'PASS').length;
+            const warnCount = rows.filter((r) => r.design?.status === 'WARNING').length;
+            const failCount = rows.filter((r) => r.design?.status === 'FAIL').length;
+            const count =
+              st === 'ALL'
+                ? rows.length
+                : st === 'PASS'
+                ? passCount
+                : st === 'WARNING'
+                ? warnCount
+                : failCount;
+
+            return (
+              <button
+                key={st}
+                onClick={() => setFilterStatus(st)}
+                className={`px-3 py-1 text-xs font-mono rounded border transition-all ${
+                  filterStatus === st
+                    ? st === 'PASS'
+                      ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs font-bold'
+                      : st === 'WARNING'
+                      ? 'bg-amber-700 text-white border-amber-700 shadow-xs font-bold'
+                      : st === 'FAIL'
+                      ? 'bg-red-700 text-white border-red-700 shadow-xs font-bold'
+                      : 'bg-deep-navy text-white border-deep-navy shadow-xs font-bold'
+                    : 'bg-white text-slate-700 border-ui-border hover:bg-slate-50'
+                }`}
+              >
+                {st} ({count})
+              </button>
+            );
+          })}
+        </div>
+      </CollapsiblePanel>
+
       {/* ========================================================================= */}
       {/* COMBINED & SHEAR WALL PILE CAPS SECTION (IS 2911 / IS 456)                */}
       {/* ========================================================================= */}
       {combinedPileCaps.length > 0 && (
         <CollapsiblePanel
-          title={`COMBINED & SHEAR WALL PILE CAPS (${combinedPileCaps.length} ACTIVE GROUPS) — IS 2911:2010 & IS 456:2000`}
+          title={`COMBINED & SHEAR WALL PILE CAPS (${filteredCombinedPileCaps.length} ACTIVE GROUPS) — IS 2911:2010 & IS 456:2000`}
           icon={<Layers className="w-4 h-4 text-rose-600" />}
           storageKey="pilecap-combined"
           open={showCombined}
           onToggle={setShowCombined}
-          contentClassName="p-4"
           headerActions={
             detachedCombinedCapNodeIds.length > 0 ? (
               <button
@@ -802,126 +1009,120 @@ export const PileCapDesignView: React.FC = () => {
           }
         >
           <div className="space-y-3 font-sans">
-            <div className="flex items-center justify-between hidden">
-              <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-rose-600" />
-                <h3 className="font-mono text-xs font-bold text-deep-navy">
-                  COMBINED &amp; SHEAR WALL PILE CAPS ({combinedPileCaps.length} ACTIVE GROUPS)
-                </h3>
-                <span className="text-[10px] font-mono text-slate-500">
-                  IS 2911:2010 &amp; IS 456:2000 Rigid Combined Foundation Schedules
-                </span>
+            {filteredCombinedPileCaps.length === 0 ? (
+              <div className="text-center py-6 bg-slate-50 rounded border border-dashed border-slate-300 font-mono text-xs text-slate-500">
+                No combined pile caps match the selected filter ({typeof filterPileGroup === 'number' ? `${filterPileGroup}-Pile` : filterPileGroup}, Status: {filterStatus}).
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {filteredCombinedPileCaps.map((grp) => {
+                  const isShearWall = grp.reason === 'SHEAR_WALL';
+                  const loadPerPileWork = Math.round(grp.totalWorkingLoad / grp.pileCount);
+                  const isSafeCapacity = loadPerPileWork <= grp.safePileCapacity;
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-            {combinedPileCaps.map((grp) => {
-              const isShearWall = grp.reason === 'SHEAR_WALL';
-              const loadPerPileWork = Math.round(grp.totalWorkingLoad / grp.pileCount);
-              const isSafeCapacity = loadPerPileWork <= grp.safePileCapacity;
-
-              return (
-                <div
-                  key={grp.groupId}
-                  className={`p-3.5 rounded-lg border flex flex-col justify-between font-mono text-xs space-y-2.5 transition-all shadow-2xs ${
-                    isShearWall
-                      ? 'bg-rose-50/40 border-rose-200'
-                      : 'bg-emerald-50/40 border-emerald-200'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`px-2 py-0.5 rounded font-bold text-xs ${
-                            isShearWall
-                              ? 'bg-rose-100 text-rose-900 border border-rose-300'
-                              : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                          }`}
-                        >
-                          {combinedCapMarks.get(grp.groupId) || 'PC'}: {grp.label}
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-white text-slate-700 border border-slate-200">
-                          {grp.pileCount}-Pile Mat
-                        </span>
-                        {grp.isCustomized && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                            Manual Edit
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-slate-600 mt-1 font-sans">
-                        Covered Supports: <strong>{grp.columnLabels.join(', ')}</strong> (Joints #{grp.nodeIds.join(', #')})
-                      </div>
-                    </div>
-
-                    <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 border ${
-                        isSafeCapacity
-                          ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                          : 'bg-rose-100 text-rose-800 border-rose-200'
+                  return (
+                    <div
+                      key={grp.groupId}
+                      className={`p-3.5 rounded-lg border flex flex-col justify-between font-mono text-xs space-y-2.5 transition-all shadow-2xs ${
+                        isShearWall
+                          ? 'bg-rose-50/40 border-rose-200'
+                          : 'bg-emerald-50/40 border-emerald-200'
                       }`}
                     >
-                      {isSafeCapacity ? 'PASS' : 'OVERLOADED'}
-                    </span>
-                  </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`px-2 py-0.5 rounded font-bold text-xs ${
+                                isShearWall
+                                  ? 'bg-rose-100 text-rose-900 border border-rose-300'
+                                  : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                              }`}
+                            >
+                              {combinedCapMarks.get(grp.groupId) || 'PC'}: {grp.label}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-white text-slate-700 border border-slate-200">
+                              {grp.pileCount}-Pile Mat
+                            </span>
+                            {grp.isCustomized && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                Manual Edit
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-600 mt-1 font-sans">
+                            Covered Supports: <strong>{grp.columnLabels.join(', ')}</strong> (Joints #{grp.nodeIds.join(', #')})
+                          </div>
+                        </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-[11px] bg-white/80 p-2.5 rounded border border-slate-200/80">
-                    <div>
-                      <span className="text-slate-500 block text-[10px]">CAP SIZE (L × B × D):</span>
-                      <strong className="text-slate-900 font-bold">{grp.capLength} × {grp.capWidth} × {grp.capDepth} mm</strong>
-                      <span className="text-[10px] text-slate-500 block">d = {grp.effectiveDepth} mm</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block text-[10px]">TOTAL LOAD Pu / P_work:</span>
-                      <strong className="text-slate-900 font-bold">{grp.totalFactoredLoad} kN (Work: {grp.totalWorkingLoad} kN)</strong>
-                      <span className={`text-[10px] block ${isSafeCapacity ? 'text-slate-600' : 'text-rose-700 font-bold'}`}>
-                        P/pile (Work): {loadPerPileWork} kN (Cap: {grp.safePileCapacity} kN)
-                      </span>
-                    </div>
-                    <div className="col-span-2 pt-1 border-t border-slate-100 text-[10px] space-y-0.5">
-                      <div>Bot Rebar: <strong className="text-orange-700">{grp.botRebarCallout}</strong></div>
-                      <div>Top Mesh: <span className="text-slate-700">{grp.topRebarCallout}</span> • Ties: <span className="text-emerald-700">{grp.shearWallStirrupCallout}</span></div>
-                    </div>
-                  </div>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 border ${
+                            isSafeCapacity
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                              : 'bg-rose-100 text-rose-800 border-rose-200'
+                          }`}
+                        >
+                          {isSafeCapacity ? 'PASS' : 'OVERLOADED'}
+                        </span>
+                      </div>
 
-                  <div className="flex items-center justify-end gap-2 pt-1">
-                    <button
-                      onClick={() => setSelectedEditCombinedCap(grp)}
-                      className="px-2.5 py-1 bg-white hover:bg-indigo-50 text-indigo-700 rounded border border-indigo-200 text-[11px] font-mono shadow-2xs flex items-center gap-1 transition-all"
-                      title="Manually edit pile count, cap dimensions, and safe pile load capacity"
-                    >
-                      <Edit3 className="w-3 h-3 text-indigo-600" />
-                      <span>Edit</span>
-                    </button>
-                    <button
-                      onClick={() => setSelectedGroupToSplit(grp)}
-                      className="px-2.5 py-1 bg-white hover:bg-rose-50 text-rose-700 rounded border border-rose-200 text-[11px] font-mono shadow-2xs flex items-center gap-1 transition-all"
-                      title="Split / Detach column joints from this combined pile cap"
-                    >
-                      <Unlink className="w-3 h-3 text-rose-600" />
-                      <span>Split</span>
-                    </button>
-                    <button
-                      onClick={() => setSelectedReport(CombinedPileCapEngine.generateCalculationReport(grp))}
-                      className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-800 rounded border border-ui-border text-[11px] font-mono shadow-2xs flex items-center gap-1"
-                      title="View IS 2911 Detailed Engineering Calculation Sheet"
-                    >
-                      <FileText className="w-3 h-3 text-slate-600" />
-                      Calc Sheet
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                      <div className="grid grid-cols-2 gap-2 text-[11px] bg-white/80 p-2.5 rounded border border-slate-200/80">
+                        <div>
+                          <span className="text-slate-500 block text-[10px]">CAP SIZE (L × B × D):</span>
+                          <strong className="text-slate-900 font-bold">{grp.capLength} × {grp.capWidth} × {grp.capDepth} mm</strong>
+                          <span className="text-[10px] text-slate-500 block">d = {grp.effectiveDepth} mm</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[10px]">TOTAL LOAD Pu / P_work:</span>
+                          <strong className="text-slate-900 font-bold">{grp.totalFactoredLoad} kN (Work: {grp.totalWorkingLoad} kN)</strong>
+                          <span className={`text-[10px] block ${isSafeCapacity ? 'text-slate-600' : 'text-rose-700 font-bold'}`}>
+                            P/pile (Work): {loadPerPileWork} kN (Cap: {grp.safePileCapacity} kN)
+                          </span>
+                        </div>
+                        <div className="col-span-2 pt-1 border-t border-slate-100 text-[10px] space-y-0.5">
+                          <div>Bot Rebar: <strong className="text-orange-700">{grp.botRebarCallout}</strong></div>
+                          <div>Top Mesh: <span className="text-slate-700">{grp.topRebarCallout}</span> • Ties: <span className="text-emerald-700">{grp.shearWallStirrupCallout}</span></div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          onClick={() => setSelectedEditCombinedCap(grp)}
+                          className="px-2.5 py-1 bg-white hover:bg-indigo-50 text-indigo-700 rounded border border-indigo-200 text-[11px] font-mono shadow-2xs flex items-center gap-1 transition-all"
+                          title="Manually edit pile count, cap dimensions, and safe pile load capacity"
+                        >
+                          <Edit3 className="w-3 h-3 text-indigo-600" />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          onClick={() => setSelectedGroupToSplit(grp)}
+                          className="px-2.5 py-1 bg-white hover:bg-rose-50 text-rose-700 rounded border border-rose-200 text-[11px] font-mono shadow-2xs flex items-center gap-1 transition-all"
+                          title="Split / Detach column joints from this combined pile cap"
+                        >
+                          <Unlink className="w-3 h-3 text-rose-600" />
+                          <span>Split</span>
+                        </button>
+                        <button
+                          onClick={() => setSelectedReport(CombinedPileCapEngine.generateCalculationReport(grp))}
+                          className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-800 rounded border border-ui-border text-[11px] font-mono shadow-2xs flex items-center gap-1"
+                          title="View IS 2911 Detailed Engineering Calculation Sheet"
+                        >
+                          <FileText className="w-3 h-3 text-slate-600" />
+                          Calc Sheet
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </CollapsiblePanel>
       )}
 
       {/* Main Table */}
       <CollapsiblePanel
-        title="RCC INDIVIDUAL & COMPONENT PILE CAP SCHEDULE"
+        title={tableTitle}
         icon={<Layers className="w-4 h-4 text-sky-700" />}
         storageKey="pilecap-table"
         open={showTable}
@@ -931,19 +1132,37 @@ export const PileCapDesignView: React.FC = () => {
         variant="card"
       >
         <div className="flex-1 min-h-[380px] flex flex-col overflow-hidden">
-        <DataTable
-          data={rows}
-          columns={columns}
-          title="RCC INDIVIDUAL & COMPONENT PILE CAP SCHEDULE"
-          searchPlaceholder="Search by Mark (e.g. PC1), Column (e.g. C1), or Joint #..."
-          searchFilter={(item, q) =>
-            item.columnLabels.some((l: string) => l.toLowerCase().includes(q)) ||
-            item.mark.toLowerCase().includes(q) ||
-            item.assignedTypeId.toLowerCase().includes(q) ||
-            item.nodeIds.some((id: number) => String(id).includes(q))
-          }
-          onExportCsv={handleExport}
-        />
+        {filterPileGroup === 'COMBINED' ? (
+          <div className="p-8 text-center bg-slate-50/50 flex flex-col items-center justify-center space-y-2">
+            <Layers className="w-8 h-8 text-rose-500" />
+            <div className="font-mono font-bold text-sm text-slate-800">
+              Showing Combined & Shear Wall Pile Caps ({combinedPileCaps.length} Groups)
+            </div>
+            <p className="text-xs text-slate-500 max-w-md font-sans">
+              Combined pile caps are detailed in the section above. Click "ALL" or select a specific individual pile count (e.g. 2-Pile, 3-Pile, 4-Pile, 5-Pile) to view individual column pile caps.
+            </p>
+            <button
+              onClick={() => setFilterPileGroup('ALL')}
+              className="mt-2 px-3 py-1.5 bg-deep-navy text-white text-xs font-mono rounded font-bold hover:bg-slate-800 transition-colors shadow-2xs"
+            >
+              Show All Pile Caps
+            </button>
+          </div>
+        ) : (
+          <DataTable
+            data={filteredRows}
+            columns={columns}
+            title={tableTitle}
+            searchPlaceholder="Search by Mark (e.g. PC1), Column (e.g. C1), or Joint #..."
+            searchFilter={(item, q) =>
+              item.columnLabels.some((l: string) => l.toLowerCase().includes(q)) ||
+              item.mark.toLowerCase().includes(q) ||
+              item.assignedTypeId.toLowerCase().includes(q) ||
+              item.nodeIds.some((id: number) => String(id).includes(q))
+            }
+            onExportCsv={handleExport}
+          />
+        )}
         </div>
       </CollapsiblePanel>
 

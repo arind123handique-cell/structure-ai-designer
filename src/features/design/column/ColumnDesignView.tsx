@@ -21,6 +21,7 @@ import { ColumnAutoFixEngine } from './columnAutoFixEngine';
 import { IS13920WeakBeamStrongColumn } from '@/features/codes/is13920/weakBeamStrongColumn';
 import { ColumnNumberingService } from '@/features/model/columnNumbering';
 import { ColumnBarArrangement, ColumnRebarOption } from './barArrangement';
+import { CalculationPdfService } from '@/features/calculations/calculationPdfService';
 import {
   Play,
   Layers,
@@ -901,13 +902,28 @@ export const ColumnDesignView: React.FC = () => {
           )}
 
           {designedColumns.size > 0 && (
-            <button
-              onClick={handleExport}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-slate-700 bg-white hover:bg-slate-50 border border-ui-border rounded transition-colors shadow-sm"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Export CSV
-            </button>
+            <>
+              <button
+                onClick={() => {
+                  if (activeModel && activeProject) {
+                    CalculationPdfService.exportColumnsCalculationsPdf(activeModel, activeProject);
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded transition-colors shadow-2xs font-semibold"
+                title="Export Detailed Step-by-Step Column Calculations PDF (IS 456 & IS 13920)"
+              >
+                <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                Calculations PDF
+              </button>
+
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-slate-700 bg-white hover:bg-slate-50 border border-ui-border rounded transition-colors shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Export CSV
+              </button>
+            </>
           )}
 
           <button

@@ -137,6 +137,7 @@ export class BbsEngine {
         let stirrupDia: number;
         let stirrupSpacing: number;
         let LdMm: number;
+        let liveCurtailment: any = null; // capture from live design for extra bars
 
         if (savedBm) {
           const cur = savedBm.curtailment || savedBm;
@@ -183,6 +184,7 @@ export class BbsEngine {
           topCount = cur.throughTop.count || 2;
           stirrupDia = getBestTieDia([8, 10]);
           stirrupSpacing = design.shear.spacing_prov || 125;
+          liveCurtailment = design.curtailment;
         }
 
         const anchorHookMm = Math.max(200, Math.min(DMm - 2 * cover, Math.round(LdMm * 0.4)));
@@ -231,8 +233,55 @@ export class BbsEngine {
           lengthByDia: { [topDia]: Number((topCount * topCutM).toFixed(2)) },
         });
 
-        // Item 3: Top Extra Support Bars (Curtailed at L/3) — skip when using saved design (curtailment already captured)
-        if (!savedBm) {
+        // Item 3: Extra Bottom Midspan Bars (if curtailment design provides them)
+        const curForExtra = savedBm?.curtailment || liveCurtailment;
+        if (curForExtra?.extraBottomMidspan?.hasExtra && curForExtra.extraBottomMidspan.count > 0) {
+          const ebDia = curForExtra.extraBottomMidspan.diameter || botDia;
+          const ebCount = curForExtra.extraBottomMidspan.count;
+          const ebLenM = curForExtra.extraBottomMidspan.length || (spanM / 3);
+          const ebB = Math.round(ebLenM * 1000);
+          const ebCutM = Math.max(0.3, (ebB + 2 * 50) / 1000);
+          items.push({
+            barNo: barIndex++,
+            elementCategory: 'BEAM',
+            elementTag: `${beam.label} (${fp.levelName.split(' ')[0]})`,
+            barDescription: `Extra Bottom Midspan Bars (${ebCount}-T${ebDia})`,
+            shapeType: 'STRAIGHT',
+            a: 0, b: ebB, c: 0,
+            diameter: ebDia,
+            cuttingLengthM: Number(ebCutM.toFixed(2)),
+            numElements: 1, barsPerElement: ebCount, totalCount: ebCount,
+            totalLengthM: Number((ebCount * ebCutM).toFixed(2)),
+            lengthByDia: { [ebDia]: Number((ebCount * ebCutM).toFixed(2)) },
+          });
+        }
+
+        // Item 4 (saved path): Top Extra Support Bars — read from saved design curtailment
+        if (savedBm) {
+          // Read from saved design curtailment
+          const curExtra = savedBm.curtailment?.extraTopSupport;
+          if (curExtra?.hasExtra && curExtra.count > 0) {
+            const exDia = curExtra.diameter || getBestLongDia([16, 20, 25]);
+            const exCount = curExtra.count;
+            const exCutoffM = curExtra.cutoffLength || (spanM / 3);
+            const exA = anchorHookMm;
+            const exB = Math.round(exCutoffM * 1000 + LdMm);
+            const exCutM = Math.max(0.4, (exA + exB - 2 * exDia) / 1000);
+            items.push({
+              barNo: barIndex++,
+              elementCategory: 'BEAM',
+              elementTag: `${beam.label} (${fp.levelName.split(' ')[0]})`,
+              barDescription: `Top Extra Support Bars (${exCount}-T${exDia})`,
+              shapeType: 'L_BAR',
+              a: exA, b: exB, c: 0,
+              diameter: exDia,
+              cuttingLengthM: Number(exCutM.toFixed(2)),
+              numElements: 1, barsPerElement: exCount, totalCount: exCount,
+              totalLengthM: Number((exCount * exCutM).toFixed(2)),
+              lengthByDia: { [exDia]: Number((exCount * exCutM).toFixed(2)) },
+            });
+          }
+        } else {
           const exDia = getBestLongDia([16, 20, 25]);
           const exA = anchorHookMm;
           const exB = Math.round((spanM / 3) * 1000 + LdMm);
@@ -252,7 +301,7 @@ export class BbsEngine {
           });
         }
 
-        // Item 4: 2-Legged Closed Shear Stirrups (stirrupDia/stirrupSpacing already resolved above)
+        // Item 5: 2-Legged Closed Shear Stirrups (stirrupDia/stirrupSpacing already resolved above)
         const stirrupA = Math.round(DMm - 2 * cover - stirrupDia);
         const stirrupC = Math.round(bMm - 2 * cover - stirrupDia);
         const stirrupCutM = Math.max(0.4, (2 * (stirrupA + stirrupC) + 24 * stirrupDia - 6 * stirrupDia) / 1000);
@@ -541,6 +590,8 @@ export class BbsEngine {
       if (foundationPlan) {
         foundationPlan.columns.forEach((col) => {
           if (!col.pileCap) return;
+          // Skip individual caps whose columns are absorbed into a combined pile cap
+          if (foundationPlan.absorbedCombinedCapNodeIds && foundationPlan.absorbedCombinedCapNodeIds.has(col.nodeId)) return;
           const cap = col.pileCap;
           const LMm = cap.capLength || 1900;
           const BMm = cap.capWidth || 1900;
@@ -549,9 +600,20 @@ export class BbsEngine {
           const isPentagon = cap.pileCount === 5 || cap.capShape === 'PENTAGONAL';
           const tag = isPentagon ? `PC-${col.columnSlNo} (5P 1461mm×5)` : `PC-${col.columnSlNo} (${cap.pileCount || 4}P ${LMm}×${BMm})`;
 
+          // Parse rebar callout from design (e.g. "T16 @ 125 mm c/c (Bottom Mat ...)")
+          function parseRebarCallout(callout: string | undefined): { dia: number; spacing: number } | null {
+            if (!callout) return null;
+            const m = callout.match(/T(\d+)\s*@\s*(\d+)/);
+            return m ? { dia: parseInt(m[1]), spacing: parseInt(m[2]) } : null;
+          }
+          const parsedBotX = parseRebarCallout(cap.rebarCalloutX);
+          const parsedBotY = parseRebarCallout(cap.rebarCalloutY);
+          const parsedTop = parseRebarCallout(cap.topRebarCallout);
+          const parsedSide = parseRebarCallout(cap.sideFaceRebarCallout);
+
           // 1. Bottom Main Rebar Mesh in X-direction (U-Bar)
-          const botDia = getBestLongDia([16, 12, 20]);
-          const botSpacing = isPentagon ? 125 : 150;
+          const botDia = parsedBotX?.dia || getBestLongDia([16, 12, 20]);
+          const botSpacing = parsedBotX?.spacing || (isPentagon ? 125 : 150);
           const botBarsX = Math.round(BMm / botSpacing) + 1;
           const botA = Math.round(DMm - 2 * cover);
           const botB = Math.round(LMm - 2 * cover);
@@ -600,8 +662,8 @@ export class BbsEngine {
           });
 
           // 3. Top Shrinkage Rebar Mesh (U-Bar with downward legs)
-          const topDia = getBestLongDia([12, 16, 10]);
-          const topSpacing = 100;
+          const topDia = parsedTop?.dia || getBestLongDia([12, 16, 10]);
+          const topSpacing = parsedTop?.spacing || 100;
           const topBars = Math.round(BMm / topSpacing) + 1;
           const topA = Math.round(DMm - 2 * cover);
           const topB = Math.round(LMm - 2 * cover);
@@ -626,9 +688,15 @@ export class BbsEngine {
             lengthByDia: { [topDia]: Number((topBars * topCutM).toFixed(2)) },
           });
 
-          // 4. Side Face Skin Ties (3-T10 Closed Perimeter Rings)
-          const sideDia = getBestTieDia([10, 8]);
-          const sideCount = 3;
+          // 4. Side Face Skin Ties (from design callout)
+          const sideDia = parsedSide?.dia || getBestTieDia([10, 8]);
+          const sideCount = (() => {
+            if (cap.sideFaceRebarCallout) {
+              const m = cap.sideFaceRebarCallout.match(/^(\d+)-/);
+              if (m) return parseInt(m[1]);
+            }
+            return 3;
+          })();
           let sideCutM = 0;
           let shapeType: BarShapeType = 'RECT_TIE';
 
@@ -764,7 +832,30 @@ export class BbsEngine {
       ? project.projectPileTypes
       : [];
 
-    const totalSupports = model ? Array.from(model.supports.values()).length : 4;
+    // Count actual piles from foundation plan columns instead of hardcoding 4 per cap
+    const pileTypeCounts: Record<string, number> = {};
+    if (floorPlans.length > 0) {
+      const foundationPlan = floorPlans.find((fp) => fp.isFoundationLevel);
+      if (foundationPlan) {
+        foundationPlan.columns.forEach((col) => {
+          if (!col.pileCap) return;
+          // Skip individual caps absorbed into combined pile caps
+          if (foundationPlan.absorbedCombinedCapNodeIds && foundationPlan.absorbedCombinedCapNodeIds.has(col.nodeId)) return;
+          const pileCount = col.pileCap.pileCount || 4;
+          // Use supportPileAssignments to assign to correct pile type
+          const assignedTypeId = project?.supportPileAssignments?.[col.nodeId] || (savedPileTypes.length > 0 ? savedPileTypes[0].id : 'P-1');
+          pileTypeCounts[assignedTypeId] = (pileTypeCounts[assignedTypeId] || 0) + pileCount;
+        });
+        // Also count piles from combined pile caps
+        if (foundationPlan.combinedPileCaps) {
+          for (const grp of foundationPlan.combinedPileCaps) {
+            const pileCount = grp.pileCount || grp.nodeIds?.length || 4;
+            const assignedTypeId = savedPileTypes.length > 0 ? savedPileTypes[0].id : 'P-1';
+            pileTypeCounts[assignedTypeId] = (pileTypeCounts[assignedTypeId] || 0) + pileCount;
+          }
+        }
+      }
+    }
 
     if (savedPileTypes.length > 0) {
       // Use actual designed pile types from the Pile Design workspace
@@ -777,9 +868,9 @@ export class BbsEngine {
         const spiralPitch: number = pt.spiralPitch || 150;
         const pileCover = 60;
 
-        // Distribute supports evenly across pile types; avg 4 piles per cap
-        const typeSupports = Math.max(1, Math.round(totalSupports / savedPileTypes.length));
-        const totalPilesOfType = typeSupports * 4;
+        // Use actual pile counts from foundation plan + supportPileAssignments
+        const totalPilesOfType = pileTypeCounts[pt.id] || 0;
+        if (totalPilesOfType === 0) continue;
 
         // Vertical Cage Bars
         const vertLapMm = 50 * barDia;
@@ -829,7 +920,7 @@ export class BbsEngine {
       }
     } else {
       // Fallback: estimate from model geometry with default pile design
-      const totalPiles = totalSupports * 4;
+      const totalPiles = Object.values(pileTypeCounts).reduce((sum, n) => sum + n, 0) || (model ? Array.from(model.supports.values()).length * 4 : 0);
       if (totalPiles > 0) {
         const pileLenM = 12.0;
         const pileDiaMm = 500;
