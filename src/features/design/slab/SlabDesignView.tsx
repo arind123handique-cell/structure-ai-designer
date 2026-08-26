@@ -23,6 +23,7 @@ import {
   Download,
   Eye,
   EyeOff,
+  Building,
 } from 'lucide-react';
 
 export const SlabDesignView: React.FC = () => {
@@ -40,7 +41,7 @@ export const SlabDesignView: React.FC = () => {
   const [panelsInput, setPanelsInput] = useState<SlabDesignInput[]>([
     {
       panelId: 'S1',
-      floorLevel: '1ST FLOOR',
+      floorLevel: 'GROUND FLOOR SLAB (+2.8m)',
       lx: 3.5,
       ly: 4.5,
       boundaryCondition: 'TWO_ADJACENT_DISCONTINUOUS',
@@ -50,7 +51,7 @@ export const SlabDesignView: React.FC = () => {
     },
     {
       panelId: 'S2',
-      floorLevel: '1ST FLOOR',
+      floorLevel: '1ST FLOOR SLAB (+5.6m)',
       lx: 3.5,
       ly: 5.0,
       boundaryCondition: 'ONE_LONG_DISCONTINUOUS',
@@ -60,7 +61,7 @@ export const SlabDesignView: React.FC = () => {
     },
     {
       panelId: 'S3',
-      floorLevel: '1ST FLOOR',
+      floorLevel: '1ST FLOOR SLAB (+5.6m)',
       lx: 3.0,
       ly: 4.5,
       boundaryCondition: 'INTERIOR',
@@ -70,7 +71,7 @@ export const SlabDesignView: React.FC = () => {
     },
     {
       panelId: 'S4',
-      floorLevel: '1ST FLOOR',
+      floorLevel: '2ND FLOOR SLAB (+8.4m)',
       lx: 2.5,
       ly: 5.5,
       boundaryCondition: 'ONE_WAY_CONTINUOUS',
@@ -80,7 +81,7 @@ export const SlabDesignView: React.FC = () => {
     },
     {
       panelId: 'S5',
-      floorLevel: '1ST FLOOR',
+      floorLevel: 'ROOF SLAB (+11.2m)',
       lx: 1.5,
       ly: 3.0,
       boundaryCondition: 'CANTILEVER',
@@ -93,6 +94,11 @@ export const SlabDesignView: React.FC = () => {
   const [selectedPanelId, setSelectedPanelId] = useState<string>('S1');
   const [selectedReportOutput, setSelectedReportOutput] = useState<SlabDesignOutput | null>(null);
   const [showDrawing, setShowDrawing] = useState<boolean>(false);
+  const [activeFloorFilter, setActiveFloorFilter] = useState<string>('ALL');
+
+  const availableFloorLevels = useMemo(() => {
+    return Array.from(new Set(panelsInput.map((p) => p.floorLevel || '1ST FLOOR SLAB (+2.8m)')));
+  }, [panelsInput]);
 
   // Extract floor slab panels directly from imported STAAD .std / .anl model plates (EXCLUDING shear wall plates)
   const modelSlabPanels = useMemo(() => {
@@ -121,7 +127,12 @@ export const SlabDesignView: React.FC = () => {
 
     sortedElevations.forEach((yElev, flIdx) => {
       const platesAtFloor = floorMap.get(yElev)!;
-      const floorLabel = flIdx === 0 ? 'GROUND FLOOR' : `FLOOR (+${yElev}m)`;
+      const floorLabel =
+        yElev <= 3.2
+          ? `GROUND FLOOR SLAB (+${yElev}m)`
+          : flIdx === sortedElevations.length - 1
+          ? `ROOF SLAB (+${yElev}m)`
+          : `FLOOR ${flIdx} SLAB (+${yElev}m)`;
 
       platesAtFloor.forEach((p: Plate3D) => {
         const pNodes = p.nodeIds.map((id) => activeModel.nodes.get(id)).filter(Boolean) as Node3D[];
@@ -207,13 +218,30 @@ export const SlabDesignView: React.FC = () => {
     alert('Slab designs saved successfully to project storage!');
   };
 
+  // Group panels by Floor Level for clean multi-story segregation
+  const groupedPanelsByFloor = useMemo(() => {
+    const map = new Map<string, { panel: SlabDesignInput; output?: SlabDesignOutput }[]>();
+    panelsInput.forEach((p) => {
+      const fl = p.floorLevel || '1ST FLOOR SLAB (+2.8m)';
+      if (activeFloorFilter !== 'ALL' && fl !== activeFloorFilter) return;
+      if (!map.has(fl)) map.set(fl, []);
+      map.get(fl)!.push({ panel: p, output: designedSlabs[p.panelId] });
+    });
+    return map;
+  }, [panelsInput, designedSlabs, activeFloorFilter]);
+
   // Add New Panel
   const handleAddPanel = () => {
     const nextNum = panelsInput.length + 1;
     const newId = `S${nextNum}`;
+    const targetFloor =
+      activeFloorFilter === 'ALL'
+        ? availableFloorLevels[0] || '1ST FLOOR SLAB (+2.8m)'
+        : activeFloorFilter;
+
     const newPanel: SlabDesignInput = {
       panelId: newId,
-      floorLevel: '1ST FLOOR',
+      floorLevel: targetFloor,
       lx: 3.5,
       ly: 4.5,
       boundaryCondition: 'INTERIOR',
@@ -364,6 +392,42 @@ export const SlabDesignView: React.FC = () => {
         </div>
       </div>
 
+      {/* Floor Level Filter Tabs */}
+      <div className="flex flex-wrap items-center gap-2 bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-xs">
+        <span className="text-slate-400 font-bold uppercase mr-1 flex items-center gap-1.5 font-sans">
+          <Building className="w-4 h-4 text-indigo-400" />
+          Select Floor Level Window:
+        </span>
+
+        <button
+          onClick={() => setActiveFloorFilter('ALL')}
+          className={`px-3 py-1.5 rounded font-bold transition-all border ${
+            activeFloorFilter === 'ALL'
+              ? 'bg-indigo-600 text-white border-indigo-500 shadow-md'
+              : 'bg-slate-950 text-slate-400 hover:text-white border-slate-800'
+          }`}
+        >
+          ALL FLOORS ({panelsInput.length})
+        </button>
+
+        {availableFloorLevels.map((fl) => {
+          const count = panelsInput.filter((p) => (p.floorLevel || '1ST FLOOR SLAB (+2.8m)') === fl).length;
+          return (
+            <button
+              key={fl}
+              onClick={() => setActiveFloorFilter(fl)}
+              className={`px-3 py-1.5 rounded font-bold transition-all border ${
+                activeFloorFilter === fl
+                  ? 'bg-indigo-600 text-white border-indigo-500 shadow-md'
+                  : 'bg-slate-950 text-slate-400 hover:text-white border-slate-800'
+              }`}
+            >
+              {fl} ({count})
+            </button>
+          );
+        })}
+      </div>
+
       {/* Main RCDC Slab Schedule Table */}
       <div className="w-full bg-white text-slate-900 rounded-lg shadow-2xl overflow-x-auto border-2 border-slate-800">
         <div className="w-full bg-slate-300 border-b-2 border-slate-800 py-1.5 text-center font-bold text-sm uppercase tracking-wide">
@@ -374,7 +438,7 @@ export const SlabDesignView: React.FC = () => {
           <thead>
             <tr className="bg-slate-200 text-slate-900 border-b-2 border-slate-800 text-center font-bold">
               <th className="border-r border-slate-400 p-2 w-12">Panel</th>
-              <th className="border-r border-slate-400 p-2 w-20">Floor</th>
+              <th className="border-r border-slate-400 p-2 w-32">Floor Level</th>
               <th className="border-r border-slate-400 p-2 w-24">Lx × Ly (m)</th>
               <th className="border-r border-slate-400 p-2 w-16">Ly / Lx</th>
               <th className="border-r border-slate-400 p-2 w-16">Thk (mm)</th>
@@ -389,133 +453,191 @@ export const SlabDesignView: React.FC = () => {
           </thead>
 
           <tbody className="divide-y divide-slate-300">
-            {panelsInput.map((panel) => {
-              const out = designedSlabs[panel.panelId];
-              if (!out) return null;
-
-              const isSelected = panel.panelId === selectedPanelId;
+            {Array.from(groupedPanelsByFloor.entries()).map(([floorLabel, items]) => {
+              const floorArea = items.reduce((acc, { panel }) => acc + panel.lx * panel.ly, 0);
+              const floorConcVol = items.reduce((acc, { panel, output: out }) => {
+                const thk = panel.thickness || out?.thickness || 130;
+                return acc + (panel.lx * panel.ly * thk) / 1000;
+              }, 0);
+              const floorSteelKg = items.reduce((acc, { panel, output: out }) => {
+                const area = panel.lx * panel.ly;
+                const wtPerM2 = out?.steelWeightKgPerM2 || 10;
+                return acc + area * wtPerM2;
+              }, 0);
 
               return (
-                <tr
-                  key={panel.panelId}
-                  onClick={() => setSelectedPanelId(panel.panelId)}
-                  className={`cursor-pointer transition-colors ${
-                    isSelected ? 'bg-indigo-50 font-bold' : 'hover:bg-slate-50'
-                  }`}
-                >
-                  <td className="border-r border-slate-300 p-2 text-center font-bold text-indigo-700">
-                    {panel.panelId}
-                  </td>
+                <React.Fragment key={floorLabel}>
+                  {/* Floor Level Header Banner */}
+                  <tr className="bg-slate-900 text-indigo-200 font-bold border-y-2 border-indigo-800">
+                    <td colSpan={12} className="p-2.5 text-left">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="flex items-center gap-2 text-white font-bold text-sm tracking-wide">
+                          <Building className="w-4 h-4 text-indigo-400" />
+                          {floorLabel} WINDOW
+                        </span>
+                        <div className="flex items-center gap-4 text-[11px] font-mono text-slate-300">
+                          <span>Panels: <strong className="text-white">{items.length}</strong></span>
+                          <span>Total Area: <strong className="text-emerald-400">{floorArea.toFixed(1)} m²</strong></span>
+                          <span>Concrete: <strong className="text-sky-300">{floorConcVol.toFixed(2)} m³</strong></span>
+                          <span>Est. Steel: <strong className="text-amber-300">{floorSteelKg.toFixed(1)} kg</strong> ({(floorSteelKg / 1000).toFixed(3)} MT)</span>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
 
-                  <td className="border-r border-slate-300 p-2 text-center text-slate-700">
-                    {panel.floorLevel}
-                  </td>
+                  {/* Floor Panel Items */}
+                  {items.map(({ panel, output: out }) => {
+                    if (!out) return null;
+                    const isSelected = panel.panelId === selectedPanelId;
 
-                  <td className="border-r border-slate-300 p-2 text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={panel.lx}
-                        onChange={(e) => handleUpdatePanel(panel.panelId, 'lx', Number(e.target.value))}
-                        className="w-10 text-center bg-transparent border-b border-slate-400 focus:border-indigo-600 focus:outline-none"
-                      />
-                      <span>×</span>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={panel.ly}
-                        onChange={(e) => handleUpdatePanel(panel.panelId, 'ly', Number(e.target.value))}
-                        className="w-10 text-center bg-transparent border-b border-slate-400 focus:border-indigo-600 focus:outline-none"
-                      />
-                    </div>
-                  </td>
-
-                  <td className="border-r border-slate-300 p-2 text-center text-slate-600">
-                    {out.aspectRatio}
-                  </td>
-
-                  <td className="border-r border-slate-300 p-2 text-center">
-                    <input
-                      type="number"
-                      step="5"
-                      value={panel.thickness || out.thickness}
-                      onChange={(e) => handleUpdatePanel(panel.panelId, 'thickness', Number(e.target.value))}
-                      className="w-12 text-center bg-transparent border-b border-slate-400 font-bold text-indigo-800 focus:border-indigo-600 focus:outline-none"
-                    />
-                  </td>
-
-                  <td className="border-r border-slate-300 p-1.5">
-                    <select
-                      value={panel.boundaryCondition || out.boundaryCondition}
-                      onChange={(e) =>
-                        handleUpdatePanel(panel.panelId, 'boundaryCondition', e.target.value as SlabBoundaryCondition)
-                      }
-                      className="w-full bg-transparent text-[11px] font-sans border border-slate-300 rounded p-1 focus:border-indigo-500"
-                    >
-                      <option value="INTERIOR">1. Interior (Continuous)</option>
-                      <option value="ONE_SHORT_DISCONTINUOUS">2. 1 Short Edge Disc.</option>
-                      <option value="ONE_LONG_DISCONTINUOUS">3. 1 Long Edge Disc.</option>
-                      <option value="TWO_ADJACENT_DISCONTINUOUS">4. 2 Adj Edges Disc (Corner)</option>
-                      <option value="TWO_SHORT_DISCONTINUOUS">5. 2 Short Edges Disc.</option>
-                      <option value="TWO_LONG_DISCONTINUOUS">6. 2 Long Edges Disc.</option>
-                      <option value="THREE_ONE_LONG_CONTINUOUS">7. 3 Edges Disc (1 Long Cont)</option>
-                      <option value="THREE_ONE_SHORT_CONTINUOUS">8. 3 Edges Disc (1 Short Cont)</option>
-                      <option value="SIMPLY_SUPPORTED_ALL">9. Simply Supported (4 Disc)</option>
-                      <option value="ONE_WAY_CONTINUOUS">One-Way Continuous</option>
-                      <option value="ONE_WAY_SIMPLY_SUPPORTED">One-Way Simply Supported</option>
-                      <option value="CANTILEVER">Cantilever Slab</option>
-                    </select>
-                  </td>
-
-                  <td className="border-r border-slate-300 p-2 text-center text-[11px]">
-                    <span className="text-emerald-700 font-bold">{out.Mux_pos}</span> /{' '}
-                    <span className="text-red-600 font-bold">{out.Mux_neg}</span>
-                  </td>
-
-                  <td className="border-r border-slate-300 p-2 text-left text-[10.5px]">
-                    <div className="font-bold text-indigo-900">{out.botRebarXCallout}</div>
-                  </td>
-
-                  <td className="border-r border-slate-300 p-2 text-left text-[10.5px]">
-                    <div className="font-bold text-indigo-900">{out.botRebarYCallout}</div>
-                  </td>
-
-                  <td className="border-r border-slate-300 p-2 text-center font-bold">
-                    <span className={out.deflectionCheck === 'PASS' ? 'text-emerald-600' : 'text-red-600'}>
-                      {out.deflectionRatioActual} ≤ {out.deflectionRatioLimit}
-                    </span>
-                  </td>
-
-                  <td className="border-r border-slate-300 p-2 text-center">
-                    <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        out.status === 'PASS' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-red-100 text-red-800 border border-red-300'
-                      }`}
-                    >
-                      {out.status}
-                    </span>
-                  </td>
-
-                  <td className="p-2 text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <button
-                        onClick={() => setSelectedReportOutput(out)}
-                        className="p-1 text-indigo-600 hover:bg-indigo-100 rounded"
-                        title="View Detailed Calculation Report"
+                    return (
+                      <tr
+                        key={panel.panelId}
+                        onClick={() => setSelectedPanelId(panel.panelId)}
+                        className={`cursor-pointer transition-colors ${
+                          isSelected ? 'bg-indigo-50 font-bold' : 'hover:bg-slate-50'
+                        }`}
                       >
-                        <FileText className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDeletePanel(panel.panelId)}
-                        className="p-1 text-red-500 hover:bg-red-100 rounded"
-                        title="Delete Panel"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+                        <td className="border-r border-slate-300 p-2 text-center font-bold text-indigo-700">
+                          {panel.panelId}
+                        </td>
+
+                        <td className="border-r border-slate-300 p-1.5 text-center text-slate-700">
+                          <select
+                            value={panel.floorLevel || floorLabel}
+                            onChange={(e) => handleUpdatePanel(panel.panelId, 'floorLevel', e.target.value)}
+                            className="w-full bg-transparent text-[11px] font-sans border border-slate-300 rounded p-1 focus:border-indigo-500"
+                          >
+                            {availableFloorLevels.map((fl) => (
+                              <option key={fl} value={fl}>{fl}</option>
+                            ))}
+                          </select>
+                        </td>
+
+                        <td className="border-r border-slate-300 p-2 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={panel.lx}
+                              onChange={(e) => handleUpdatePanel(panel.panelId, 'lx', Number(e.target.value))}
+                              className="w-10 text-center bg-transparent border-b border-slate-400 focus:border-indigo-600 focus:outline-none"
+                            />
+                            <span>×</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={panel.ly}
+                              onChange={(e) => handleUpdatePanel(panel.panelId, 'ly', Number(e.target.value))}
+                              className="w-10 text-center bg-transparent border-b border-slate-400 focus:border-indigo-600 focus:outline-none"
+                            />
+                          </div>
+                        </td>
+
+                        <td className="border-r border-slate-300 p-2 text-center text-slate-600">
+                          {out.aspectRatio}
+                        </td>
+
+                        <td className="border-r border-slate-300 p-2 text-center">
+                          <input
+                            type="number"
+                            step="5"
+                            value={panel.thickness || out.thickness}
+                            onChange={(e) => handleUpdatePanel(panel.panelId, 'thickness', Number(e.target.value))}
+                            className="w-12 text-center bg-transparent border-b border-slate-400 font-bold text-indigo-800 focus:border-indigo-600 focus:outline-none"
+                          />
+                        </td>
+
+                        <td className="border-r border-slate-300 p-1.5">
+                          <select
+                            value={panel.boundaryCondition || out.boundaryCondition}
+                            onChange={(e) =>
+                              handleUpdatePanel(panel.panelId, 'boundaryCondition', e.target.value as SlabBoundaryCondition)
+                            }
+                            className="w-full bg-transparent text-[11px] font-sans border border-slate-300 rounded p-1 focus:border-indigo-500"
+                          >
+                            <option value="INTERIOR">1. Interior (Continuous)</option>
+                            <option value="ONE_SHORT_DISCONTINUOUS">2. 1 Short Edge Disc.</option>
+                            <option value="ONE_LONG_DISCONTINUOUS">3. 1 Long Edge Disc.</option>
+                            <option value="TWO_ADJACENT_DISCONTINUOUS">4. 2 Adj Edges Disc (Corner)</option>
+                            <option value="TWO_SHORT_DISCONTINUOUS">5. 2 Short Edges Disc.</option>
+                            <option value="TWO_LONG_DISCONTINUOUS">6. 2 Long Edges Disc.</option>
+                            <option value="THREE_ONE_LONG_CONTINUOUS">7. 3 Edges Disc (1 Long Cont)</option>
+                            <option value="THREE_ONE_SHORT_CONTINUOUS">8. 3 Edges Disc (1 Short Cont)</option>
+                            <option value="SIMPLY_SUPPORTED_ALL">9. Simply Supported (4 Disc)</option>
+                            <option value="ONE_WAY_CONTINUOUS">One-Way Continuous</option>
+                            <option value="ONE_WAY_SIMPLY_SUPPORTED">One-Way Simply Supported</option>
+                            <option value="CANTILEVER">Cantilever Slab</option>
+                          </select>
+                        </td>
+
+                        <td className="border-r border-slate-300 p-2 text-center text-[11px]">
+                          <span className="text-emerald-700 font-bold">{out.Mux_pos}</span> /{' '}
+                          <span className="text-red-600 font-bold">{out.Mux_neg}</span>
+                        </td>
+
+                        <td className="border-r border-slate-300 p-2 text-left text-[10.5px]">
+                          <div className="font-bold text-indigo-900">{out.botRebarXCallout}</div>
+                        </td>
+
+                        <td className="border-r border-slate-300 p-2 text-left text-[10.5px]">
+                          <div className="font-bold text-indigo-900">{out.botRebarYCallout}</div>
+                        </td>
+
+                        <td className="border-r border-slate-300 p-2 text-center font-bold">
+                          <span className={out.deflectionCheck === 'PASS' ? 'text-emerald-600' : 'text-red-600'}>
+                            {out.deflectionRatioActual} ≤ {out.deflectionRatioLimit}
+                          </span>
+                        </td>
+
+                        <td className="border-r border-slate-300 p-2 text-center">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              out.status === 'PASS' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-red-100 text-red-800 border border-red-300'
+                            }`}
+                          >
+                            {out.status}
+                          </span>
+                        </td>
+
+                        <td className="p-2 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => setSelectedReportOutput(out)}
+                              className="p-1 text-indigo-600 hover:bg-indigo-100 rounded"
+                              title="View Detailed Calculation Report"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeletePanel(panel.panelId)}
+                              className="p-1 text-red-500 hover:bg-red-100 rounded"
+                              title="Delete Panel"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {/* Floor Level Subtotal Row */}
+                  <tr className="bg-indigo-950/60 text-indigo-200 font-bold text-[11px] border-b-2 border-indigo-800">
+                    <td colSpan={6} className="p-2 text-right uppercase text-slate-400">
+                      {floorLabel} Subtotal ({items.length} Panels):
+                    </td>
+                    <td className="p-2 text-center text-emerald-400 font-bold">
+                      Area: {floorArea.toFixed(1)} m²
+                    </td>
+                    <td colSpan={2} className="p-2 text-left text-sky-300 font-bold">
+                      Concrete: {floorConcVol.toFixed(2)} m³
+                    </td>
+                    <td colSpan={3} className="p-2 text-center text-amber-300 font-bold">
+                      Steel: {floorSteelKg.toFixed(1)} kg ({(floorSteelKg / 1000).toFixed(3)} MT)
+                    </td>
+                  </tr>
+                </React.Fragment>
               );
             })}
           </tbody>
