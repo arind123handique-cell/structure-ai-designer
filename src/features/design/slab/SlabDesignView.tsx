@@ -549,11 +549,24 @@ export const SlabDesignView: React.FC = () => {
               {selectedReportOutput.calculationReport.sections.map((sec, idx) => (
                 <div key={idx} className="bg-slate-950 p-4 rounded border border-slate-800 space-y-2">
                   <h4 className="font-bold text-indigo-400 text-sm border-b border-slate-800 pb-1">
-                    {sec.heading}
+                    {sec.title}
                   </h4>
-                  <pre className="text-slate-300 font-mono whitespace-pre-wrap text-xs leading-relaxed">
-                    {sec.content}
-                  </pre>
+                  <div className="space-y-1.5 pt-1">
+                    {sec.steps.map((st, sIdx) => (
+                      <div key={sIdx} className="bg-slate-900/60 p-2 rounded border border-slate-800/80">
+                        <div className="flex items-center justify-between text-slate-200 font-bold">
+                          <span>{st.description} ({st.symbol})</span>
+                          {st.status && (
+                            <span className={st.status === 'PASS' ? 'text-emerald-400' : 'text-red-400'}>
+                              [{st.status}]
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-slate-400 text-[11px] font-sans">Formula: {st.formula}</div>
+                        <div className="text-indigo-300 font-mono text-xs font-semibold mt-0.5">{st.result}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>

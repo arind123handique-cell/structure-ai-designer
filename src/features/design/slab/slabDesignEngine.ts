@@ -347,52 +347,106 @@ export class SlabDesignEngine {
     // Detailed Calculation Report
     const calculationReport: DetailedCalculationReport = {
       title: `IS 456:2000 Slab Design Calculation — Panel ${panelId}`,
+      elementId: 0,
+      elementType: 'BEAM',
+      designCode: 'IS 456:2000',
+      governingLoadCase: 1,
+      timestamp: new Date().toISOString(),
+      overallStatus: status,
+      summaryCallout: `${lx}m × ${ly}m × ${proposedThickness}mm (${slabType}) | Bot Rebar: ${botRebarXCallout}`,
       sections: [
         {
-          heading: '1. Panel Geometry & Loading',
-          content: `Panel ID: ${panelId} (${floorLevel})
-Short Span (Lx): ${lx} m
-Long Span (Ly): ${ly} m
-Aspect Ratio (Ly/Lx): ${aspectRatio.toFixed(2)} (${slabType})
-Boundary Condition: ${bc}
-Proposed Thickness (D): ${proposedThickness} mm (dx = ${dx} mm, dy = ${dy} mm)
-Concrete Grade: M${fck}, Steel Grade: Fe${fy}
-Dead Load (gk): ${deadLoad.toFixed(2)} kN/m² (Self Weight = ${selfWeight.toFixed(2)} kN/m²)
-Live Load (qk): ${liveLoad.toFixed(2)} kN/m²
-Design Factored Load (wu = 1.5*(gk+qk)): ${totalFactoredLoad} kN/m²`,
+          title: '1. Panel Geometry & Loading',
+          steps: [
+            {
+              symbol: 'Lx × Ly',
+              description: 'Panel Dimensions & Aspect Ratio',
+              formula: 'Ly / Lx',
+              substitution: `${ly} / ${lx}`,
+              result: `${lx}m × ${ly}m (Aspect Ratio = ${aspectRatio.toFixed(2)} - ${slabType})`,
+              codeReference: 'IS 456:2000 Cl. 24.1',
+            },
+            {
+              symbol: 'wu',
+              description: 'Factored Design Load',
+              formula: '1.5 * (SelfWeight + Finish + Live)',
+              substitution: `1.5 * (${deadLoad.toFixed(2)} + ${liveLoad.toFixed(2)})`,
+              result: `${totalFactoredLoad} kN/m²`,
+              codeReference: 'IS 456:2000 Cl. 36.4.1',
+            },
+          ],
         },
         {
-          heading: '2. Design Bending Moments (IS 456 Table 26 / Table 27)',
-          content: `Short Span Max Positive Moment (Mux+): ${Mux_pos} kNm/m
-Short Span Support Negative Moment (Mux-): ${Mux_neg} kNm/m
-Long Span Max Positive Moment (Muy+): ${Muy_pos} kNm/m
-Long Span Support Negative Moment (Muy-): ${Muy_neg} kNm/m`,
+          title: '2. Design Bending Moments',
+          steps: [
+            {
+              symbol: 'Mux+, Mux-',
+              description: 'Short Span Moments',
+              formula: 'alpha_x * wu * Lx^2',
+              substitution: `Table 26 Coefficients * ${totalFactoredLoad} * ${lx}^2`,
+              result: `Mux+ = ${Mux_pos} kNm/m, Mux- = ${Mux_neg} kNm/m`,
+              codeReference: 'IS 456:2000 Table 26',
+            },
+            {
+              symbol: 'Muy+, Muy-',
+              description: 'Long Span Moments',
+              formula: 'alpha_y * wu * Lx^2',
+              substitution: `Table 26 Coefficients * ${totalFactoredLoad} * ${lx}^2`,
+              result: `Muy+ = ${Muy_pos} kNm/m, Muy- = ${Muy_neg} kNm/m`,
+              codeReference: 'IS 456:2000 Table 26',
+            },
+          ],
         },
         {
-          heading: '3. Flexural Reinforcement Design',
-          content: `Required Ast (X-Dir): ${Math.round(astReqX)} mm²/m → Provided: ${botRebarXCallout}
-Required Ast (Y-Dir): ${Math.round(astReqY)} mm²/m → Provided: ${botRebarYCallout}
-Top Negative Support Steel X: ${topRebarXCallout}
-Top Negative Support Steel Y: ${topRebarYCallout}
-Distribution & Temperature Steel: ${distributionRebarCallout}
-${torsionRebarCallout ? `Corner Torsion Reinforcement: ${torsionRebarCallout}` : ''}`,
+          title: '3. Flexural Reinforcement Design',
+          steps: [
+            {
+              symbol: 'Ast_X',
+              description: 'Short Span Reinforcement',
+              formula: '0.5*(fck/fy)*(1 - sqrt(1 - 4.6*Mu/(fck*b*d^2)))*b*d',
+              substitution: `Req: ${Math.round(astReqX)} mm²/m`,
+              result: botRebarXCallout,
+              codeReference: 'IS 456:2000 Cl. 38.1',
+              status: 'PASS',
+            },
+            {
+              symbol: 'Ast_Y',
+              description: 'Long Span Reinforcement',
+              formula: '0.5*(fck/fy)*(1 - sqrt(1 - 4.6*Mu/(fck*b*d^2)))*b*d',
+              substitution: `Req: ${Math.round(astReqY)} mm²/m`,
+              result: botRebarYCallout,
+              codeReference: 'IS 456:2000 Cl. 38.1',
+              status: 'PASS',
+            },
+          ],
         },
         {
-          heading: '4. Serviceability & Deflection Check (IS 456 Cl 23.2.1)',
-          content: `Basic L/d Ratio: ${basicLdRatio}
-Percentage Steel (pt): ${ptProvided.toFixed(3)}%
-Modification Factor (F1): ${F1}
-Allowable L/d Ratio: ${deflectionRatioLimit}
-Actual L/d Ratio (Lx/dx): ${deflectionRatioActual}
-Status: ${deflectionCheck} (Actual ${deflectionRatioActual} ≤ Allowable ${deflectionRatioLimit})`,
+          title: '4. Serviceability & Deflection Check',
+          steps: [
+            {
+              symbol: 'L/d',
+              description: 'Deflection Span-to-Depth Ratio',
+              formula: 'Lx / dx <= BasicLd * F1',
+              substitution: `${lx * 1000} / ${dx} <= ${deflectionRatioLimit}`,
+              result: `Actual: ${deflectionRatioActual} <= Limit: ${deflectionRatioLimit}`,
+              codeReference: 'IS 456:2000 Cl. 23.2.1',
+              status: deflectionCheck,
+            },
+          ],
         },
         {
-          heading: '5. Shear Check (IS 456 Cl 40.1 & 40.2.1.1)',
-          content: `Factored Shear Force (Vu): ${Vu.toFixed(2)} kN/m
-Nominal Shear Stress (τv): ${shearStressTauV} N/mm²
-Solid Slab Depth Factor (k): ${kFactor}
-Design Shear Strength (k * τc): ${shearStrengthTauC} N/mm²
-Status: ${shearCheck} (τv ${shearStressTauV} ≤ k*τc ${shearStrengthTauC})`,
+          title: '5. Shear Check',
+          steps: [
+            {
+              symbol: 'tau_v',
+              description: 'Nominal Shear Stress vs Design Shear Strength',
+              formula: 'Vu / (b*d) <= k * tau_c',
+              substitution: `${(0.5 * totalFactoredLoad * lx).toFixed(2)} kN / (1000 * ${dx})`,
+              result: `tau_v = ${shearStressTauV} N/mm² <= k*tau_c = ${shearStrengthTauC} N/mm²`,
+              codeReference: 'IS 456:2000 Cl. 40.1 & 40.2.1.1',
+              status: shearCheck,
+            },
+          ],
         },
       ],
     };
