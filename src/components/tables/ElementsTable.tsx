@@ -3,9 +3,12 @@ import { useProjectStore } from '@/features/projects/projectStore';
 import { DataTable, ColumnDef } from './DataTable';
 import { Member3D } from '@/features/model/types';
 import { exportToCsv } from '@/utils/exportUtils';
+import { BuildingDetailsPanel } from '@/components/engineering/BuildingDetailsPanel';
+import { Layers, Building, Ruler, FileSpreadsheet } from 'lucide-react';
 
 export const ElementsTable: React.FC = () => {
   const { activeModel, selectMember, setActiveView } = useProjectStore();
+  const [activeTab, setActiveTab] = useState<'ELEMENTS' | 'BUILDING_DETAILS'>('BUILDING_DETAILS');
   const [filterType, setFilterType] = useState<'ALL' | 'BEAM' | 'COLUMN' | 'BRACE'>('ALL');
 
   if (!activeModel) {
@@ -98,12 +101,12 @@ export const ElementsTable: React.FC = () => {
       align: 'center',
       cell: (r) => (
         <button
-          onClick={(e) => {
-            e.stopPropagation();
+          type="button"
+          onClick={() => {
             selectMember(r.id);
             setActiveView('3d-model');
           }}
-          className="px-2 py-1 text-[11px] bg-slate-100 hover:bg-secondary-brand hover:text-white rounded border border-ui-border transition-colors font-mono"
+          className="px-2.5 py-1 text-[11px] bg-secondary-brand/10 hover:bg-secondary-brand/20 text-secondary-brand rounded font-mono font-semibold transition-colors"
         >
           View in 3D
         </button>
@@ -115,8 +118,8 @@ export const ElementsTable: React.FC = () => {
   const handleExport = () => {
     exportToCsv(
       members.map((m) => ({
-        MemberId: m.id,
-        Classification: m.classification,
+        ID: m.id,
+        Type: m.classification,
         StartNode: m.startNodeId,
         EndNode: m.endNodeId,
         Length_m: m.length,
@@ -128,40 +131,76 @@ export const ElementsTable: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full space-y-3 p-4 bg-ui-background overflow-hidden">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-full bg-slate-950 text-slate-100 font-mono overflow-hidden select-none">
+      {/* Analysis & Geometry Top Switcher Header */}
+      <div className="flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-800 shadow-md">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-mono text-slate-500 font-semibold uppercase">Classification:</span>
-          {(['ALL', 'BEAM', 'COLUMN', 'BRACE'] as const).map((cls) => (
-            <button
-              key={cls}
-              onClick={() => setFilterType(cls)}
-              className={`px-3 py-1 text-xs font-mono rounded border transition-colors ${
-                filterType === cls
-                  ? 'bg-deep-navy text-white border-deep-navy shadow-sm'
-                  : 'bg-white text-slate-700 border-ui-border hover:bg-slate-50'
-              }`}
-            >
-              {cls}
-            </button>
-          ))}
+          <button
+            onClick={() => setActiveTab('BUILDING_DETAILS')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded text-xs font-bold transition-all border ${
+              activeTab === 'BUILDING_DETAILS'
+                ? 'bg-indigo-600 text-white border-indigo-500 shadow'
+                : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+            }`}
+          >
+            <Building className="w-4 h-4 text-indigo-300" />
+            <span>Building Details &amp; Centerline Panel</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('ELEMENTS')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded text-xs font-bold transition-all border ${
+              activeTab === 'ELEMENTS'
+                ? 'bg-indigo-600 text-white border-indigo-500 shadow'
+                : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+            }`}
+          >
+            <Layers className="w-4 h-4 text-sky-300" />
+            <span>Structural Elements Table ({members.length})</span>
+          </button>
         </div>
+
+        {activeTab === 'ELEMENTS' && (
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-slate-400 font-semibold uppercase text-[11px]">Filter:</span>
+            {(['ALL', 'BEAM', 'COLUMN', 'BRACE'] as const).map((cls) => (
+              <button
+                key={cls}
+                onClick={() => setFilterType(cls)}
+                className={`px-2.5 py-1 text-xs rounded border font-bold transition-colors ${
+                  filterType === cls
+                    ? 'bg-indigo-950 text-indigo-300 border-indigo-700'
+                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                }`}
+              >
+                {cls}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
+      {/* Main Content Body */}
       <div className="flex-1 overflow-hidden">
-        <DataTable
-          data={members}
-          columns={columns}
-          title="STAAD STRUCTURAL MEMBERS & INCIDENCES"
-          searchPlaceholder="Search by member # or section..."
-          searchFilter={(item, q) =>
-            String(item.id).includes(q) ||
-            item.classification.toLowerCase().includes(q) ||
-            String(item.section.name || '').toLowerCase().includes(q)
-          }
-          onExportCsv={handleExport}
-          onRowClick={(r) => selectMember(r.id)}
-        />
+        {activeTab === 'BUILDING_DETAILS' ? (
+          <BuildingDetailsPanel />
+        ) : (
+          <div className="p-4 h-full flex flex-col space-y-3">
+            <DataTable
+              data={members}
+              columns={columns}
+              title="STAAD STRUCTURAL MEMBERS & INCIDENCES"
+              searchPlaceholder="Search by member # or section..."
+              searchFilter={(item, q) =>
+                String(item.id).includes(q) ||
+                item.classification.toLowerCase().includes(q) ||
+                String(item.section.name || '').toLowerCase().includes(q)
+              }
+              onExportCsv={handleExport}
+              onRowClick={(r) => selectMember(r.id)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

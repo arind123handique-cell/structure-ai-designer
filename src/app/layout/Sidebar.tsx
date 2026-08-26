@@ -48,7 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({ onHide }) => {
     { label: 'Member Forces', view: 'member-forces', icon: FileSpreadsheet },
     { label: 'Support Reactions', view: 'joint-reactions', icon: Building },
     { label: 'Load Cases & Comb.', view: 'load-cases', icon: Workflow },
-    { label: 'Structural Elements', view: 'elements', icon: Layers },
+    { label: 'Elements & Building Details', view: 'elements', icon: Layers },
     { label: 'Model Warnings', view: 'warnings', icon: ShieldAlert, badge: warningsCount ? String(warningsCount) : undefined },
   ];
 
