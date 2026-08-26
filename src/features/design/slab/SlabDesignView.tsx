@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useProjectStore } from '@/features/projects/projectStore';
+import { Plate3D, Node3D } from '@/features/model/types';
 import {
   SlabDesignEngine,
   SlabDesignInput,
@@ -89,6 +90,78 @@ export const SlabDesignView: React.FC = () => {
 
   const [selectedPanelId, setSelectedPanelId] = useState<string>('S1');
   const [selectedReportOutput, setSelectedReportOutput] = useState<SlabDesignOutput | null>(null);
+
+  // Extract floor slab panels directly from imported STAAD .std / .anl model plates (EXCLUDING shear wall plates)
+  const modelSlabPanels = useMemo(() => {
+    if (!activeModel?.plates || activeModel.plates.size === 0) return [];
+
+    const plateList = Array.from(activeModel.plates.values());
+    // Filter ONLY SLAB plates (EXCLUDE SHEAR WALL PLATES)
+    const slabPlates = plateList.filter(
+      (p: Plate3D) => p.classification === 'SLAB' && !p.isLiftCore
+    );
+    if (slabPlates.length === 0) return [];
+
+    const floorMap = new Map<number, Plate3D[]>();
+    slabPlates.forEach((p: Plate3D) => {
+      const pNodes = p.nodeIds.map((id) => activeModel.nodes.get(id)).filter(Boolean) as Node3D[];
+      if (pNodes.length > 0) {
+        const avgY = Math.round((pNodes.reduce((acc: number, n: Node3D) => acc + n.y, 0) / pNodes.length) * 10) / 10;
+        if (!floorMap.has(avgY)) floorMap.set(avgY, []);
+        floorMap.get(avgY)!.push(p);
+      }
+    });
+
+    const panels: SlabDesignInput[] = [];
+    let idx = 1;
+    const sortedElevations = Array.from(floorMap.keys()).sort((a, b) => a - b);
+
+    sortedElevations.forEach((yElev, flIdx) => {
+      const platesAtFloor = floorMap.get(yElev)!;
+      const floorLabel = flIdx === 0 ? 'GROUND FLOOR' : `FLOOR (+${yElev}m)`;
+
+      platesAtFloor.forEach((p: Plate3D) => {
+        const pNodes = p.nodeIds.map((id) => activeModel.nodes.get(id)).filter(Boolean) as Node3D[];
+        if (pNodes.length < 3) return;
+
+        const xCoords = pNodes.map((n: Node3D) => n.x);
+        const zCoords = pNodes.map((n: Node3D) => n.z);
+        const dx = Math.max(...xCoords) - Math.min(...xCoords);
+        const dz = Math.max(...zCoords) - Math.min(...zCoords);
+
+        const span1 = Number(Math.max(dx, dz).toFixed(2));
+        const span2 = Number(Math.min(dx, dz).toFixed(2));
+
+        const lx = Math.max(1.5, span2 > 0 ? span2 : span1);
+        const ly = Math.max(lx, span1);
+
+        // Exact thickness from STAAD .std / .anl file (e.g. 0.12m -> 120mm)
+        const thicknessMm = p.thickness ? Math.round(p.thickness * 1000) : 120;
+
+        panels.push({
+          panelId: `S${idx++}`,
+          floorLevel: floorLabel,
+          lx,
+          ly,
+          thickness: thicknessMm,
+          boundaryCondition: ly / lx > 2.0 ? 'ONE_WAY_CONTINUOUS' : 'INTERIOR',
+          liveLoad: 2.0,
+          fck,
+          fy,
+        });
+      });
+    });
+
+    return panels;
+  }, [activeModel, fck, fy]);
+
+  // Auto-populate from STAAD model plates on initial load if present
+  useEffect(() => {
+    if (modelSlabPanels.length > 0) {
+      setPanelsInput(modelSlabPanels);
+      setSelectedPanelId(modelSlabPanels[0].panelId);
+    }
+  }, [modelSlabPanels]);
 
   // Initialize from project design settings
   useEffect(() => {
@@ -183,6 +256,20 @@ export const SlabDesignView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 text-xs">
+          {modelSlabPanels.length > 0 && (
+            <button
+              onClick={() => {
+                setPanelsInput(modelSlabPanels);
+                if (modelSlabPanels[0]) setSelectedPanelId(modelSlabPanels[0].panelId);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950 hover:bg-emerald-900 text-emerald-300 rounded font-bold transition-all border border-emerald-700"
+              title="Import floor slab plates from imported STAAD model (excluding shear wall plates)"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+              Import {modelSlabPanels.length} Panels from STAAD Model
+            </button>
+          )}
+
           <button
             onClick={handleAddPanel}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded font-bold transition-all border border-slate-700"
