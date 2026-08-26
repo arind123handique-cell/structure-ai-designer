@@ -595,7 +595,7 @@ export class BbsEngine {
 
           function parseRebarCallout(callout: string | undefined): { dia: number; spacing: number } | null {
             if (!callout) return null;
-            const m = callout.match(/T(\d+)\s*@\s*(\d+)/i);
+            const m = callout.match(/(?:T|Ø)?\s*(\d+)\s*(?:mm)?\s*@\s*(\d+)/i);
             return m ? { dia: parseInt(m[1]), spacing: parseInt(m[2]) } : null;
           }
           const parsedBotX = parseRebarCallout(cap.rebarCalloutX);
@@ -717,7 +717,7 @@ export class BbsEngine {
           const sideDia = g.parsedSide?.dia || getBestTieDia([10, 8]);
           const sideCountPerCap = (() => {
             if (g.cap.sideFaceRebarCallout) {
-              const m = g.cap.sideFaceRebarCallout.match(/^(\d+)-/);
+              const m = g.cap.sideFaceRebarCallout.match(/(\d+)\s*[-–\sTØ]/);
               if (m) return parseInt(m[1]);
             }
             return 3;
@@ -757,7 +757,7 @@ export class BbsEngine {
         if (foundationPlan.combinedPileCaps && foundationPlan.combinedPileCaps.length > 0) {
           function parseRebarCallout(callout: string | undefined): { dia: number; spacing: number } | null {
             if (!callout) return null;
-            const m = callout.match(/T(\d+)\s*@\s*(\d+)/i);
+            const m = callout.match(/(?:T|Ø)?\s*(\d+)\s*(?:mm)?\s*@\s*(\d+)/i);
             return m ? { dia: parseInt(m[1]), spacing: parseInt(m[2]) } : null;
           }
 
