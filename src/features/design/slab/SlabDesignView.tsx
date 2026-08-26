@@ -21,6 +21,8 @@ import {
   Maximize2,
   Grid,
   Download,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 export const SlabDesignView: React.FC = () => {
@@ -90,6 +92,7 @@ export const SlabDesignView: React.FC = () => {
 
   const [selectedPanelId, setSelectedPanelId] = useState<string>('S1');
   const [selectedReportOutput, setSelectedReportOutput] = useState<SlabDesignOutput | null>(null);
+  const [showDrawing, setShowDrawing] = useState<boolean>(false);
 
   // Extract floor slab panels directly from imported STAAD .std / .anl model plates (EXCLUDING shear wall plates)
   const modelSlabPanels = useMemo(() => {
@@ -519,9 +522,9 @@ export const SlabDesignView: React.FC = () => {
         </table>
       </div>
 
-      {/* Selected Panel Detail Section & Interactive Rebar Diagram */}
+      {/* Selected Panel Detail Section & Optional Rebar Diagram */}
       {activeOutput && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className={`grid grid-cols-1 ${showDrawing ? 'md:grid-cols-2' : ''} gap-4`}>
           {/* Rebar Detailing Summary Card */}
           <div className="bg-slate-900 p-4 rounded-lg border border-slate-800 space-y-3 text-xs">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
@@ -529,7 +532,18 @@ export const SlabDesignView: React.FC = () => {
                 <Sparkles className="w-4 h-4 text-indigo-400" />
                 PANEL {activeOutput.panelId} DETAILING SUMMARY ({activeOutput.slabType})
               </h3>
-              <span className="text-indigo-400 font-bold">{activeOutput.lx}m × {activeOutput.ly}m</span>
+              <div className="flex items-center gap-2">
+                <span className="text-indigo-400 font-bold">{activeOutput.lx}m × {activeOutput.ly}m</span>
+                <button
+                  type="button"
+                  onClick={() => setShowDrawing(!showDrawing)}
+                  className="flex items-center gap-1 text-[11px] px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 font-sans transition-colors"
+                  title="Toggle Slab Cross-Section Drawing"
+                >
+                  {showDrawing ? <EyeOff className="w-3 h-3 text-slate-400" /> : <Eye className="w-3 h-3 text-emerald-400" />}
+                  <span>{showDrawing ? 'Hide Drawing' : 'Show Drawing'}</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-[11px]">
@@ -567,51 +581,53 @@ export const SlabDesignView: React.FC = () => {
             </div>
           </div>
 
-          {/* Interactive 2D Cross-Section SVG Diagram */}
-          <div className="bg-slate-900 p-4 rounded-lg border border-slate-800 flex flex-col justify-between">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
-              <h3 className="text-sm font-bold text-white">
-                SLAB CROSS-SECTION REBAR DETAILING (PANEL {activeOutput.panelId})
-              </h3>
-              <span className="text-slate-400 text-xs font-sans">IS 456 Cl 26.5.2</span>
+          {/* Optional 2D Cross-Section SVG Diagram */}
+          {showDrawing && (
+            <div className="bg-slate-900 p-4 rounded-lg border border-slate-800 flex flex-col justify-between">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
+                <h3 className="text-sm font-bold text-white">
+                  SLAB CROSS-SECTION REBAR DETAILING (PANEL {activeOutput.panelId})
+                </h3>
+                <span className="text-slate-400 text-xs font-sans">IS 456 Cl 26.5.2</span>
+              </div>
+
+              <div className="w-full flex items-center justify-center p-2 bg-slate-950 rounded border border-slate-800">
+                <svg width="100%" height="160" viewBox="0 0 500 160" className="select-none">
+                  {/* Concrete Slab Outline */}
+                  <rect x="50" y="30" width="400" height="90" fill="#334155" stroke="#94a3b8" strokeWidth="2" rx="4" />
+                  
+                  {/* Bottom Main Bar Mesh (Red Line) */}
+                  <line x1="60" y1="105" x2="440" y2="105" stroke="#ef4444" strokeWidth="4" strokeLinecap="round" />
+                  {/* Bottom Cranked / U-Hooks */}
+                  <path d="M 60 105 L 60 60" fill="none" stroke="#ef4444" strokeWidth="4" />
+                  <path d="M 440 105 L 440 60" fill="none" stroke="#ef4444" strokeWidth="4" />
+
+                  {/* Transverse Bottom Dots */}
+                  {[90, 140, 190, 240, 290, 340, 390].map((cx) => (
+                    <circle key={`dot_${cx}`} cx={cx} cy="97" r="4" fill="#38bdf8" stroke="#0284c7" strokeWidth="1" />
+                  ))}
+
+                  {/* Top Negative Support Bars at Ends (Yellow) */}
+                  <line x1="60" y1="45" x2="150" y2="45" stroke="#f59e0b" strokeWidth="3" />
+                  <line x1="350" y1="45" x2="440" y2="45" stroke="#f59e0b" strokeWidth="3" />
+
+                  {/* Dimension Annotations */}
+                  <text x="250" y="22" fill="#e2e8f0" fontSize="11" textAnchor="middle" fontWeight="bold">
+                    Lx = {activeOutput.lx}m (Thickness D = {activeOutput.thickness}mm)
+                  </text>
+                  <text x="250" y="125" fill="#f87171" fontSize="10" textAnchor="middle">
+                    Main Bottom: {activeOutput.botRebarXCallout.split(' (')[0]}
+                  </text>
+                  <text x="100" y="40" fill="#fbbf24" fontSize="9">Top Support Steel</text>
+                  <text x="400" y="40" fill="#fbbf24" fontSize="9" textAnchor="end">Top Support Steel</text>
+                </svg>
+              </div>
+
+              <div className="text-[11px] text-slate-400 text-center font-sans mt-2">
+                Detailing complies with <strong className="text-white">IS 456:2000</strong> &amp; <strong className="text-white">SP 34 (S&amp;T):1987</strong>
+              </div>
             </div>
-
-            <div className="w-full flex items-center justify-center p-2 bg-slate-950 rounded border border-slate-800">
-              <svg width="100%" height="160" viewBox="0 0 500 160" className="select-none">
-                {/* Concrete Slab Outline */}
-                <rect x="50" y="30" width="400" height="90" fill="#334155" stroke="#94a3b8" strokeWidth="2" rx="4" />
-                
-                {/* Bottom Main Bar Mesh (Red Line) */}
-                <line x1="60" y1="105" x2="440" y2="105" stroke="#ef4444" strokeWidth="4" strokeLinecap="round" />
-                {/* Bottom Cranked / U-Hooks */}
-                <path d="M 60 105 L 60 60" fill="none" stroke="#ef4444" strokeWidth="4" />
-                <path d="M 440 105 L 440 60" fill="none" stroke="#ef4444" strokeWidth="4" />
-
-                {/* Transverse Bottom Dots */}
-                {[90, 140, 190, 240, 290, 340, 390].map((cx) => (
-                  <circle key={`dot_${cx}`} cx={cx} cy="97" r="4" fill="#38bdf8" stroke="#0284c7" strokeWidth="1" />
-                ))}
-
-                {/* Top Negative Support Bars at Ends (Yellow) */}
-                <line x1="60" y1="45" x2="150" y2="45" stroke="#f59e0b" strokeWidth="3" />
-                <line x1="350" y1="45" x2="440" y2="45" stroke="#f59e0b" strokeWidth="3" />
-
-                {/* Dimension Annotations */}
-                <text x="250" y="22" fill="#e2e8f0" fontSize="11" textAnchor="middle" fontWeight="bold">
-                  Lx = {activeOutput.lx}m (Thickness D = {activeOutput.thickness}mm)
-                </text>
-                <text x="250" y="125" fill="#f87171" fontSize="10" textAnchor="middle">
-                  Main Bottom: {activeOutput.botRebarXCallout.split(' (')[0]}
-                </text>
-                <text x="100" y="40" fill="#fbbf24" fontSize="9">Top Support Steel</text>
-                <text x="400" y="40" fill="#fbbf24" fontSize="9" textAnchor="end">Top Support Steel</text>
-              </svg>
-            </div>
-
-            <div className="text-[11px] text-slate-400 text-center font-sans mt-2">
-              Detailing complies with <strong className="text-white">IS 456:2000</strong> &amp; <strong className="text-white">SP 34 (S&amp;T):1987</strong>
-            </div>
-          </div>
+          )}
         </div>
       )}
 
