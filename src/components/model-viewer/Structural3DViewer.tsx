@@ -455,12 +455,50 @@ export const Structural3DViewer: React.FC = () => {
       }
     });
 
+    // Build panel ID mapping for horizontal slab plates to support instant deletion in 3D
+    const horizontalSlabPlates = Array.from(plates.values()).filter(
+      (p: any) => p.classification !== 'WALL' && !p.isLiftCore
+    );
+    const slabFloorMap = new Map<number, typeof horizontalSlabPlates>();
+    horizontalSlabPlates.forEach((p) => {
+      const pNodes = p.nodeIds.map((id) => nodes.get(id)).filter(Boolean) as Node3D[];
+      if (pNodes.length > 0) {
+        const avgY = Math.round((pNodes.reduce((acc, n) => acc + n.y, 0) / pNodes.length) * 10) / 10;
+        if (!slabFloorMap.has(avgY)) slabFloorMap.set(avgY, []);
+        slabFloorMap.get(avgY)!.push(p);
+      }
+    });
+
+    const plateToPanelIdMap = new Map<number, string>();
+    let pIdx = 1;
+    const sortedElevs = Array.from(slabFloorMap.keys()).sort((a, b) => a - b);
+    sortedElevs.forEach((yElev) => {
+      const platesAtFloor = slabFloorMap.get(yElev)!;
+      platesAtFloor.forEach((p) => {
+        plateToPanelIdMap.set(p.id, `S${pIdx++}`);
+      });
+    });
+
+    const activeSlabPanelSet =
+      savedSlabDesigns && Object.keys(savedSlabDesigns).length > 0
+        ? new Set(Object.keys(savedSlabDesigns))
+        : null;
+
     // 2. Draw Plates — strictly differentiated: horizontal SLABS vs vertical SHEAR WALLS (Lift Core)
     if (filterLayers.showPlates) {
       plates.forEach((plate) => {
         const isWallPlate = plate.classification === 'WALL';
         if (isWallPlate && !showWalls) return;
         if (!isWallPlate && !showSlabs) return;
+
+        // If slab panel was deleted in Slab Design workspace, do NOT render in 3D model
+        if (!isWallPlate && activeSlabPanelSet) {
+          const panelId = plateToPanelIdMap.get(plate.id);
+          if (panelId && !activeSlabPanelSet.has(panelId)) {
+            return;
+          }
+        }
+
         if (plate.nodeIds.length >= 3) {
           const pNodes = plate.nodeIds.map((id) => nodes.get(id)).filter(Boolean) as Node3D[];
           if (pNodes.length >= 3) {
@@ -526,7 +564,7 @@ export const Structural3DViewer: React.FC = () => {
       });
     }
 
-    // 2c. Slab Numbers / Badges in 3D Model — respects showSlabLabels on/off switch
+    // 2c. Slab Numbers / Badges in 3D Model — respects showSlabLabels on/off switch and deleted slabs
     if (showSlabLabels && showSlabs && filterLayers.showPlates) {
       let slabLabelCount = 1;
       const slabPlates = Array.from(plates.values()).filter(
@@ -536,6 +574,11 @@ export const Structural3DViewer: React.FC = () => {
       const seenCenters: { x: number; y: number; z: number }[] = [];
 
       slabPlates.forEach((plate: any) => {
+        const panelId = plateToPanelIdMap.get(plate.id);
+        if (panelId && activeSlabPanelSet && !activeSlabPanelSet.has(panelId)) {
+          return; // Skip deleted slab label
+        }
+
         const pNodes = plate.nodeIds.map((id) => nodes.get(id)).filter(Boolean) as Node3D[];
         if (pNodes.length < 3) return;
 
@@ -551,7 +594,7 @@ export const Structural3DViewer: React.FC = () => {
 
         seenCenters.push({ x: cx, y: cy, z: cz });
 
-        const slabName = `S${slabLabelCount++}`;
+        const slabName = panelId || `S${slabLabelCount++}`;
         const thk = Math.round((plate.thickness || 0.13) * 1000);
         const isSelected = selectedPlateId === plate.id;
 
@@ -850,6 +893,7 @@ export const Structural3DViewer: React.FC = () => {
     supportPileAssignments,
     customPileCapOverrides,
     manualMergedPileCapGroups,
+    savedSlabDesigns,
   ]);
 
   // Click & Hover Raycasting with Multi-Selection Support

@@ -1234,7 +1234,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const currentProj = get().activeProject;
     if (!currentProj) return;
 
-    const slabObj: Record<string, any> = { ...(get().savedSlabDesigns || {}) };
+    const slabObj: Record<string, any> = {};
     if (designs) {
       if (designs instanceof Map) {
         designs.forEach((val, key) => {

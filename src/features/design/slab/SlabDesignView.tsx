@@ -371,6 +371,14 @@ export const SlabDesignView: React.FC = () => {
     const next = panelsInput.filter((p) => p.panelId !== id);
     setPanelsInput(next);
     if (selectedPanelId === id) setSelectedPanelId(next[0].panelId);
+
+    const nextDesigned: Record<string, SlabDesignOutput> = {};
+    next.forEach((p) => {
+      if (designedSlabs[p.panelId]) {
+        nextDesigned[p.panelId] = designedSlabs[p.panelId];
+      }
+    });
+    saveSlabDesigns(nextDesigned);
   };
 
   // Update Panel Input Field
