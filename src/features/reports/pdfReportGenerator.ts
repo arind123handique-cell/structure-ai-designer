@@ -1595,8 +1595,49 @@ export class PDFReportGenerator {
     const wallsDia32 = getDiaKg('SHEAR_WALL', 32);
     const wallsTotalSteelKg = wallsDia8 + wallsDia10 + wallsDia12 + wallsDia16 + wallsDia20 + wallsDia25 + wallsDia32;
 
+    // Slabs Takeoff
+    const savedSlabDesigns: Record<string, any> = (dataset as any)?.savedSlabDesigns || {};
+    const slabList = Object.values(savedSlabDesigns);
+    let slabsConcreteM3 = 0;
+    let slabsDia8 = 0;
+    let slabsDia10 = 0;
+    let slabsDia12 = 0;
+    let slabsDia16 = 0;
+    let slabsTotalSteelKg = 0;
+
+    slabList.forEach((s) => {
+      const area = (s.lx || 3.5) * (s.ly || 4.5);
+      const thk = (s.thickness || 130) / 1000;
+      slabsConcreteM3 += area * thk;
+      const wtKg = area * (s.steelWeightKgPerM2 || 10);
+      slabsTotalSteelKg += wtKg;
+
+      const barDia = s.barDiaX || 10;
+      if (barDia === 8) slabsDia8 += wtKg;
+      else if (barDia === 12) slabsDia12 += wtKg;
+      else if (barDia === 16) slabsDia16 += wtKg;
+      else slabsDia10 += wtKg;
+    });
+
     // 7. Assemble Component Diameter Breakdown Matrix
     const componentBreakdowns: ComponentDiameterBreakdown[] = [
+      {
+        component: 'Floor Slabs (IS 456 / RCDC)',
+        count: slabList.length,
+        concreteM3: slabsConcreteM3,
+        dia8Kg: slabsDia8,
+        dia10Kg: slabsDia10,
+        dia12Kg: slabsDia12,
+        dia16Kg: slabsDia16,
+        dia20Kg: 0,
+        dia25Kg: 0,
+        dia32Kg: 0,
+        totalSteelKg: slabsTotalSteelKg,
+        totalSteelMT: slabsTotalSteelKg / 1000,
+        steelIndexKgM3: slabsTotalSteelKg / (slabsConcreteM3 || 1),
+        mainRebarCallout: 'T10 @ 150 c/c Bottom Mesh',
+        shearRebarCallout: 'Corner Torsion Mesh T8 @ 150',
+      },
       {
         component: 'Cast-in-situ Bored Piles (Dia 350mm)',
         count: totalPilesCount,

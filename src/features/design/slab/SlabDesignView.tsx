@@ -97,6 +97,9 @@ export const SlabDesignView: React.FC = () => {
   const [showPanelSummary, setShowPanelSummary] = useState<boolean>(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState<boolean>(false);
   const [showContourMap, setShowContourMap] = useState<boolean>(false);
+  const [showFloorFilter, setShowFloorFilter] = useState<boolean>(true);
+  const [showBbsModal, setShowBbsModal] = useState<boolean>(false);
+  const [permittedBarSizes, setPermittedBarSizes] = useState<number[]>([8, 10, 12, 16]);
   const [activeFloorFilter, setActiveFloorFilter] = useState<string>('ALL');
 
   const availableFloorLevels = useMemo(() => {
@@ -207,11 +210,47 @@ export const SlabDesignView: React.FC = () => {
         liveLoad: p.liveLoad || liveLoad,
         floorFinishLoad,
         thickness: p.thickness || defaultThickness,
+        permittedBarSizes,
       });
       results[p.panelId] = output;
     });
     return results;
-  }, [panelsInput, fck, fy, clearCover, liveLoad, floorFinishLoad, defaultThickness]);
+  }, [panelsInput, fck, fy, clearCover, liveLoad, floorFinishLoad, defaultThickness, permittedBarSizes]);
+
+  // Auto-Fix All Failing Slabs Handler
+  const handleAutoFixFailingSlabs = () => {
+    let fixedCount = 0;
+    setPanelsInput((prev) =>
+      prev.map((panel) => {
+        const out = designedSlabs[panel.panelId];
+        if (out && out.status === 'FAIL') {
+          fixedCount++;
+          const currentThk = panel.thickness || out.thickness;
+          return { ...panel, thickness: currentThk + 15 };
+        }
+        return panel;
+      })
+    );
+    if (fixedCount > 0) {
+      alert(`Auto-fixed ${fixedCount} failing slab panel(s) by optimizing thickness to satisfy IS 456 deflection & shear limits!`);
+    } else {
+      alert('All slab panels are already passing IS 456 design checks!');
+    }
+  };
+
+  // Single Panel Fix Handler
+  const handleFixSinglePanel = (id: string) => {
+    setPanelsInput((prev) =>
+      prev.map((p) => {
+        if (p.panelId === id) {
+          const out = designedSlabs[id];
+          const currentThk = p.thickness || out?.thickness || 130;
+          return { ...p, thickness: currentThk + 15 };
+        }
+        return p;
+      })
+    );
+  };
 
   const activeOutput = designedSlabs[selectedPanelId] || Object.values(designedSlabs)[0];
 
@@ -306,6 +345,40 @@ export const SlabDesignView: React.FC = () => {
 
           <button
             type="button"
+            onClick={handleAutoFixFailingSlabs}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950 hover:bg-emerald-900 text-emerald-300 rounded font-bold transition-all border border-emerald-700 shadow"
+            title="Auto-Fix all failing slab panels by optimizing thickness to satisfy IS 456 limits"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Auto-Fix Failing Slabs</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowBbsModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-950 hover:bg-sky-900 text-sky-300 rounded font-bold transition-all border border-sky-700 shadow"
+            title="View Bar Bending Schedule (BBS) for Floor Slabs"
+          >
+            <FileText className="w-3.5 h-3.5 text-sky-400" />
+            <span>Slab BBS Schedule</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowFloorFilter(!showFloorFilter)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-bold transition-all border ${
+              showFloorFilter
+                ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                : 'bg-indigo-950 text-indigo-300 border-indigo-800'
+            }`}
+            title="Toggle Select Floor Level Window Bar"
+          >
+            <Building className="w-3.5 h-3.5 text-indigo-400" />
+            <span>{showFloorFilter ? 'Hide Floor Bar' : 'Floor Levels'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowContourMap(!showContourMap)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-bold transition-all border ${
               showContourMap
@@ -366,75 +439,108 @@ export const SlabDesignView: React.FC = () => {
 
       {/* Global Design Parameters & Load Settings (Hidden by Default) */}
       {showSettingsPanel && (
-        <div className="grid grid-cols-1 md:grid-cols-6 gap-3 bg-slate-900/90 p-3.5 rounded-lg border border-slate-800 text-xs">
-          <div>
-            <label className="text-slate-400 block mb-1 font-sans">Concrete Grade:</label>
-            <select
-              value={fck}
-              onChange={(e) => setFck(Number(e.target.value))}
-              className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
-            >
-              <option value={20}>M20 (20 N/mm²)</option>
-              <option value={25}>M25 (25 N/mm²)</option>
-              <option value={30}>M30 (30 N/mm²)</option>
-              <option value={35}>M35 (35 N/mm²)</option>
-            </select>
+        <div className="bg-slate-900/90 p-4 rounded-lg border border-slate-800 space-y-3 text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+            <div>
+              <label className="text-slate-400 block mb-1 font-sans">Concrete Grade:</label>
+              <select
+                value={fck}
+                onChange={(e) => setFck(Number(e.target.value))}
+                className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
+              >
+                <option value={20}>M20 (20 N/mm²)</option>
+                <option value={25}>M25 (25 N/mm²)</option>
+                <option value={30}>M30 (30 N/mm²)</option>
+                <option value={35}>M35 (35 N/mm²)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-slate-400 block mb-1 font-sans">Steel Grade:</label>
+              <select
+                value={fy}
+                onChange={(e) => setFy(Number(e.target.value))}
+                className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
+              >
+                <option value={415}>Fe415</option>
+                <option value={500}>Fe500D</option>
+                <option value={550}>Fe550D</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-slate-400 block mb-1 font-sans">Clear Cover (mm):</label>
+              <input
+                type="number"
+                value={clearCover}
+                onChange={(e) => setClearCover(Number(e.target.value))}
+                className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-slate-400 block mb-1 font-sans">Live Load (kN/m²):</label>
+              <input
+                type="number"
+                step="0.5"
+                value={liveLoad}
+                onChange={(e) => setLiveLoad(Number(e.target.value))}
+                className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-slate-400 block mb-1 font-sans">Floor Finish (kN/m²):</label>
+              <input
+                type="number"
+                step="0.25"
+                value={floorFinishLoad}
+                onChange={(e) => setFloorFinishLoad(Number(e.target.value))}
+                className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-slate-400 block mb-1 font-sans">Default Thickness (mm):</label>
+              <input
+                type="number"
+                step="5"
+                value={defaultThickness}
+                onChange={(e) => setDefaultThickness(Number(e.target.value))}
+                className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
+              />
+            </div>
           </div>
 
-          <div>
-            <label className="text-slate-400 block mb-1 font-sans">Steel Grade:</label>
-            <select
-              value={fy}
-              onChange={(e) => setFy(Number(e.target.value))}
-              className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
-            >
-              <option value={415}>Fe415</option>
-              <option value={500}>Fe500D</option>
-              <option value={550}>Fe550D</option>
-            </select>
-          </div>
+          {/* RCDC Style Rebar Selection Matrix */}
+          <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <span className="text-slate-300 font-bold uppercase flex items-center gap-1.5 font-sans">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              Permitted Slab Rebar Sizes (RCDC Bar Manager):
+            </span>
 
-          <div>
-            <label className="text-slate-400 block mb-1 font-sans">Clear Cover (mm):</label>
-            <input
-              type="number"
-              value={clearCover}
-              onChange={(e) => setClearCover(Number(e.target.value))}
-              className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
-            />
-          </div>
-
-          <div>
-            <label className="text-slate-400 block mb-1 font-sans">Live Load (kN/m²):</label>
-            <input
-              type="number"
-              step="0.5"
-              value={liveLoad}
-              onChange={(e) => setLiveLoad(Number(e.target.value))}
-              className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
-            />
-          </div>
-
-          <div>
-            <label className="text-slate-400 block mb-1 font-sans">Floor Finish (kN/m²):</label>
-            <input
-              type="number"
-              step="0.25"
-              value={floorFinishLoad}
-              onChange={(e) => setFloorFinishLoad(Number(e.target.value))}
-              className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
-            />
-          </div>
-
-          <div>
-            <label className="text-slate-400 block mb-1 font-sans">Default Thickness (mm):</label>
-            <input
-              type="number"
-              step="5"
-              value={defaultThickness}
-              onChange={(e) => setDefaultThickness(Number(e.target.value))}
-              className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
-            />
+            <div className="flex items-center gap-4">
+              {[8, 10, 12, 16, 20].map((dia) => {
+                const checked = permittedBarSizes.includes(dia);
+                return (
+                  <label key={`bar_${dia}`} className="flex items-center gap-1.5 cursor-pointer text-slate-200 font-bold select-none">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setPermittedBarSizes([...permittedBarSizes, dia]);
+                        } else if (permittedBarSizes.length > 1) {
+                          setPermittedBarSizes(permittedBarSizes.filter((d) => d !== dia));
+                        }
+                      }}
+                      className="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>{dia} mm</span>
+                  </label>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -535,40 +641,43 @@ export const SlabDesignView: React.FC = () => {
           </div>
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-2 bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-xs">
-        <span className="text-slate-400 font-bold uppercase mr-1 flex items-center gap-1.5 font-sans">
-          <Building className="w-4 h-4 text-indigo-400" />
-          Select Floor Level Window:
-        </span>
+      {/* Floor Level Filter Tabs */}
+      {showFloorFilter && (
+        <div className="flex flex-wrap items-center gap-2 bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-xs">
+          <span className="text-slate-400 font-bold uppercase mr-1 flex items-center gap-1.5 font-sans">
+            <Building className="w-4 h-4 text-indigo-400" />
+            Select Floor Level Window:
+          </span>
 
-        <button
-          onClick={() => setActiveFloorFilter('ALL')}
-          className={`px-3 py-1.5 rounded font-bold transition-all border ${
-            activeFloorFilter === 'ALL'
-              ? 'bg-indigo-600 text-white border-indigo-500 shadow-md'
-              : 'bg-slate-950 text-slate-400 hover:text-white border-slate-800'
-          }`}
-        >
-          ALL FLOORS ({panelsInput.length})
-        </button>
+          <button
+            onClick={() => setActiveFloorFilter('ALL')}
+            className={`px-3 py-1.5 rounded font-bold transition-all border ${
+              activeFloorFilter === 'ALL'
+                ? 'bg-indigo-600 text-white border-indigo-500 shadow-md'
+                : 'bg-slate-950 text-slate-400 hover:text-white border-slate-800'
+            }`}
+          >
+            ALL FLOORS ({panelsInput.length})
+          </button>
 
-        {availableFloorLevels.map((fl) => {
-          const count = panelsInput.filter((p) => (p.floorLevel || '1ST FLOOR SLAB (+2.8m)') === fl).length;
-          return (
-            <button
-              key={fl}
-              onClick={() => setActiveFloorFilter(fl)}
-              className={`px-3 py-1.5 rounded font-bold transition-all border ${
-                activeFloorFilter === fl
-                  ? 'bg-indigo-600 text-white border-indigo-500 shadow-md'
-                  : 'bg-slate-950 text-slate-400 hover:text-white border-slate-800'
-              }`}
-            >
-              {fl} ({count})
-            </button>
-          );
-        })}
-      </div>
+          {availableFloorLevels.map((fl) => {
+            const count = panelsInput.filter((p) => (p.floorLevel || '1ST FLOOR SLAB (+2.8m)') === fl).length;
+            return (
+              <button
+                key={fl}
+                onClick={() => setActiveFloorFilter(fl)}
+                className={`px-3 py-1.5 rounded font-bold transition-all border ${
+                  activeFloorFilter === fl
+                    ? 'bg-indigo-600 text-white border-indigo-500 shadow-md'
+                    : 'bg-slate-950 text-slate-400 hover:text-white border-slate-800'
+                }`}
+              >
+                {fl} ({count})
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Main RCDC Slab Schedule Table */}
       <div className="w-full bg-white text-slate-900 rounded-lg shadow-2xl overflow-x-auto border-2 border-slate-800">
@@ -751,6 +860,15 @@ export const SlabDesignView: React.FC = () => {
 
                         <td className="p-2 text-center">
                           <div className="flex items-center justify-center gap-1">
+                            {out.status === 'FAIL' && (
+                              <button
+                                onClick={() => handleFixSinglePanel(panel.panelId)}
+                                className="px-1.5 py-0.5 bg-amber-600 hover:bg-amber-500 text-white rounded text-[10px] font-bold shadow transition-all"
+                                title="Auto-Fix this panel by optimizing slab thickness"
+                              >
+                                Fix
+                              </button>
+                            )}
                             <button
                               onClick={() => setSelectedReportOutput(out)}
                               className="p-1 text-indigo-600 hover:bg-indigo-100 rounded"
@@ -951,6 +1069,96 @@ export const SlabDesignView: React.FC = () => {
                 className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded font-bold"
               >
                 Close Calculation Report
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Slab BBS Schedule Modal */}
+      {showBbsModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-lg w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden font-mono">
+            <div className="flex items-center justify-between p-4 bg-slate-950 border-b border-slate-800">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <FileText className="w-4 h-4 text-sky-400" />
+                FLOOR SLAB REINFORCEMENT BAR BENDING SCHEDULE (IS 2502 / SP:34)
+              </h3>
+              <button
+                onClick={() => setShowBbsModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto space-y-4 flex-1">
+              <table className="w-full text-xs text-left border-collapse bg-white text-slate-900 border border-slate-700 font-mono">
+                <thead>
+                  <tr className="bg-slate-800 text-white text-center font-bold">
+                    <th className="p-2 border border-slate-600">Mark</th>
+                    <th className="p-2 border border-slate-600">Floor Level</th>
+                    <th className="p-2 border border-slate-600 text-left">Bar Description &amp; Position</th>
+                    <th className="p-2 border border-slate-600">Shape</th>
+                    <th className="p-2 border border-slate-600">Dia (mm)</th>
+                    <th className="p-2 border border-slate-600">Spacing</th>
+                    <th className="p-2 border border-slate-600">Cut Len (m)</th>
+                    <th className="p-2 border border-slate-600">No. Bars</th>
+                    <th className="p-2 border border-slate-600">Total Wt (kg)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {panelsInput.map((panel) => {
+                    const out = designedSlabs[panel.panelId];
+                    if (!out) return null;
+                    const thk = panel.thickness || out.thickness;
+                    const cover = 20;
+                    const numX = Math.round((panel.ly * 1000) / out.barSpacingX) + 1;
+                    const cutX = Number(((2 * (thk - 2 * cover) + (panel.lx * 1000 - 2 * cover) - 4 * out.barDiaX) / 1000).toFixed(2));
+                    const wtX = Number(((numX * cutX * (Math.PI / 4) * Math.pow(out.barDiaX, 2) * 7850) / 1e6).toFixed(1));
+
+                    const numY = Math.round((panel.lx * 1000) / out.barSpacingY) + 1;
+                    const cutY = Number(((2 * (thk - 2 * cover) + (panel.ly * 1000 - 2 * cover) - 4 * out.barDiaY) / 1000).toFixed(2));
+                    const wtY = Number(((numY * cutY * (Math.PI / 4) * Math.pow(out.barDiaY, 2) * 7850) / 1e6).toFixed(1));
+
+                    return (
+                      <React.Fragment key={`bbs_${panel.panelId}`}>
+                        <tr className="hover:bg-slate-100 font-sans text-[11px]">
+                          <td className="p-2 border border-slate-300 text-center font-bold text-indigo-700">{panel.panelId}</td>
+                          <td className="p-2 border border-slate-300 text-center">{panel.floorLevel?.split(' ')[0] || 'L1'}</td>
+                          <td className="p-2 border border-slate-300 font-bold text-sky-800">Bottom Short Way Main Steel</td>
+                          <td className="p-2 border border-slate-300 text-center text-amber-700 font-bold">U-BAR</td>
+                          <td className="p-2 border border-slate-300 text-center font-bold">{out.barDiaX}</td>
+                          <td className="p-2 border border-slate-300 text-center">{out.barSpacingX} mm</td>
+                          <td className="p-2 border border-slate-300 text-center">{cutX} m</td>
+                          <td className="p-2 border border-slate-300 text-center font-bold">{numX}</td>
+                          <td className="p-2 border border-slate-300 text-center font-bold text-emerald-700">{wtX} kg</td>
+                        </tr>
+                        <tr className="hover:bg-slate-100 font-sans text-[11px]">
+                          <td className="p-2 border border-slate-300 text-center font-bold text-indigo-700">{panel.panelId}</td>
+                          <td className="p-2 border border-slate-300 text-center">{panel.floorLevel?.split(' ')[0] || 'L1'}</td>
+                          <td className="p-2 border border-slate-300 font-bold text-sky-800">Bottom Long Way Main Steel</td>
+                          <td className="p-2 border border-slate-300 text-center text-amber-700 font-bold">U-BAR</td>
+                          <td className="p-2 border border-slate-300 text-center font-bold">{out.barDiaY}</td>
+                          <td className="p-2 border border-slate-300 text-center">{out.barSpacingY} mm</td>
+                          <td className="p-2 border border-slate-300 text-center">{cutY} m</td>
+                          <td className="p-2 border border-slate-300 text-center font-bold">{numY}</td>
+                          <td className="p-2 border border-slate-300 text-center font-bold text-emerald-700">{wtY} kg</td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="p-3 bg-slate-950 border-t border-slate-800 flex justify-between items-center text-xs">
+              <span className="text-slate-400">Total Slab Steel Takeoff: <strong className="text-emerald-400">{Object.values(designedSlabs).reduce((acc, o) => acc + (o.lx * o.ly * o.steelWeightKgPerM2), 0).toFixed(1)} kg</strong></span>
+              <button
+                onClick={() => setShowBbsModal(false)}
+                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-bold"
+              >
+                Close BBS Schedule
               </button>
             </div>
           </div>

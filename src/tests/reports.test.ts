@@ -185,7 +185,7 @@ describe('Reports and Multi-Sheet Excel Engine', () => {
     expect(designs.shearWallsSummary[0].boundaryRebar).toBeDefined();
 
     expect(designs.pileCapsSummary.length).toBe(1);
-    expect(designs.componentBreakdowns.length).toBe(6); // Piles, Pile Caps, Grade Beams, Columns, Beams, Shear Walls
+    expect(designs.componentBreakdowns.length).toBe(7); // Slabs, Piles, Pile Caps, Grade Beams, Columns, Beams, Shear Walls
     expect(designs.grandTotals.dia8).toBeGreaterThan(0);
     expect(designs.grandTotals.dia16).toBeGreaterThan(0);
     expect(designs.grandTotals.dia20).toBeGreaterThan(0);

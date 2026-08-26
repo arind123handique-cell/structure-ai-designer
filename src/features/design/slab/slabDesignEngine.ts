@@ -29,6 +29,7 @@ export interface SlabDesignInput {
   boundaryCondition?: SlabBoundaryCondition;
   preferredBarDia?: number; // Preferred main bar diameter in mm (default: 10)
   distributionBarDia?: number; // Distribution bar diameter in mm (default: 8)
+  permittedBarSizes?: number[]; // Allowed rebar sizes e.g. [8, 10, 12]
 }
 
 export interface SlabDesignOutput {
@@ -180,7 +181,7 @@ export class SlabDesignEngine {
       floorFinishLoad = 1.0,
       partitionLoad = 1.0,
       clearCover = 20,
-      preferredBarDia = 10,
+      preferredBarDia: inputPreferredBarDia = 10,
       distributionBarDia = 8,
     } = input;
 
@@ -212,6 +213,13 @@ export class SlabDesignEngine {
         : slabType === 'ONE_WAY' || slabType === 'TWO_WAY_SIMPLY_SUPPORTED'
         ? 20
         : 26;
+
+    const allowedBars = input.permittedBarSizes && input.permittedBarSizes.length > 0
+      ? input.permittedBarSizes
+      : [8, 10, 12, 16];
+    const preferredBarDia = allowedBars.includes(inputPreferredBarDia)
+      ? inputPreferredBarDia
+      : allowedBars[0];
 
     const minDReqMm = Math.ceil((lx * 1000) / (basicLdRatio * 1.25)) + clearCover + preferredBarDia / 2;
     const initialMinThickness = Math.max(125, Math.ceil(minDReqMm / 10) * 10);
