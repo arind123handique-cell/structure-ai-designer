@@ -208,15 +208,13 @@ describe('IS 456 & SP:34 Rigid Pile Cap Design Engine', () => {
 
     const dummyCaps = new Map<number, any>();
 
-    // Case 1: Without detachment, nodes 364, 365, 366 form a shear wall combined cap
+    // Case 1: Auto-detection disabled — no combined cap is formed without manual merge
     const initialGroups = CombinedPileCapEngine.detectAndDesignAll(mockModel, dummyCaps, 350, []);
-    expect(initialGroups.length).toBe(1);
-    expect(initialGroups[0].nodeIds).toEqual(expect.arrayContaining([364, 365, 366]));
+    expect(initialGroups.length).toBe(0);
 
-    // Case 2: When user explicitly detaches nodes 364 and 365
+    // Case 2: When user explicitly detaches nodes 364 and 365 — still no combined cap
     const detached = [364, 365];
     const afterDetachGroups = CombinedPileCapEngine.detectAndDesignAll(mockModel, dummyCaps, 350, [], detached);
-    // Since only node 366 remains (which is < 2 nodes), no combined cap is formed; all become individual caps
     expect(afterDetachGroups.length).toBe(0);
   });
 

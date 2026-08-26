@@ -531,57 +531,11 @@ export class PileCapDesignEngine {
   public static batchDesignAndStandardize(
     inputs: PileCapDesignInput[]
   ): Map<number, PileCapDesignOutput> {
-    const initialMap = new Map<number, PileCapDesignOutput>();
-    const countGroups = new Map<
-      number,
-      {
-        maxDepth: number;
-        maxLen: number;
-        maxWid: number;
-        inputs: PileCapDesignInput[];
-        outputs: PileCapDesignOutput[];
-      }
-    >();
+    const finalMap = new Map<number, PileCapDesignOutput>();
 
     for (const inp of inputs) {
       const out = this.design(inp);
-      initialMap.set(inp.supportNodeId, out);
-
-      // If manually overridden by user, keep individual custom specs
-      if (inp.customCapLength || inp.customCapWidth || inp.customCapDepth || inp.customPileCount) {
-        continue;
-      }
-
-      const grp = countGroups.get(out.pileCount) || {
-        maxDepth: 0,
-        maxLen: 0,
-        maxWid: 0,
-        inputs: [],
-        outputs: [],
-      };
-
-      grp.maxDepth = Math.max(grp.maxDepth, out.capDepth);
-      grp.maxLen = Math.max(grp.maxLen, out.capLength);
-      grp.maxWid = Math.max(grp.maxWid, out.capWidth);
-      grp.inputs.push(inp);
-      grp.outputs.push(out);
-      countGroups.set(out.pileCount, grp);
-    }
-
-    const finalMap = new Map<number, PileCapDesignOutput>(initialMap);
-
-    for (const [cnt, grp] of countGroups.entries()) {
-      for (const inp of grp.inputs) {
-        const standardizedOut = this.design({
-          ...inp,
-          customPileCount: cnt,
-          customCapLength: grp.maxLen,
-          customCapWidth: grp.maxWid,
-          customCapDepth: grp.maxDepth,
-        });
-        standardizedOut.isManuallyEdited = false;
-        finalMap.set(inp.supportNodeId, standardizedOut);
-      }
+      finalMap.set(inp.supportNodeId, out);
     }
 
     return finalMap;

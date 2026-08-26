@@ -361,17 +361,8 @@ export const PileCapDesignView: React.FC = () => {
       };
     });
 
-    // Group by pile count — batchDesignAndStandardize normalizes L×B×D within same pile count
-    const groupMap = new Map<string, typeof flatRows>();
-    for (const row of flatRows) {
-      const pileCount = row.design?.pileCount || 4;
-      const key = `${pileCount}`;
-      if (!groupMap.has(key)) groupMap.set(key, []);
-      groupMap.get(key)!.push(row);
-    }
-
-    // Build grouped rows: governing design = highest Pu in each group
-    const grouped: {
+    // Each pile cap displayed individually — no grouping
+    const individual: {
       nodeIds: number[];
       columnLabels: string[];
       colSlNo: number;
@@ -382,27 +373,20 @@ export const PileCapDesignView: React.FC = () => {
       isCustomized: boolean;
     }[] = [];
 
-    for (const group of groupMap.values()) {
-      const sorted = group.sort((a, b) => a.colSlNo - b.colSlNo);
-      // Representative = pile cap with highest axial load (governing design)
-      const governing = sorted.reduce((best, r) => {
-        const pu = r.design?.factoredVerticalLoad || 0;
-        const bestPu = best.design?.factoredVerticalLoad || 0;
-        return pu > bestPu ? r : best;
-      }, sorted[0]);
-      grouped.push({
-        nodeIds: sorted.map((r) => r.nodeId),
-        columnLabels: sorted.map((r) => r.columnLabel),
-        colSlNo: governing.colSlNo,
-        mark: governing.mark,
-        assignedTypeId: governing.assignedTypeId,
-        design: governing.design,
-        count: sorted.length,
-        isCustomized: sorted.some((r) => r.isCustomized),
+    for (const row of flatRows) {
+      individual.push({
+        nodeIds: [row.nodeId],
+        columnLabels: [row.columnLabel],
+        colSlNo: row.colSlNo,
+        mark: row.mark,
+        assignedTypeId: row.assignedTypeId,
+        design: row.design,
+        count: 1,
+        isCustomized: row.isCustomized,
       });
     }
 
-    return grouped.sort((a, b) => a.colSlNo - b.colSlNo);
+    return individual.sort((a, b) => a.colSlNo - b.colSlNo);
   }, [supportNodes, designedCaps, columnSupportMapping, availablePileTypes, supportPileAssignments, absorbedNodeMap, pileCountMarkMap, customPileCapOverrides]);
 
   const columns: ColumnDef<any>[] = [

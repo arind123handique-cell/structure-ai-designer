@@ -171,135 +171,42 @@ export const ColumnDesignView: React.FC = () => {
     const cover = activeProject.metadata.designSettings.clearCoverColumn || 40;
     const allowed = allowedColumnRebarDiameters || [12, 16, 20, 25];
 
-    // Step 1: Group columns into column lines by spatial position (same X, Z within 0.5m tolerance)
-    const columnLines: { key: string; members: typeof allColumns }[] = [];
-    for (const col of allColumns) {
-      const n1 = activeModel.nodes.get(col.startNodeId);
-      const n2 = activeModel.nodes.get(col.endNodeId);
-      const avgX = n1 && n2 ? (n1.x + n2.x) / 2 : n1?.x || 0;
-      const avgZ = n1 && n2 ? (n1.z + n2.z) / 2 : n1?.z || 0;
-
-      const key = `${avgX.toFixed(1)}_${avgZ.toFixed(1)}`;
-      let line = columnLines.find((l) => l.key === key);
-      if (!line) {
-        line = { key, members: [] };
-        columnLines.push(line);
-      }
-      line.members.push(col);
-    }
-
-    // Step 2: For each column line, find governing member (highest axial load) and design ONCE
+    // Design each column individually with its own section and forces
     const newMap = new Map<number, ColumnDesignOutput>();
 
-    for (const line of columnLines) {
-      // Find the member with the highest axial load in this column line
-      let governingCol = line.members[0];
-      let globalMaxPu = 0;
-      let globalMaxMux = 0;
-      let globalMaxMuy = 0;
-      let globalGovLC = 1;
+    for (const col of allColumns) {
+      const memberHeight = col.length || 3.5;
+      let memberPu = 0;
+      let memberMux = 0;
+      let memberMuy = 0;
+      let memberGovLC = 1;
 
-      for (const col of line.members) {
-        let localMaxPu = 0;
-        let localMux = 0;
-        let localMuy = 0;
-        let localGovLC = 1;
-
-        const forces = activeModel.memberForces.filter((f) => f.memberId === col.id);
-        for (const f of forces) {
-          if (Math.abs(f.axial) > localMaxPu) {
-            localMaxPu = Math.abs(f.axial);
-            localGovLC = f.loadCaseId;
-          }
-          if (Math.abs(f.mz) > localMux) localMux = Math.abs(f.mz);
-          if (Math.abs(f.my) > localMuy) localMuy = Math.abs(f.my);
+      const forces = activeModel.memberForces.filter((f) => f.memberId === col.id);
+      for (const f of forces) {
+        if (Math.abs(f.axial) > memberPu) {
+          memberPu = Math.abs(f.axial);
+          memberGovLC = f.loadCaseId;
         }
-
-        const startSup = activeModel.supports.get(col.startNodeId);
-        const endSup = activeModel.supports.get(col.endNodeId);
-        const supNodeId = startSup ? col.startNodeId : endSup ? col.endNodeId : null;
-        if (supNodeId) {
-          const reactions = activeModel.reactions.filter((r) => r.nodeId === supNodeId);
-          for (const r of reactions) {
-            if (r.fy > localMaxPu) {
-              localMaxPu = r.fy;
-              localGovLC = r.loadCaseId;
-            }
-          }
-        }
-
-        if (localMaxPu <= 0) {
-          const colInfo = columnMapping.get(col.id);
-          if (colInfo?.supportNodeId) {
-            const reactions = activeModel.reactions.filter((r) => r.nodeId === colInfo.supportNodeId);
-            for (const r of reactions) {
-              if (r.fy > localMaxPu) {
-                localMaxPu = r.fy;
-                localGovLC = r.loadCaseId;
-              }
-            }
-          }
-        }
-
-        if (localMaxPu <= 0) localMaxPu = 650;
-
-        if (localMaxPu > globalMaxPu) {
-          globalMaxPu = localMaxPu;
-          globalMaxMux = localMux;
-          globalMaxMuy = localMuy;
-          globalGovLC = localGovLC;
-          governingCol = col;
-        }
+        if (Math.abs(f.mz) > memberMux) memberMux = Math.abs(f.mz);
+        if (Math.abs(f.my) > memberMuy) memberMuy = Math.abs(f.my);
       }
 
-      // Use the governing member's section for the entire column line
-      const b = Math.round((governingCol.section.zd || 0.45) * 1000);
-      const D = Math.round((governingCol.section.yd || 0.55) * 1000);
-      const height = governingCol.length || 3.5;
-
-      // Design once for the governing case
-      const governingDesign = ColumnDesignEngine.design({
-        memberId: governingCol.id,
-        b,
-        D,
-        unsupportedHeight: height,
-        fck,
-        fy,
-        cover,
-        Pu: globalMaxPu,
-        Mux: globalMaxMux,
-        Muy: globalMaxMuy,
-        governingLoadCase: globalGovLC,
-        allowedDiameters: allowed,
-      });
-
-      // Check if user has a custom rebar override for the governing member
-      const customRebar = customRebarOverrides.get(governingCol.id);
-      const finalRebar = customRebar || governingDesign.rebar;
-
-      // Apply same design (section + rebar) to ALL members in this column line
-      for (const col of line.members) {
-        const memberHeight = col.length || 3.5;
-        let memberPu = 0;
-        let memberMux = 0;
-        let memberMuy = 0;
-        let memberGovLC = 1;
-
-        const forces = activeModel.memberForces.filter((f) => f.memberId === col.id);
-        for (const f of forces) {
-          if (Math.abs(f.axial) > memberPu) {
-            memberPu = Math.abs(f.axial);
-            memberGovLC = f.loadCaseId;
+      const startSup = activeModel.supports.get(col.startNodeId);
+      const endSup = activeModel.supports.get(col.endNodeId);
+      const supNodeId = startSup ? col.startNodeId : endSup ? col.endNodeId : null;
+      if (supNodeId) {
+        const reactions = activeModel.reactions.filter((r) => r.nodeId === supNodeId);
+        for (const r of reactions) {
+          if (r.fy > memberPu) {
+            memberPu = r.fy;
+            memberGovLC = r.loadCaseId;
           }
-          if (Math.abs(f.mz) > memberMux) memberMux = Math.abs(f.mz);
-          if (Math.abs(f.my) > memberMuy) memberMuy = Math.abs(f.my);
         }
-
-        const startSup = activeModel.supports.get(col.startNodeId);
-        const endSup = activeModel.supports.get(col.endNodeId);
-        const supNodeId = startSup ? col.startNodeId : endSup ? col.endNodeId : null;
-        if (supNodeId) {
-          const reactions = activeModel.reactions.filter((r) => r.nodeId === supNodeId);
+      }
+      if (memberPu <= 0) {
+        const colInfo = columnMapping.get(col.id);
+        if (colInfo?.supportNodeId) {
+          const reactions = activeModel.reactions.filter((r) => r.nodeId === colInfo.supportNodeId);
           for (const r of reactions) {
             if (r.fy > memberPu) {
               memberPu = r.fy;
@@ -307,55 +214,38 @@ export const ColumnDesignView: React.FC = () => {
             }
           }
         }
-        if (memberPu <= 0) {
-          const colInfo = columnMapping.get(col.id);
-          if (colInfo?.supportNodeId) {
-            const reactions = activeModel.reactions.filter((r) => r.nodeId === colInfo.supportNodeId);
-            for (const r of reactions) {
-              if (r.fy > memberPu) {
-                memberPu = r.fy;
-                memberGovLC = r.loadCaseId;
-              }
-            }
-          }
-        }
-        if (memberPu <= 0) memberPu = 650;
+      }
+      if (memberPu <= 0) memberPu = 650;
 
-        // Design with the SAME section (b, D) and SAME rebar as governing case
-        let memberDesign = ColumnDesignEngine.design({
-          memberId: col.id,
-          b,
-          D,
-          unsupportedHeight: memberHeight,
-          fck,
-          fy,
-          cover,
-          Pu: memberPu,
-          Mux: memberMux,
-          Muy: memberMuy,
-          governingLoadCase: memberGovLC,
-          allowedDiameters: allowed,
-        });
+      const b = Math.round((col.section.zd || 0.45) * 1000);
+      const D = Math.round((col.section.yd || 0.55) * 1000);
 
-        // Override rebar to match governing design (same column type)
+      let memberDesign = ColumnDesignEngine.design({
+        memberId: col.id,
+        b,
+        D,
+        unsupportedHeight: memberHeight,
+        fck,
+        fy,
+        cover,
+        Pu: memberPu,
+        Mux: memberMux,
+        Muy: memberMuy,
+        governingLoadCase: memberGovLC,
+        allowedDiameters: allowed,
+      });
+
+      // Check if user has a custom rebar override for this specific member
+      const memberCustomRebar = customRebarOverrides.get(col.id);
+      if (memberCustomRebar) {
         memberDesign = {
           ...memberDesign,
-          rebar: finalRebar,
-          dimensions: `${b} x ${D} mm`,
+          rebar: memberCustomRebar,
+          calculationReport: ColumnDesignEngine.rebuildReportWithRebar(memberDesign, memberCustomRebar),
         };
-
-        // Check if user has a custom rebar override for this specific member
-        const memberCustomRebar = customRebarOverrides.get(col.id);
-        if (memberCustomRebar) {
-          memberDesign = {
-            ...memberDesign,
-            rebar: memberCustomRebar,
-            calculationReport: ColumnDesignEngine.rebuildReportWithRebar(memberDesign, memberCustomRebar),
-          };
-        }
-
-        newMap.set(col.id, memberDesign);
       }
+
+      newMap.set(col.id, memberDesign);
     }
 
     setDesignedColumns(newMap);
@@ -586,16 +476,8 @@ export const ColumnDesignView: React.FC = () => {
       };
     });
 
-    // Group by same section (b×D) — governing rebar (highest Pu) shown for the group
-    const groupMap = new Map<string, typeof allRows>();
-    for (const row of allRows) {
-      const key = `${row.b_mm}x${row.D_mm}`;
-      if (!groupMap.has(key)) groupMap.set(key, []);
-      groupMap.get(key)!.push(row);
-    }
-
-    // Build grouped rows
-    const grouped: {
+    // Each column displayed individually — no grouping
+    const individual: {
       memberIds: number[];
       columnLabels: string[];
       columnSlNo: number;
@@ -606,28 +488,20 @@ export const ColumnDesignView: React.FC = () => {
       count: number;
     }[] = [];
 
-    for (const group of groupMap.values()) {
-      // Sort by SlNo for label ordering
-      const sorted = group.sort((a, b) => a.columnSlNo - b.columnSlNo);
-      // Representative = column with highest axial load (governing design)
-      const governing = sorted.reduce((best, r) => {
-        const pu = r.design?.factoredDemandPu || 0;
-        const bestPu = best.design?.factoredDemandPu || 0;
-        return pu > bestPu ? r : best;
-      }, sorted[0]);
-      grouped.push({
-        memberIds: sorted.map((r) => r.memberId),
-        columnLabels: sorted.map((r) => r.columnLabel),
-        columnSlNo: governing.columnSlNo,
-        dimensions: governing.dimensions,
-        height: governing.height,
-        wbsc: governing.wbsc,
-        design: governing.design,
-        count: sorted.length,
+    for (const row of allRows) {
+      individual.push({
+        memberIds: [row.memberId],
+        columnLabels: [row.columnLabel],
+        columnSlNo: row.columnSlNo,
+        dimensions: row.dimensions,
+        height: row.height,
+        wbsc: row.wbsc,
+        design: row.design,
+        count: 1,
       });
     }
 
-    return grouped
+    return individual
       .sort((a, b) => a.columnSlNo - b.columnSlNo)
       .filter((r) => {
         if (filterStatus === 'ALL') return true;

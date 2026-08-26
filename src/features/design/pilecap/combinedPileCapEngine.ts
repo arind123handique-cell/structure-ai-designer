@@ -131,37 +131,13 @@ export class CombinedPileCapEngine {
       }
     }
 
-    // Mark user-detached nodes as excluded from auto-merging/auto-clustering
+    // Mark user-detached nodes as excluded from manual merging
     if (detachedNodeIds && detachedNodeIds.length > 0) {
       detachedNodeIds.forEach((id) => absorbed.add(id));
     }
 
-    // 2. Process Shear Wall Clusters (plate-linked or closely clustered shear wall base nodes)
-    const remainingForSW = supportNodes.filter((n) => !absorbed.has(n.nodeId));
-    const shearWallGroups = CombinedPileCapEngine.detectShearWallClusters(
-      model,
-      remainingForSW,
-      pileDiameter,
-      customCombinedOverrides,
-      defaultSafeWorkingCapacity
-    );
-    for (const grp of shearWallGroups) {
-      grp.nodeIds.forEach((id) => absorbed.add(id));
-      results.push(grp);
-    }
-
-    // 3. Process Auto-Detected Closely-Spaced Column Pairs
-    const remainingForMerge = supportNodes.filter((n) => !absorbed.has(n.nodeId));
-    const merged = CombinedPileCapEngine.detectMergedPairs(
-      remainingForMerge,
-      designedIndividualCaps,
-      pileDiameter,
-      customCombinedOverrides,
-      defaultSafeWorkingCapacity
-    );
-    for (const grp of merged) {
-      results.push(grp);
-    }
+    // Auto-detection of shear wall clusters and closely-spaced columns removed.
+    // Only user-initiated manual merge groups are supported.
 
     return results;
   }
