@@ -96,6 +96,7 @@ export const SlabDesignView: React.FC = () => {
   const [showDrawing, setShowDrawing] = useState<boolean>(false);
   const [showPanelSummary, setShowPanelSummary] = useState<boolean>(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState<boolean>(false);
+  const [showContourMap, setShowContourMap] = useState<boolean>(false);
   const [activeFloorFilter, setActiveFloorFilter] = useState<string>('ALL');
 
   const availableFloorLevels = useMemo(() => {
@@ -305,6 +306,20 @@ export const SlabDesignView: React.FC = () => {
 
           <button
             type="button"
+            onClick={() => setShowContourMap(!showContourMap)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-bold transition-all border ${
+              showContourMap
+                ? 'bg-indigo-600 text-white border-indigo-500 shadow'
+                : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+            }`}
+            title="Toggle RCDC 2D Floor Plan Grid & Slab Contour Visualizer Map"
+          >
+            <Maximize2 className="w-3.5 h-3.5 text-sky-400" />
+            <span>{showContourMap ? 'Hide 2D Map' : '2D Contour Map'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowSettingsPanel(!showSettingsPanel)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-bold transition-all border ${
               showSettingsPanel
@@ -424,7 +439,102 @@ export const SlabDesignView: React.FC = () => {
         </div>
       )}
 
-      {/* Floor Level Filter Tabs */}
+      {/* RCDC Interactive 2D Floor Grid & Slab Contour Map Visualizer */}
+      {showContourMap && (
+        <div className="bg-slate-900 p-4 rounded-lg border border-slate-800 space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2 font-mono">
+              <Grid className="w-4 h-4 text-sky-400" />
+              STAAD.Pro / RCDC 2D SLAB BOUNDARY & GRID CONTOUR MAP ({activeFloorFilter})
+            </h3>
+            <span className="text-xs text-slate-400 font-sans">Click any panel to select &amp; view detailing</span>
+          </div>
+
+          <div className="w-full bg-slate-950 p-4 rounded border border-slate-800 overflow-x-auto flex items-center justify-center">
+            <svg width="680" height="280" viewBox="0 0 680 280" className="select-none font-mono">
+              {/* Grid Lines X */}
+              {[80, 220, 360, 500, 620].map((x, i) => (
+                <g key={`gridX_${x}`}>
+                  <line x1={x} y1="30" x2={x} y2="240" stroke="#334155" strokeDasharray="4 4" strokeWidth="1.5" />
+                  <circle cx={x} cy="20" r="11" fill="#1e293b" stroke="#64748b" strokeWidth="1.5" />
+                  <text x={x} y="24" fill="#38bdf8" fontSize="11" textAnchor="middle" fontWeight="bold">
+                    {String.fromCharCode(65 + i)}
+                  </text>
+                </g>
+              ))}
+
+              {/* Grid Lines Y */}
+              {[40, 130, 220].map((y, i) => (
+                <g key={`gridY_${y}`}>
+                  <line x1="60" y1={y} x2="640" y2={y} stroke="#334155" strokeDasharray="4 4" strokeWidth="1.5" />
+                  <circle cx="50" cy={y} r="11" fill="#1e293b" stroke="#64748b" strokeWidth="1.5" />
+                  <text x="50" y={y + 4} fill="#38bdf8" fontSize="11" textAnchor="middle" fontWeight="bold">
+                    {i + 1}
+                  </text>
+                </g>
+              ))}
+
+              {/* Slab Panels */}
+              {panelsInput.map((panel, idx) => {
+                const isSelected = panel.panelId === selectedPanelId;
+                const out = designedSlabs[panel.panelId];
+                // Lay out panels neatly across grid cells
+                const col = idx % 4;
+                const row = Math.floor(idx / 4);
+                const x = 80 + col * 140;
+                const y = 40 + row * 90;
+                const w = 135;
+                const h = 85;
+
+                return (
+                  <g
+                    key={panel.panelId}
+                    onClick={() => setSelectedPanelId(panel.panelId)}
+                    className="cursor-pointer transition-opacity hover:opacity-90"
+                  >
+                    {/* Panel Concrete Background */}
+                    <rect
+                      x={x}
+                      y={y}
+                      width={w}
+                      height={h}
+                      fill={isSelected ? '#312e81' : '#1e293b'}
+                      stroke={isSelected ? '#6366f1' : '#475569'}
+                      strokeWidth={isSelected ? '2.5' : '1.5'}
+                      rx="4"
+                    />
+
+                    {/* Edge Continuity Markers (Solid for Continuous, Dashed for Discontinuous) */}
+                    <line x1={x} y1={y} x2={x + w} y2={y} stroke="#38bdf8" strokeWidth="2" strokeDasharray={panel.boundaryCondition?.includes('DISCONTINUOUS') ? '3 3' : 'none'} />
+                    <line x1={x + w} y1={y} x2={x + w} y2={y + h} stroke="#38bdf8" strokeWidth="2" />
+                    <line x1={x} y1={y + h} x2={x + w} y2={y + h} stroke="#38bdf8" strokeWidth="2" />
+                    <line x1={x} y1={y} x2={x} y2={y + h} stroke="#38bdf8" strokeWidth="2" strokeDasharray={panel.boundaryCondition?.includes('DISCONTINUOUS') ? '3 3' : 'none'} />
+
+                    {/* Panel Label & Dimensions */}
+                    <text x={x + w / 2} y={y + 24} fill="#ffffff" fontSize="13" textAnchor="middle" fontWeight="bold">
+                      {panel.panelId} ({panel.floorLevel?.split(' ')[0] || 'L1'})
+                    </text>
+                    <text x={x + w / 2} y={y + 44} fill="#cbd5e1" fontSize="10" textAnchor="middle">
+                      {panel.lx}m × {panel.ly}m ({panel.thickness || out?.thickness || 130}mm)
+                    </text>
+                    <text x={x + w / 2} y={y + 64} fill={out?.status === 'PASS' ? '#34d399' : '#f87171'} fontSize="10" textAnchor="middle" fontWeight="bold">
+                      {out?.botRebarXCallout?.split(' (')[0] || 'Fe500'}
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+
+          <div className="flex items-center justify-between text-[11px] text-slate-400 font-sans">
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-sky-400 inline-block"></span> Solid Line: Continuous Edge</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-0.5 border-b border-dashed border-sky-400 inline-block"></span> Dashed Line: Discontinuous Edge</span>
+            </div>
+            <span>Auto Edge Detection &amp; Grid Assignment per <strong className="text-white">RCDC Cl 4.2</strong></span>
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2 bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-xs">
         <span className="text-slate-400 font-bold uppercase mr-1 flex items-center gap-1.5 font-sans">
           <Building className="w-4 h-4 text-indigo-400" />
@@ -479,6 +589,7 @@ export const SlabDesignView: React.FC = () => {
               <th className="border-r border-slate-400 p-2 w-48 text-left">Main Rebar (X-Dir)</th>
               <th className="border-r border-slate-400 p-2 w-48 text-left">Main Rebar (Y-Dir)</th>
               <th className="border-r border-slate-400 p-2 w-20">L/d Check</th>
+              <th className="border-r border-slate-400 p-2 w-24">Crack Width</th>
               <th className="border-r border-slate-400 p-2 w-16">Status</th>
               <th className="p-2 w-20">Actions</th>
             </tr>
@@ -501,7 +612,7 @@ export const SlabDesignView: React.FC = () => {
                 <React.Fragment key={floorLabel}>
                   {/* Floor Level Header Banner */}
                   <tr className="bg-slate-900 text-indigo-200 font-bold border-y-2 border-indigo-800">
-                    <td colSpan={12} className="p-2.5 text-left">
+                    <td colSpan={13} className="p-2.5 text-left">
                       <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                         <span className="flex items-center gap-2 text-white font-bold text-sm tracking-wide">
                           <Building className="w-4 h-4 text-indigo-400" />
@@ -619,6 +730,12 @@ export const SlabDesignView: React.FC = () => {
                         <td className="border-r border-slate-300 p-2 text-center font-bold">
                           <span className={out.deflectionCheck === 'PASS' ? 'text-emerald-600' : 'text-red-600'}>
                             {out.deflectionRatioActual} ≤ {out.deflectionRatioLimit}
+                          </span>
+                        </td>
+
+                        <td className="border-r border-slate-300 p-2 text-center font-bold">
+                          <span className={out.crackWidthCheck === 'PASS' ? 'text-emerald-600' : 'text-red-600'}>
+                            {out.crackWidthMm}mm ≤ 0.30mm
                           </span>
                         </td>
 

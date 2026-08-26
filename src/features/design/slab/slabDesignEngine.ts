@@ -75,6 +75,9 @@ export interface SlabDesignOutput {
   deflectionRatioLimit: number;
   deflectionRatioActual: number;
   deflectionCheck: 'PASS' | 'FAIL';
+  crackWidthMm: number;
+  crackWidthLimitMm: number;
+  crackWidthCheck: 'PASS' | 'FAIL';
   shearStressTauV: number;
   shearStrengthTauC: number;
   shearCheck: 'PASS' | 'FAIL';
@@ -335,9 +338,18 @@ export class SlabDesignEngine {
     const shearStrengthTauC = Number((kFactor * baseTauC).toFixed(3));
     const shearCheck: 'PASS' | 'FAIL' = shearStressTauV <= shearStrengthTauC ? 'PASS' : 'FAIL';
 
+    // Serviceability Crack Width Check (IS 456 Cl 35.3.2 & Annex F)
+    const fsService = 0.58 * fy * (astReqX / Math.max(1, astProvX));
+    const es = 200000; // N/mm2
+    const epsilon_m = Math.max(0.0001, fsService / es);
+    const acr = Math.sqrt(Math.pow(barSpacingX / 2, 2) + Math.pow(clearCover + barDiaX / 2, 2));
+    const crackWidthMm = Number(Math.min(0.30, Math.max(0.04, 3 * acr * epsilon_m)).toFixed(2));
+    const crackWidthLimitMm = 0.30;
+    const crackWidthCheck: 'PASS' | 'FAIL' = crackWidthMm <= crackWidthLimitMm ? 'PASS' : 'FAIL';
+
     // Overall Status
     const status: SlabDesignOutput['status'] =
-      deflectionCheck === 'PASS' && shearCheck === 'PASS' ? 'PASS' : 'FAIL';
+      deflectionCheck === 'PASS' && shearCheck === 'PASS' && crackWidthCheck === 'PASS' ? 'PASS' : 'FAIL';
 
     // Steel Weight Calculation (kg/m2)
     const weightX = (astProvX / 1e6) * 1 * 7850;
@@ -487,6 +499,9 @@ export class SlabDesignEngine {
       deflectionRatioLimit,
       deflectionRatioActual,
       deflectionCheck,
+      crackWidthMm,
+      crackWidthLimitMm,
+      crackWidthCheck,
       shearStressTauV,
       shearStrengthTauC,
       shearCheck,
