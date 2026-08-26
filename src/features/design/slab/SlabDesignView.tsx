@@ -99,6 +99,7 @@ export const SlabDesignView: React.FC = () => {
   const [showContourMap, setShowContourMap] = useState<boolean>(false);
   const [showFloorFilter, setShowFloorFilter] = useState<boolean>(true);
   const [showBbsModal, setShowBbsModal] = useState<boolean>(false);
+  const [showRebarMatrix, setShowRebarMatrix] = useState<boolean>(false);
   const [permittedBarSizes, setPermittedBarSizes] = useState<number[]>([8, 10, 12, 16]);
   const [activeFloorFilter, setActiveFloorFilter] = useState<string>('ALL');
 
@@ -393,6 +394,20 @@ export const SlabDesignView: React.FC = () => {
 
           <button
             type="button"
+            onClick={() => setShowRebarMatrix(!showRebarMatrix)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-bold transition-all border ${
+              showRebarMatrix
+                ? 'bg-amber-600 text-white border-amber-500 shadow'
+                : 'bg-amber-950/80 text-amber-300 border-amber-700 hover:bg-amber-900'
+            }`}
+            title="Select permitted rebar diameters for floor slabs"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>Rebar Selection ({permittedBarSizes.map((d) => `T${d}`).join(', ')})</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowSettingsPanel(!showSettingsPanel)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-bold transition-all border ${
               showSettingsPanel
@@ -436,6 +451,47 @@ export const SlabDesignView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* RCDC Dedicated Rebar Selection Manager Card */}
+      {showRebarMatrix && (
+        <div className="bg-amber-950/40 p-4 rounded-lg border border-amber-700/60 flex flex-wrap items-center justify-between gap-3 text-xs font-mono shadow-lg">
+          <div className="flex items-center gap-2.5">
+            <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
+            <div>
+              <span className="text-white font-bold text-sm block font-mono">RCDC SLAB REBAR SELECTION MATRIX</span>
+              <span className="text-amber-300 text-[11px] font-sans">
+                Check permitted reinforcement bar diameters (IS 456 / RCDC) for batch slab calculations:
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4 bg-slate-950 p-2.5 rounded border border-amber-800/80">
+            {[8, 10, 12, 16, 20].map((dia) => {
+              const checked = permittedBarSizes.includes(dia);
+              return (
+                <label
+                  key={`rebar_sel_mat_${dia}`}
+                  className="flex items-center gap-1.5 cursor-pointer text-slate-100 font-bold select-none hover:text-amber-300 text-xs"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setPermittedBarSizes([...permittedBarSizes, dia]);
+                      } else if (permittedBarSizes.length > 1) {
+                        setPermittedBarSizes(permittedBarSizes.filter((d) => d !== dia));
+                      }
+                    }}
+                    className="rounded border-slate-700 text-amber-500 focus:ring-amber-400 w-4 h-4 cursor-pointer"
+                  />
+                  <span>T{dia} ({dia}mm)</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Global Design Parameters & Load Settings (Hidden by Default) */}
       {showSettingsPanel && (
