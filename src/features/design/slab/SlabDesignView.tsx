@@ -95,6 +95,7 @@ export const SlabDesignView: React.FC = () => {
   const [selectedReportOutput, setSelectedReportOutput] = useState<SlabDesignOutput | null>(null);
   const [showDrawing, setShowDrawing] = useState<boolean>(false);
   const [showPanelSummary, setShowPanelSummary] = useState<boolean>(false);
+  const [showSettingsPanel, setShowSettingsPanel] = useState<boolean>(false);
   const [activeFloorFilter, setActiveFloorFilter] = useState<string>('ALL');
 
   const availableFloorLevels = useMemo(() => {
@@ -304,6 +305,20 @@ export const SlabDesignView: React.FC = () => {
 
           <button
             type="button"
+            onClick={() => setShowSettingsPanel(!showSettingsPanel)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-bold transition-all border ${
+              showSettingsPanel
+                ? 'bg-indigo-600 text-white border-indigo-500 shadow'
+                : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+            }`}
+            title="Toggle Global Design Parameters & Material Settings"
+          >
+            <Settings className="w-3.5 h-3.5 text-indigo-400" />
+            <span>{showSettingsPanel ? 'Hide Settings' : 'Design Parameters'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowPanelSummary(!showPanelSummary)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-bold transition-all border ${
               showPanelSummary
@@ -334,78 +349,80 @@ export const SlabDesignView: React.FC = () => {
         </div>
       </div>
 
-      {/* Global Design Parameters & Load Settings */}
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 bg-slate-900/90 p-3.5 rounded-lg border border-slate-800 text-xs">
-        <div>
-          <label className="text-slate-400 block mb-1 font-sans">Concrete Grade:</label>
-          <select
-            value={fck}
-            onChange={(e) => setFck(Number(e.target.value))}
-            className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
-          >
-            <option value={20}>M20 (20 N/mm²)</option>
-            <option value={25}>M25 (25 N/mm²)</option>
-            <option value={30}>M30 (30 N/mm²)</option>
-            <option value={35}>M35 (35 N/mm²)</option>
-          </select>
-        </div>
+      {/* Global Design Parameters & Load Settings (Hidden by Default) */}
+      {showSettingsPanel && (
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-3 bg-slate-900/90 p-3.5 rounded-lg border border-slate-800 text-xs">
+          <div>
+            <label className="text-slate-400 block mb-1 font-sans">Concrete Grade:</label>
+            <select
+              value={fck}
+              onChange={(e) => setFck(Number(e.target.value))}
+              className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
+            >
+              <option value={20}>M20 (20 N/mm²)</option>
+              <option value={25}>M25 (25 N/mm²)</option>
+              <option value={30}>M30 (30 N/mm²)</option>
+              <option value={35}>M35 (35 N/mm²)</option>
+            </select>
+          </div>
 
-        <div>
-          <label className="text-slate-400 block mb-1 font-sans">Steel Grade:</label>
-          <select
-            value={fy}
-            onChange={(e) => setFy(Number(e.target.value))}
-            className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
-          >
-            <option value={415}>Fe415</option>
-            <option value={500}>Fe500D</option>
-            <option value={550}>Fe550D</option>
-          </select>
-        </div>
+          <div>
+            <label className="text-slate-400 block mb-1 font-sans">Steel Grade:</label>
+            <select
+              value={fy}
+              onChange={(e) => setFy(Number(e.target.value))}
+              className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
+            >
+              <option value={415}>Fe415</option>
+              <option value={500}>Fe500D</option>
+              <option value={550}>Fe550D</option>
+            </select>
+          </div>
 
-        <div>
-          <label className="text-slate-400 block mb-1 font-sans">Clear Cover (mm):</label>
-          <input
-            type="number"
-            value={clearCover}
-            onChange={(e) => setClearCover(Number(e.target.value))}
-            className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
-          />
-        </div>
+          <div>
+            <label className="text-slate-400 block mb-1 font-sans">Clear Cover (mm):</label>
+            <input
+              type="number"
+              value={clearCover}
+              onChange={(e) => setClearCover(Number(e.target.value))}
+              className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
+            />
+          </div>
 
-        <div>
-          <label className="text-slate-400 block mb-1 font-sans">Live Load (kN/m²):</label>
-          <input
-            type="number"
-            step="0.5"
-            value={liveLoad}
-            onChange={(e) => setLiveLoad(Number(e.target.value))}
-            className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
-          />
-        </div>
+          <div>
+            <label className="text-slate-400 block mb-1 font-sans">Live Load (kN/m²):</label>
+            <input
+              type="number"
+              step="0.5"
+              value={liveLoad}
+              onChange={(e) => setLiveLoad(Number(e.target.value))}
+              className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
+            />
+          </div>
 
-        <div>
-          <label className="text-slate-400 block mb-1 font-sans">Floor Finish (kN/m²):</label>
-          <input
-            type="number"
-            step="0.25"
-            value={floorFinishLoad}
-            onChange={(e) => setFloorFinishLoad(Number(e.target.value))}
-            className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
-          />
-        </div>
+          <div>
+            <label className="text-slate-400 block mb-1 font-sans">Floor Finish (kN/m²):</label>
+            <input
+              type="number"
+              step="0.25"
+              value={floorFinishLoad}
+              onChange={(e) => setFloorFinishLoad(Number(e.target.value))}
+              className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
+            />
+          </div>
 
-        <div>
-          <label className="text-slate-400 block mb-1 font-sans">Default Thickness (mm):</label>
-          <input
-            type="number"
-            step="5"
-            value={defaultThickness}
-            onChange={(e) => setDefaultThickness(Number(e.target.value))}
-            className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
-          />
+          <div>
+            <label className="text-slate-400 block mb-1 font-sans">Default Thickness (mm):</label>
+            <input
+              type="number"
+              step="5"
+              value={defaultThickness}
+              onChange={(e) => setDefaultThickness(Number(e.target.value))}
+              className="w-full bg-slate-950 border border-slate-700 text-white px-2 py-1 rounded focus:border-indigo-500"
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Floor Level Filter Tabs */}
       <div className="flex flex-wrap items-center gap-2 bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-xs">
