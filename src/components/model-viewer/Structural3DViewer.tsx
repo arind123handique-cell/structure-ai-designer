@@ -158,6 +158,9 @@ export const Structural3DViewer: React.FC = () => {
     clearSelectedSupportNodes,
     mergeSelectedPileCaps,
     unmergePileCapGroup,
+    savedSlabDesigns,
+    savedColumnDesigns,
+    savedBeamDesigns,
   } = useProjectStore() as any;
 
   const [showLabels, setShowLabels] = useState(true);
@@ -411,7 +414,7 @@ export const Structural3DViewer: React.FC = () => {
     const selectedPileCapMaterial = new THREE.MeshStandardMaterial({ color: 0xd97706, emissive: 0xb45309, emissiveIntensity: 0.4, roughness: 0.3 });
     const pileMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.35, metalness: 0.25 });
 
-    // 1. Draw Members (6 radial segments for lightweight RAM)
+    // 1. Draw Members with exact designed structural cross-section dimensions (b × D)
     members.forEach((member) => {
       const isCol = member.classification === 'COLUMN';
       if (isCol && !filterLayers.showColumns) return;
@@ -426,8 +429,35 @@ export const Structural3DViewer: React.FC = () => {
       const distance = p1.distanceTo(p2);
       if (distance <= 0.001) return;
 
-      const radius = isCol ? 0.24 : 0.15;
-      const geometry = new THREE.CylinderGeometry(radius, radius, distance, 5);
+      // Extract exact designed section dimensions (b × D) from saved designs or member section
+      let b = 0.3;
+      let D = 0.45;
+
+      if (isCol) {
+        const colDesign = savedColumnDesigns ? savedColumnDesigns[member.id] : null;
+        if (colDesign && (colDesign.b || colDesign.bMm)) {
+          const rawB = colDesign.b || colDesign.bMm;
+          const rawD = colDesign.D || colDesign.dMm;
+          b = rawB > 5 ? rawB / 1000 : rawB;
+          D = rawD > 5 ? rawD / 1000 : rawD;
+        } else {
+          b = member.section.zd ? (member.section.zd > 5 ? member.section.zd / 1000 : member.section.zd) : 0.45;
+          D = member.section.yd ? (member.section.yd > 5 ? member.section.yd / 1000 : member.section.yd) : 0.55;
+        }
+      } else {
+        const beamDesign = savedBeamDesigns ? savedBeamDesigns[member.id] : null;
+        if (beamDesign && (beamDesign.b || beamDesign.bMm)) {
+          const rawB = beamDesign.b || beamDesign.bMm;
+          const rawD = beamDesign.D || beamDesign.dMm;
+          b = rawB > 5 ? rawB / 1000 : rawB;
+          D = rawD > 5 ? rawD / 1000 : rawD;
+        } else {
+          b = member.section.zd ? (member.section.zd > 5 ? member.section.zd / 1000 : member.section.zd) : 0.30;
+          D = member.section.yd ? (member.section.yd > 5 ? member.section.yd / 1000 : member.section.yd) : 0.45;
+        }
+      }
+
+      const geometry = new THREE.BoxGeometry(b, distance, D);
       const isSelected = selectedMemberId === member.id;
       const material = isSelected ? selectedMaterial : isCol ? columnMaterial : beamMaterial;
 
@@ -438,16 +468,37 @@ export const Structural3DViewer: React.FC = () => {
       const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
       mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
 
-      mesh.userData = { memberId: member.id, type: 'member' };
+      mesh.userData = {
+        memberId: member.id,
+        type: 'member',
+        isColumn: isCol,
+        b: Math.round(b * 1000),
+        D: Math.round(D * 1000),
+        sectionName: `${Math.round(b * 1000)}×${Math.round(D * 1000)} mm`,
+      };
       dynamicGroup.add(mesh);
       memberMeshesRef.current.set(member.id, mesh);
+
+      // Add crisp edges geometry lines for exact 3D structural outline
+      const edges = new THREE.EdgesGeometry(geometry);
+      const edgeLine = new THREE.LineSegments(
+        edges,
+        new THREE.LineBasicMaterial({
+          color: isSelected ? 0xfde047 : isCol ? 0x059669 : 0x2563eb,
+          linewidth: 1,
+        })
+      );
+      edgeLine.position.copy(mesh.position);
+      edgeLine.quaternion.copy(mesh.quaternion);
+      dynamicGroup.add(edgeLine);
 
       if (isCol && showLabels) {
         const isGroundCol = supports.has(member.startNodeId) || supports.has(member.endNodeId);
         if (isGroundCol) {
           const colInfo = columnMemberMapping.get(member.id);
           const colLabel = colInfo?.columnLabel || `C${member.id}`;
-          const sprite = createTextBadgeSprite(colLabel, `Mem #${member.id}`, '#064e3b', '#10b981', '#ffffff');
+          const secLabel = `${Math.round(b * 1000)}×${Math.round(D * 1000)}`;
+          const sprite = createTextBadgeSprite(colLabel, secLabel, '#064e3b', '#10b981', '#ffffff');
           sprite.position.copy(midpoint);
           sprite.position.y += 0.3;
           dynamicGroup.add(sprite);
@@ -894,6 +945,8 @@ export const Structural3DViewer: React.FC = () => {
     customPileCapOverrides,
     manualMergedPileCapGroups,
     savedSlabDesigns,
+    savedColumnDesigns,
+    savedBeamDesigns,
   ]);
 
   // Click & Hover Raycasting with Multi-Selection Support
