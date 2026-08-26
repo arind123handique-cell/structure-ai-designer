@@ -118,12 +118,45 @@ export class FloorPlanEngine {
     const columnSupportMapping = ColumnNumberingService.getColumnSupportMapping(model);
     const columnMemberMapping = ColumnNumberingService.getColumnMemberMapping(model);
 
-    // 1. Identify all unique Y elevations in the model
+    // 1. Identify main floor framing Y elevations in the model (e.g. 0.0m, 3.2m, 6.4m, 9.6m, 12.8m, Roof)
+    const beamElevations = new Set<number>();
+    for (const m of members.values()) {
+      if (m.classification === 'BEAM') {
+        const n1 = nodes.get(m.startNodeId);
+        const n2 = nodes.get(m.endNodeId);
+        if (n1 && n2 && Math.abs(n1.y - n2.y) < 0.15) {
+          beamElevations.add(parseFloat(n1.y.toFixed(2)));
+        }
+      }
+    }
+
+    if (model.plates) {
+      for (const p of model.plates.values()) {
+        const pNodes = p.nodeIds.map((id) => nodes.get(id)).filter(Boolean);
+        if (pNodes.length > 0) {
+          const avgY = pNodes.reduce((sum, n) => sum + (n?.y || 0), 0) / pNodes.length;
+          beamElevations.add(parseFloat(avgY.toFixed(2)));
+        }
+      }
+    }
+
+    // Always include base / foundation elevation
+    const allNodeY = Array.from(nodes.values()).map((n) => parseFloat(n.y.toFixed(2)));
+    const minY = allNodeY.length > 0 ? Math.min(...allNodeY) : 0;
+    beamElevations.add(minY);
+
+    const sortedBeamY = Array.from(beamElevations).sort((a, b) => a - b);
+
+    // Cluster Y elevations within 2.2m tolerance so minor intermediate nodes (landings, drops) merge into main 3.2m story levels
     const yCoordinates: number[] = [];
-    for (const node of nodes.values()) {
-      const roundedY = parseFloat(node.y.toFixed(2));
-      if (!yCoordinates.some((y) => Math.abs(y - roundedY) < 0.35)) {
-        yCoordinates.push(roundedY);
+    for (const y of sortedBeamY) {
+      if (yCoordinates.length === 0) {
+        yCoordinates.push(y);
+      } else {
+        const lastY = yCoordinates[yCoordinates.length - 1];
+        if (y - lastY >= 2.2) {
+          yCoordinates.push(y);
+        }
       }
     }
     yCoordinates.sort((a, b) => a - b);
@@ -333,8 +366,8 @@ export class FloorPlanEngine {
           const n2 = nodes.get(m.endNodeId);
           if (!n1 || !n2) continue;
 
-          // Check if both nodes are near this floor elevation
-          if (Math.abs(n1.y - elevY) < 0.4 && Math.abs(n2.y - elevY) < 0.4) {
+          // Check if both nodes are near this floor elevation (within 1.1m to capture beam drops)
+          if (Math.abs(n1.y - elevY) < 1.1 && Math.abs(n2.y - elevY) < 1.1) {
             const width = m.section.zd || 0.3;
             const depth = m.section.yd || 0.45;
             floorBeams.push({
