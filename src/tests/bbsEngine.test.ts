@@ -122,4 +122,53 @@ describe('BbsEngine', () => {
     const dia20 = bbs.diameterSummaries.find((d) => d.diameter === 20);
     expect(dia20?.unitWeightKgM).toBeCloseTo((20 * 20) / 162.2, 2);
   });
+
+  it('should use saved pile cap designs and overrides for pile cap BBS matching', () => {
+    const mockModel: NormalizedStructuralModel = {
+      nodes: new Map([
+        [1, { id: 1, x: 0, y: 0, z: 0 }],
+      ]),
+      members: new Map(),
+      plates: new Map(),
+      supports: new Map([[1, { nodeId: 1, type: 'FIXED', releases: {} as any }]]),
+      loadCases: new Map(),
+      loadCombinations: new Map(),
+      reactions: [],
+      memberForces: [],
+      storyDrifts: [],
+      boundingBox: { minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0 },
+      statistics: {} as any,
+    };
+
+    const mockProject = {
+      metadata: {
+        id: 'proj-1',
+        name: 'Test Project',
+        designSettings: { concreteGrade: 'M25', steelGrade: 'Fe500D' },
+      },
+      savedPileCapDesigns: {
+        1: {
+          supportNodeId: 1,
+          pileCount: 4,
+          capLength: 2800,
+          capWidth: 2800,
+          capDepth: 900,
+          rebarCalloutX: 'T20 @ 125 mm c/c',
+          rebarCalloutY: 'T20 @ 125 mm c/c',
+          topRebarCallout: 'T16 @ 150 mm c/c',
+          sideFaceRebarCallout: '4-T12 @ 200 mm c/c',
+        },
+      },
+    } as any;
+
+    const bbs = BbsEngine.generateBuildingBbs(mockModel, mockProject);
+    const pileCapItems = bbs.items.filter((i) => i.elementCategory === 'PILE_CAP');
+
+    expect(pileCapItems.length).toBeGreaterThan(0);
+    const botXItem = pileCapItems.find((i) => i.barDescription.includes('X-Dir'));
+    expect(botXItem).toBeDefined();
+    expect(botXItem?.diameter).toBe(20);
+    expect(botXItem?.spacing).toBe(125);
+    expect(botXItem?.b).toBe(2800 - 2 * 60);
+  });
 });

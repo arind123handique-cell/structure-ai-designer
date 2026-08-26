@@ -113,7 +113,20 @@ export class BbsEngine {
     // 1. EXTRACT BEAMS
     // ── READ FROM SAVED BEAM DESIGNS first (live sync with Beam Design workspace) ──
     const savedBeamDesigns: Record<number, any> = project?.savedBeamDesigns || {};
-    const floorPlans = model ? FloorPlanEngine.extractAllFloorPlans(model) : [];
+    const floorPlans = model
+      ? FloorPlanEngine.extractAllFloorPlans(
+          model,
+          project?.projectPileTypes,
+          project?.supportPileAssignments,
+          project?.customPileCapOverrides,
+          project?.manualMergedPileCapGroups,
+          project?.detachedCombinedCapNodeIds,
+          project?.customCombinedCapOverrides,
+          project?.savedPileCapDesigns,
+          project?.savedCombinedCapDesigns,
+          project?.metadata?.designSettings
+        )
+      : [];
     const beamProcessed = new Set<string>();
 
     floorPlans.forEach((fp) => {
@@ -598,12 +611,14 @@ export class BbsEngine {
           const DMm = cap.capDepth || 750;
           const cover = 60;
           const isPentagon = cap.pileCount === 5 || cap.capShape === 'PENTAGONAL';
-          const tag = isPentagon ? `PC-${col.columnSlNo} (5P 1461mm×5)` : `PC-${col.columnSlNo} (${cap.pileCount || 4}P ${LMm}×${BMm})`;
+          const markLabel = `PC${Math.max(1, (cap.pileCount || 4) - 1)}`;
+          const colLabel = col.label || `C${col.columnSlNo}`;
+          const tag = `${markLabel} (${colLabel})`;
 
           // Parse rebar callout from design (e.g. "T16 @ 125 mm c/c (Bottom Mat ...)")
           function parseRebarCallout(callout: string | undefined): { dia: number; spacing: number } | null {
             if (!callout) return null;
-            const m = callout.match(/T(\d+)\s*@\s*(\d+)/);
+            const m = callout.match(/T(\d+)\s*@\s*(\d+)/i);
             return m ? { dia: parseInt(m[1]), spacing: parseInt(m[2]) } : null;
           }
           const parsedBotX = parseRebarCallout(cap.rebarCalloutX);
@@ -639,56 +654,83 @@ export class BbsEngine {
           });
 
           // 2. Bottom Main Rebar Mesh in Y-direction (U-Bar)
-          const botBarsY = Math.round(LMm / botSpacing) + 1;
-          const botCutMY = (botA * 2 + (BMm - 2 * cover) - 4 * botDia) / 1000;
+          const botDiaY = parsedBotY?.dia || botDia;
+          const botSpacingY = parsedBotY?.spacing || botSpacing;
+          const botBarsY = Math.round(LMm / botSpacingY) + 1;
+          const botBY = Math.round(BMm - 2 * cover);
+          const botCutMY = (botA * 2 + botBY - 4 * botDiaY) / 1000;
 
           items.push({
             barNo: barIndex++,
             elementCategory: 'PILE_CAP',
             elementTag: tag,
-            barDescription: `Bottom Main Rebar Mesh Y-Dir (T${botDia}@${botSpacing} c/c)`,
+            barDescription: `Bottom Main Rebar Mesh Y-Dir (T${botDiaY}@${botSpacingY} c/c)`,
             shapeType: 'U_BAR',
             a: botA,
-            b: Math.round(BMm - 2 * cover),
+            b: botBY,
             c: botA,
-            diameter: botDia,
-            spacing: botSpacing,
+            diameter: botDiaY,
+            spacing: botSpacingY,
             cuttingLengthM: Number(botCutMY.toFixed(2)),
             numElements: 1,
             barsPerElement: botBarsY,
             totalCount: botBarsY,
             totalLengthM: Number((botBarsY * botCutMY).toFixed(2)),
-            lengthByDia: { [botDia]: Number((botBarsY * botCutMY).toFixed(2)) },
+            lengthByDia: { [botDiaY]: Number((botBarsY * botCutMY).toFixed(2)) },
           });
 
-          // 3. Top Shrinkage Rebar Mesh (U-Bar with downward legs)
+          // 3. Top Shrinkage Rebar Mesh X-Dir (U-Bar with downward legs)
           const topDia = parsedTop?.dia || getBestLongDia([12, 16, 10]);
-          const topSpacing = parsedTop?.spacing || 100;
-          const topBars = Math.round(BMm / topSpacing) + 1;
+          const topSpacing = parsedTop?.spacing || 150;
+          const topBarsX = Math.round(BMm / topSpacing) + 1;
           const topA = Math.round(DMm - 2 * cover);
           const topB = Math.round(LMm - 2 * cover);
-          const topCutM = (topA * 2 + topB - 4 * topDia) / 1000;
+          const topCutMX = (topA * 2 + topB - 4 * topDia) / 1000;
 
           items.push({
             barNo: barIndex++,
             elementCategory: 'PILE_CAP',
             elementTag: tag,
-            barDescription: `Top Shrinkage Rebar Mat (T${topDia}@${topSpacing} c/c)`,
+            barDescription: `Top Shrinkage Rebar Mesh X-Dir (T${topDia}@${topSpacing} c/c)`,
             shapeType: 'U_BAR',
             a: topA,
             b: topB,
             c: topA,
             diameter: topDia,
             spacing: topSpacing,
-            cuttingLengthM: Number(topCutM.toFixed(2)),
+            cuttingLengthM: Number(topCutMX.toFixed(2)),
             numElements: 1,
-            barsPerElement: topBars,
-            totalCount: topBars,
-            totalLengthM: Number((topBars * topCutM).toFixed(2)),
-            lengthByDia: { [topDia]: Number((topBars * topCutM).toFixed(2)) },
+            barsPerElement: topBarsX,
+            totalCount: topBarsX,
+            totalLengthM: Number((topBarsX * topCutMX).toFixed(2)),
+            lengthByDia: { [topDia]: Number((topBarsX * topCutMX).toFixed(2)) },
           });
 
-          // 4. Side Face Skin Ties (from design callout)
+          // 4. Top Shrinkage Rebar Mesh Y-Dir (U-Bar with downward legs)
+          const topBarsY = Math.round(LMm / topSpacing) + 1;
+          const topBY = Math.round(BMm - 2 * cover);
+          const topCutMY = (topA * 2 + topBY - 4 * topDia) / 1000;
+
+          items.push({
+            barNo: barIndex++,
+            elementCategory: 'PILE_CAP',
+            elementTag: tag,
+            barDescription: `Top Shrinkage Rebar Mesh Y-Dir (T${topDia}@${topSpacing} c/c)`,
+            shapeType: 'U_BAR',
+            a: topA,
+            b: topBY,
+            c: topA,
+            diameter: topDia,
+            spacing: topSpacing,
+            cuttingLengthM: Number(topCutMY.toFixed(2)),
+            numElements: 1,
+            barsPerElement: topBarsY,
+            totalCount: topBarsY,
+            totalLengthM: Number((topBarsY * topCutMY).toFixed(2)),
+            lengthByDia: { [topDia]: Number((topBarsY * topCutMY).toFixed(2)) },
+          });
+
+          // 5. Side Face Skin Ties (from design callout)
           const sideDia = parsedSide?.dia || getBestTieDia([10, 8]);
           const sideCount = (() => {
             if (cap.sideFaceRebarCallout) {
@@ -729,91 +771,107 @@ export class BbsEngine {
 
         // ── 3b. COMBINED PILE CAPS BBS ──
         if (foundationPlan.combinedPileCaps && foundationPlan.combinedPileCaps.length > 0) {
+          function parseRebarCallout(callout: string | undefined): { dia: number; spacing: number } | null {
+            if (!callout) return null;
+            const m = callout.match(/T(\d+)\s*@\s*(\d+)/i);
+            return m ? { dia: parseInt(m[1]), spacing: parseInt(m[2]) } : null;
+          }
+
           for (const grp of foundationPlan.combinedPileCaps) {
             const capL = grp.capLength;
             const capB = grp.capWidth;
             const capD = grp.capDepth;
             const cover = 60;
-            const barNoBase = items.length + 1;
-            const tag = grp.label;
+            const tag = grp.label || `Combined Cap ${grp.groupId}`;
             const nElem = 1;
 
-            // Bottom long bars
-            const botDia = getBestLongDia([16, 12, 20]);
-            const botSpacing = 125;
+            const parsedBot = parseRebarCallout(grp.botRebarCallout);
+            const parsedTop = parseRebarCallout(grp.topRebarCallout);
+            const parsedTie = parseRebarCallout(grp.shearWallStirrupCallout);
+
+            const botDia = parsedBot?.dia || getBestLongDia([16, 12, 20]);
+            const botSpacing = parsedBot?.spacing || 125;
+            const topDia = parsedTop?.dia || getBestLongDia([12, 16, 10]);
+            const topSpacing = parsedTop?.spacing || 150;
+            const tieDia = parsedTie?.dia || getBestTieDia([10, 8]);
+            const tieSpacing = parsedTie?.spacing || 200;
+
+            const botA = Math.round(capD - 2 * cover);
+            const botBL = Math.round(capL - 2 * cover);
+            const botBB = Math.round(capB - 2 * cover);
+
+            // Bottom long bars (U-Bar)
             const botCountLong = Math.max(2, Math.floor(capB / botSpacing) + 1);
-            const botLenL = capL - 2 * cover + 2 * 300;
+            const botLenL = botA * 2 + botBL - 4 * botDia;
             items.push({
-              barNo: barNoBase,
+              barNo: barIndex++,
               elementCategory: 'PILE_CAP',
               elementTag: tag,
-              barDescription: `Bottom Main Bars — Long Way (T${botDia} @ ${botSpacing} C/C)`,
-              shapeType: 'STRAIGHT',
-              a: 300, b: capL - 2 * cover, c: 300, diameter: botDia, spacing: botSpacing,
+              barDescription: `Bottom Main Bars — Long Way (T${botDia} @ ${botSpacing} c/c)`,
+              shapeType: 'U_BAR',
+              a: botA, b: botBL, c: botA, diameter: botDia, spacing: botSpacing,
               cuttingLengthM: Number((botLenL / 1000).toFixed(2)),
               numElements: nElem, barsPerElement: botCountLong, totalCount: botCountLong,
               totalLengthM: Number((botCountLong * botLenL / 1000).toFixed(2)),
               lengthByDia: { [botDia]: Number((botCountLong * botLenL / 1000).toFixed(2)) },
             });
 
-            // Bottom short bars
+            // Bottom short bars (U-Bar)
             const botCountShort = Math.max(2, Math.floor(capL / botSpacing) + 1);
-            const botLenB = capB - 2 * cover + 2 * 300;
+            const botLenB = botA * 2 + botBB - 4 * botDia;
             items.push({
-              barNo: barNoBase + 1,
+              barNo: barIndex++,
               elementCategory: 'PILE_CAP',
               elementTag: tag,
-              barDescription: `Bottom Main Bars — Short Way (T${botDia} @ ${botSpacing} C/C)`,
-              shapeType: 'STRAIGHT',
-              a: 300, b: capB - 2 * cover, c: 300, diameter: botDia, spacing: botSpacing,
+              barDescription: `Bottom Main Bars — Short Way (T${botDia} @ ${botSpacing} c/c)`,
+              shapeType: 'U_BAR',
+              a: botA, b: botBB, c: botA, diameter: botDia, spacing: botSpacing,
               cuttingLengthM: Number((botLenB / 1000).toFixed(2)),
               numElements: nElem, barsPerElement: botCountShort, totalCount: botCountShort,
               totalLengthM: Number((botCountShort * botLenB / 1000).toFixed(2)),
               lengthByDia: { [botDia]: Number((botCountShort * botLenB / 1000).toFixed(2)) },
             });
 
-            // Top mesh both ways
-            const topDia = getBestLongDia([12, 16, 10]);
-            const topSpacing = 150;
+            // Top mesh long way (U-Bar)
             const topCountL = Math.max(2, Math.floor(capB / topSpacing) + 1);
-            const topCountB = Math.max(2, Math.floor(capL / topSpacing) + 1);
-            const topLenL = capL - 2 * cover + 2 * 200;
-            const topLenB = capB - 2 * cover + 2 * 200;
+            const topLenL = botA * 2 + botBL - 4 * topDia;
             items.push({
-              barNo: barNoBase + 2,
+              barNo: barIndex++,
               elementCategory: 'PILE_CAP',
               elementTag: tag,
-              barDescription: `Top Mesh — Long Way (T${topDia} @ ${topSpacing} C/C)`,
-              shapeType: 'STRAIGHT',
-              a: 200, b: capL - 2 * cover, c: 200, diameter: topDia, spacing: topSpacing,
+              barDescription: `Top Mesh — Long Way (T${topDia} @ ${topSpacing} c/c)`,
+              shapeType: 'U_BAR',
+              a: botA, b: botBL, c: botA, diameter: topDia, spacing: topSpacing,
               cuttingLengthM: Number((topLenL / 1000).toFixed(2)),
               numElements: nElem, barsPerElement: topCountL, totalCount: topCountL,
               totalLengthM: Number((topCountL * topLenL / 1000).toFixed(2)),
-              lengthByDia: { [topDia]: Number((topCountL * topLenL / 1000).toFixed(2)) },
+              lengthByDia: { [topDia]: Number((topLenL * topCountL / 1000).toFixed(2)) },
             });
+
+            // Top mesh short way (U-Bar)
+            const topCountB = Math.max(2, Math.floor(capL / topSpacing) + 1);
+            const topLenB = botA * 2 + botBB - 4 * topDia;
             items.push({
-              barNo: barNoBase + 3,
+              barNo: barIndex++,
               elementCategory: 'PILE_CAP',
               elementTag: tag,
-              barDescription: `Top Mesh — Short Way (T${topDia} @ ${topSpacing} C/C)`,
-              shapeType: 'STRAIGHT',
-              a: 200, b: capB - 2 * cover, c: 200, diameter: topDia, spacing: topSpacing,
+              barDescription: `Top Mesh — Short Way (T${topDia} @ ${topSpacing} c/c)`,
+              shapeType: 'U_BAR',
+              a: botA, b: botBB, c: botA, diameter: topDia, spacing: topSpacing,
               cuttingLengthM: Number((topLenB / 1000).toFixed(2)),
               numElements: nElem, barsPerElement: topCountB, totalCount: topCountB,
               totalLengthM: Number((topCountB * topLenB / 1000).toFixed(2)),
               lengthByDia: { [topDia]: Number((topCountB * topLenB / 1000).toFixed(2)) },
             });
 
-            // Strap ties
-            const tieDia = getBestTieDia([10, 8]);
-            const tieSpacing = 200;
+            // Strap / Perimeter ties
             const tieCount = Math.max(2, Math.floor(capL / tieSpacing) + 1);
-            const tiePerim = 2 * (capB - 2 * cover + capD - 2 * cover) + 4 * 150;
+            const tiePerim = 2 * (capB - 2 * cover + capD - 2 * cover) + 24 * tieDia;
             items.push({
-              barNo: barNoBase + 4,
+              barNo: barIndex++,
               elementCategory: 'PILE_CAP',
               elementTag: tag,
-              barDescription: `Strap Ties (T${tieDia} @ ${tieSpacing} C/C)`,
+              barDescription: `Perimeter / Strap Ties (T${tieDia} @ ${tieSpacing} c/c)`,
               shapeType: 'RECT_TIE',
               a: capD - 2 * cover, b: capB - 2 * cover, c: 0, diameter: tieDia, spacing: tieSpacing,
               cuttingLengthM: Number((tiePerim / 1000).toFixed(2)),

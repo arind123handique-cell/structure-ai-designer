@@ -64,6 +64,7 @@ export const PileCapDesignView: React.FC = () => {
     clearCustomPileCapOverride,
     setCustomCombinedCapOverride,
     clearCustomCombinedCapOverride,
+    savedPileCapDesigns,
     savePileCapDesigns,
   } = useProjectStore();
 
@@ -257,7 +258,7 @@ export const PileCapDesignView: React.FC = () => {
   const handleSaveAll = async () => {
     setIsSaving(true);
     try {
-      await savePileCapDesigns();
+      await savePileCapDesigns(designedCaps, combinedPileCaps);
       setSaveSuccessMessage('Pile cap designs & manual edits saved successfully to project database!');
       setTimeout(() => setSaveSuccessMessage(null), 3500);
     } catch (err) {

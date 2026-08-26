@@ -124,6 +124,8 @@ export interface ProjectState {
   savedShearWallDesigns: Record<number, any>;
   savedGradeBeamDesigns: any[];
   savedFootingDesigns: Record<number, any>;
+  savedPileCapDesigns: Record<number, any>;
+  savedCombinedCapDesigns: any[];
   customColumnRebarOverrides: Record<number, any>;
   customBeamRebarOverrides: Record<number, any>;
   customShearWallOverrides: Record<number, any>;
@@ -134,7 +136,7 @@ export interface ProjectState {
   saveShearWallDesigns: (designs: Map<number, any> | Record<number, any>, overrides?: Record<number, any>) => Promise<void>;
   saveGradeBeamDesigns: (designs: any[]) => Promise<void>;
   saveFootingDesigns: (designs: Map<number, any> | Record<number, any>) => Promise<void>;
-  savePileCapDesigns: () => Promise<void>;
+  savePileCapDesigns: (designedCaps?: Map<number, any> | Record<number, any>, combinedCaps?: any[]) => Promise<void>;
   savePileDesigns: (types: any[]) => Promise<void>;
 }
 
@@ -191,6 +193,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   savedShearWallDesigns: {},
   savedGradeBeamDesigns: [],
   savedFootingDesigns: {},
+  savedPileCapDesigns: {},
+  savedCombinedCapDesigns: [],
   customColumnRebarOverrides: {},
   customBeamRebarOverrides: {},
   customShearWallOverrides: {},
@@ -234,6 +238,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           savedShearWallDesigns: first.savedShearWallDesigns || {},
           savedGradeBeamDesigns: first.savedGradeBeamDesigns || [],
           savedFootingDesigns: first.savedFootingDesigns || {},
+          savedPileCapDesigns: first.savedPileCapDesigns || {},
+          savedCombinedCapDesigns: first.savedCombinedCapDesigns || [],
           customColumnRebarOverrides: first.customColumnRebarOverrides || {},
           customBeamRebarOverrides: first.customBeamRebarOverrides || {},
           customShearWallOverrides: first.customShearWallOverrides || {},
@@ -332,6 +338,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           savedShearWallDesigns: project.savedShearWallDesigns || {},
           savedGradeBeamDesigns: project.savedGradeBeamDesigns || [],
           savedFootingDesigns: project.savedFootingDesigns || {},
+          savedPileCapDesigns: project.savedPileCapDesigns || {},
+          savedCombinedCapDesigns: project.savedCombinedCapDesigns || [],
           customColumnRebarOverrides: project.customColumnRebarOverrides || {},
           customBeamRebarOverrides: project.customBeamRebarOverrides || {},
           customShearWallOverrides: project.customShearWallOverrides || {},
@@ -1157,9 +1165,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     });
   },
 
-  savePileCapDesigns: async () => {
+  savePileCapDesigns: async (designedCaps?: Map<number, any> | Record<number, any>, combinedCaps?: any[]) => {
     const currentProj = get().activeProject;
     if (!currentProj) return;
+
+    const pileCapObj: Record<number, any> = { ...(get().savedPileCapDesigns || {}) };
+    if (designedCaps) {
+      if (designedCaps instanceof Map) {
+        designedCaps.forEach((val, key) => {
+          pileCapObj[key] = val;
+        });
+      } else {
+        Object.assign(pileCapObj, designedCaps);
+      }
+    }
+
+    const combinedList = combinedCaps || get().savedCombinedCapDesigns || [];
 
     const updatedProject: StoredProject = {
       ...currentProj,
@@ -1171,11 +1192,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       detachedCombinedCapNodeIds: get().detachedCombinedCapNodeIds,
       allowedColumnRebarDiameters: get().allowedColumnRebarDiameters,
       allowedBeamRebarDiameters: get().allowedBeamRebarDiameters,
+      savedPileCapDesigns: pileCapObj,
+      savedCombinedCapDesigns: combinedList,
       metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
     };
 
     await ProjectStorage.saveProject(updatedProject);
-    set({ activeProject: updatedProject });
+    set({
+      activeProject: updatedProject,
+      savedPileCapDesigns: pileCapObj,
+      savedCombinedCapDesigns: combinedList,
+    });
   },
 
   savePileDesigns: async (types: any[]) => {

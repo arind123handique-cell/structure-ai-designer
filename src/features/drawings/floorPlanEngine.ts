@@ -104,7 +104,11 @@ export class FloorPlanEngine {
     supportPileAssignments?: Record<number, string>,
     customPileCapOverrides?: Record<number, any>,
     manualMergedPileCapGroups?: number[][],
-    detachedCombinedCapNodeIds?: number[]
+    detachedCombinedCapNodeIds?: number[],
+    customCombinedCapOverrides?: Record<string, any>,
+    savedPileCapDesigns?: Record<number, any>,
+    savedCombinedCapDesigns?: any[],
+    designSettings?: { concreteGrade?: string; steelGrade?: string }
   ): FloorPlanLevel[] {
     if (!model || !model.nodes || !model.members) return [];
 
@@ -193,23 +197,48 @@ export class FloorPlanEngine {
       ? projectPileTypes
       : PileDesignEngine.getDefaultProjectPileTypes();
 
+    const fck = designSettings?.concreteGrade === 'M30' ? 30 : 25;
+    const fy = designSettings?.steelGrade === 'Fe500D' ? 500 : 500;
+
     const pileCapInputs: import('@/features/design/pilecap/pileCapDesignEngine').PileCapDesignInput[] = [];
     for (const sup of supports.values()) {
-      const reactions = model.reactions.filter((r) => r.nodeId === sup.nodeId);
-      let maxFy = 650;
+      const reactions = model.reactions ? model.reactions.filter((r) => r.nodeId === sup.nodeId) : [];
+      let maxFy = 0;
       let maxMx = 0;
       let maxMy = 0;
       let govLC = 1;
       for (const r of reactions) {
-        if (r.fy > maxFy) {
-          maxFy = r.fy;
-          maxMx = r.mx;
-          maxMy = r.my;
+        if (Math.abs(r.fy) > maxFy) {
+          maxFy = Math.abs(r.fy);
+          maxMx = Math.abs(r.mx);
+          maxMy = Math.abs(r.my);
           govLC = r.loadCaseId;
         }
       }
 
-      const assignedTypeId = (supportPileAssignments && supportPileAssignments[sup.nodeId]) || 'P-1';
+      if (maxFy <= 0 && model.memberForces && model.members) {
+        const connectedMemberIds = new Set(
+          Array.from(model.members.values())
+            .filter((m) => m.startNodeId === sup.nodeId || m.endNodeId === sup.nodeId)
+            .map((m) => m.id)
+        );
+        const connectedForces = model.memberForces.filter((f) => connectedMemberIds.has(f.memberId));
+        for (const cf of connectedForces) {
+          if (Math.abs(cf.axial) > maxFy) {
+            maxFy = Math.abs(cf.axial);
+            govLC = cf.loadCaseId;
+          }
+        }
+      }
+
+      if (maxFy <= 0) {
+        maxFy = 650;
+        maxMx = 45;
+        maxMy = 25;
+        govLC = 9;
+      }
+
+      const assignedTypeId = (supportPileAssignments && supportPileAssignments[sup.nodeId]) || defaultPileTypes[0]?.id || 'P-1';
       const assignedPile = defaultPileTypes.find((p) => p.id === assignedTypeId) || defaultPileTypes[0];
       const overrides = customPileCapOverrides ? customPileCapOverrides[sup.nodeId] : undefined;
 
@@ -227,24 +256,42 @@ export class FloorPlanEngine {
         factoredVerticalLoad: maxFy,
         factoredMomentX: maxMx,
         factoredMomentY: maxMy,
-        fck: 25,
-        fy: 500,
+        fck,
+        fy,
         governingLoadCase: govLC,
       });
     }
-    const designedPileCaps = pileCapInputs.length > 0
-      ? PileCapDesignEngine.batchDesignAndStandardize(pileCapInputs)
-      : new Map<number, PileCapDesignOutput>();
+
+    let designedPileCaps: Map<number, PileCapDesignOutput>;
+    if (savedPileCapDesigns && Object.keys(savedPileCapDesigns).length > 0) {
+      designedPileCaps = new Map();
+      Object.entries(savedPileCapDesigns).forEach(([k, v]) => {
+        designedPileCaps.set(Number(k), v);
+      });
+    } else {
+      designedPileCaps = pileCapInputs.length > 0
+        ? PileCapDesignEngine.batchDesignAndStandardize(pileCapInputs)
+        : new Map<number, PileCapDesignOutput>();
+    }
 
     // Pre-detect Combined & Shear Wall Groups for the entire building model
     const pileDp = defaultPileTypes[0]?.diameter || 350;
-    const allCombinedPileCaps = CombinedPileCapEngine.detectAndDesignAll(
-      model,
-      designedPileCaps,
-      pileDp,
-      manualMergedPileCapGroups || [],
-      detachedCombinedCapNodeIds || []
-    );
+    const defaultQsafe = defaultPileTypes[0]?.safeWorkingLoad || 280;
+
+    let allCombinedPileCaps: CombinedPileCapGroup[];
+    if (savedCombinedCapDesigns && savedCombinedCapDesigns.length > 0) {
+      allCombinedPileCaps = savedCombinedCapDesigns;
+    } else {
+      allCombinedPileCaps = CombinedPileCapEngine.detectAndDesignAll(
+        model,
+        designedPileCaps,
+        pileDp,
+        manualMergedPileCapGroups || [],
+        detachedCombinedCapNodeIds || [],
+        customCombinedCapOverrides,
+        defaultQsafe
+      );
+    }
 
     const absorbedCombinedCapNodeIds = new Set<number>();
     for (const grp of allCombinedPileCaps) {

@@ -69,6 +69,8 @@ export interface StoredProject {
   savedShearWallDesigns?: Record<number, any>;
   savedGradeBeamDesigns?: any[];
   savedFootingDesigns?: Record<number, any>;
+  savedPileCapDesigns?: Record<number, any>;
+  savedCombinedCapDesigns?: any[];
   customColumnRebarOverrides?: Record<number, any>;
   customBeamRebarOverrides?: Record<number, any>;
   customShearWallOverrides?: Record<number, any>;
