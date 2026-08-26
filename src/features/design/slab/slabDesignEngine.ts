@@ -28,6 +28,8 @@ export interface SlabDesignInput {
   partitionLoad?: number; // Partition wall load in kN/m2 (default: 1.0)
   boundaryCondition?: SlabBoundaryCondition;
   preferredBarDia?: number; // Preferred main bar diameter in mm (default: 10)
+  topBarDia?: number; // Top extra / support bar diameter in mm (default: 8)
+  bottomBarDia?: number; // Bottom main bar diameter in mm (default: 10)
   distributionBarDia?: number; // Distribution bar diameter in mm (default: 8)
   permittedBarSizes?: number[]; // Allowed rebar sizes e.g. [8, 10, 12]
 }
@@ -52,6 +54,18 @@ export interface SlabDesignOutput {
   Mux_neg: number;
   Muy_pos: number;
   Muy_neg: number;
+
+  // Explicit Top (8mm) & Bottom (10mm) Rebar Quantities
+  bottomBarDiaX: number; // e.g. 10mm
+  bottomBarSpacingX: number;
+  topBarDiaX: number; // e.g. 8mm
+  topBarSpacingX: number;
+  bottomBarDiaY: number;
+  bottomBarSpacingY: number;
+  topBarDiaY: number;
+  topBarSpacingY: number;
+  crankLengthMm: number; // 0.42 * (D - 2*cover)
+  bentUpBarCallout: string;
 
   // Rebar Callouts
   botRebarXCallout: string;
@@ -225,10 +239,9 @@ export class SlabDesignEngine {
     const initialMinThickness = Math.max(125, Math.ceil(minDReqMm / 10) * 10);
     const proposedThickness = input.thickness ? Math.max(input.thickness, 100) : initialMinThickness;
 
-    const barDiaX = preferredBarDia;
-    const barDiaY = preferredBarDia;
-    const dx = proposedThickness - clearCover - barDiaX / 2;
-    const dy = dx - barDiaY;
+    const initialBottomBarDia = input.bottomBarDia || preferredBarDia || 10;
+    const dx = proposedThickness - clearCover - initialBottomBarDia / 2;
+    const dy = dx - initialBottomBarDia;
 
     // 2. Loads Calculation (IS 875 Part 1 & 2 + IS 456 Cl 36.4.1)
     const selfWeight = (proposedThickness / 1000) * 25.0; // 25 kN/m3 for RCC
@@ -274,17 +287,42 @@ export class SlabDesignEngine {
     const minAstRatio = fy >= 500 ? 0.0012 : 0.0015;
     const minAstPerM = minAstRatio * 1000 * proposedThickness;
 
-    // Design X-Direction Steel (Short Span)
-    const maxMuX = Math.max(Mux_pos, Mux_neg, 0.1);
-    const astReqX = Math.max(minAstPerM, SlabDesignEngine.calculateAst(maxMuX * 1e6, 1000, dx, fck, fy));
-    const barSpacingX = SlabDesignEngine.calculateBarSpacing(barDiaX, astReqX, dx);
-    const astProvX = Math.round(((Math.PI / 4) * barDiaX * barDiaX * 1000) / barSpacingX);
+    const bottomBarDiaX = input.bottomBarDia || preferredBarDia || 10;
+    const topBarDiaX = input.topBarDia || 8;
+    const bottomBarDiaY = input.bottomBarDia || preferredBarDia || 10;
+    const topBarDiaY = input.topBarDia || 8;
 
-    // Design Y-Direction Steel (Long Span)
-    const maxMuY = Math.max(Muy_pos, Muy_neg, 0.1);
-    const astReqY = Math.max(minAstPerM, SlabDesignEngine.calculateAst(maxMuY * 1e6, 1000, dy, fck, fy));
-    const barSpacingY = SlabDesignEngine.calculateBarSpacing(barDiaY, astReqY, dy);
-    const astProvY = Math.round(((Math.PI / 4) * barDiaY * barDiaY * 1000) / barSpacingY);
+    // Design X-Direction Bottom Main Steel (10mm)
+    const maxMuX_pos = Math.max(Mux_pos, 0.1);
+    const astReqX = Math.max(minAstPerM, SlabDesignEngine.calculateAst(maxMuX_pos * 1e6, 1000, dx, fck, fy));
+    const bottomBarSpacingX = SlabDesignEngine.calculateBarSpacing(bottomBarDiaX, astReqX, dx);
+    const astProvX = Math.round(((Math.PI / 4) * bottomBarDiaX * bottomBarDiaX * 1000) / bottomBarSpacingX);
+
+    // Design X-Direction Top Support Steel (8mm)
+    const maxMuX_neg = Math.max(Mux_neg, 0.1);
+    const astReqX_top = Math.max(minAstPerM * 0.5, SlabDesignEngine.calculateAst(maxMuX_neg * 1e6, 1000, dx, fck, fy));
+    const topBarSpacingX = SlabDesignEngine.calculateBarSpacing(topBarDiaX, astReqX_top, dx);
+
+    // Design Y-Direction Bottom Main Steel (10mm)
+    const maxMuY_pos = Math.max(Muy_pos, 0.1);
+    const astReqY = Math.max(minAstPerM, SlabDesignEngine.calculateAst(maxMuY_pos * 1e6, 1000, dy, fck, fy));
+    const bottomBarSpacingY = SlabDesignEngine.calculateBarSpacing(bottomBarDiaY, astReqY, dy);
+    const astProvY = Math.round(((Math.PI / 4) * bottomBarDiaY * bottomBarDiaY * 1000) / bottomBarSpacingY);
+
+    // Design Y-Direction Top Support Steel (8mm)
+    const maxMuY_neg = Math.max(Muy_neg, 0.1);
+    const astReqY_top = Math.max(minAstPerM * 0.5, SlabDesignEngine.calculateAst(maxMuY_neg * 1e6, 1000, dy, fck, fy));
+    const topBarSpacingY = SlabDesignEngine.calculateBarSpacing(topBarDiaY, astReqY_top, dy);
+
+    // Crank / Bent-Up Bar Length & Detailing (IS 456 Cl. 26.5.2)
+    const dNet = Math.max(20, proposedThickness - 2 * clearCover);
+    const crankLengthMm = Math.round(0.42 * dNet);
+    const bentUpBarCallout = `Bottom: T${bottomBarDiaX}@${bottomBarSpacingX}mm | Top Bent-Up: T${topBarDiaX}@${topBarSpacingX}mm (Crank ht: ${crankLengthMm}mm @ 0.25L)`;
+
+    const barDiaX = bottomBarDiaX;
+    const barSpacingX = bottomBarSpacingX;
+    const barDiaY = bottomBarDiaY;
+    const barSpacingY = bottomBarSpacingY;
 
     // Distribution / Temperature Steel
     const distAstReq = minAstPerM;
@@ -302,16 +340,10 @@ export class SlabDesignEngine {
     }
 
     // Callout Strings
-    const botRebarXCallout = `T${barDiaX} @ ${barSpacingX} mm c/c (Main Bottom Short Way — Ast prov: ${astProvX} mm²/m)`;
-    const botRebarYCallout = `T${barDiaY} @ ${barSpacingY} mm c/c (Main Bottom Long Way — Ast prov: ${astProvY} mm²/m)`;
-    const topRebarXCallout =
-      Mux_neg > 0
-        ? `T${barDiaX} @ ${barSpacingX} mm c/c (Top Negative Support X — Ast prov: ${astProvX} mm²/m)`
-        : `T${barDiaX} @ 200 mm c/c (Top Support Edge Anchorage)`;
-    const topRebarYCallout =
-      Muy_neg > 0
-        ? `T${barDiaY} @ ${barSpacingY} mm c/c (Top Negative Support Y — Ast prov: ${astProvY} mm²/m)`
-        : `T${barDiaY} @ 200 mm c/c (Top Support Edge Anchorage)`;
+    const botRebarXCallout = `T${bottomBarDiaX} @ ${bottomBarSpacingX} mm c/c (Main Bottom Short Way — Ast prov: ${astProvX} mm²/m)`;
+    const botRebarYCallout = `T${bottomBarDiaY} @ ${bottomBarSpacingY} mm c/c (Main Bottom Long Way — Ast prov: ${astProvY} mm²/m)`;
+    const topRebarXCallout = `T${topBarDiaX} @ ${topBarSpacingX} mm c/c (Top Support Extra / Bent-Up @ 0.25L — Crank ht: ${crankLengthMm}mm)`;
+    const topRebarYCallout = `T${topBarDiaY} @ ${topBarSpacingY} mm c/c (Top Support Extra / Bent-Up @ 0.25L — Crank ht: ${crankLengthMm}mm)`;
 
     // 5. Deflection Check (IS 456 Cl 23.2.1 & Fig. 4)
     const ptProvided = (100 * astProvX) / (1000 * dx);
@@ -489,6 +521,16 @@ export class SlabDesignEngine {
       Mux_neg,
       Muy_pos,
       Muy_neg,
+      bottomBarDiaX,
+      bottomBarSpacingX,
+      topBarDiaX,
+      topBarSpacingX,
+      bottomBarDiaY,
+      bottomBarSpacingY,
+      topBarDiaY,
+      topBarSpacingY,
+      crankLengthMm,
+      bentUpBarCallout,
       botRebarXCallout,
       botRebarYCallout,
       topRebarXCallout,

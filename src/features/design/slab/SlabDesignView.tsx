@@ -100,6 +100,8 @@ export const SlabDesignView: React.FC = () => {
   const [showFloorFilter, setShowFloorFilter] = useState<boolean>(true);
   const [showBbsModal, setShowBbsModal] = useState<boolean>(false);
   const [showRebarMatrix, setShowRebarMatrix] = useState<boolean>(false);
+  const [topBarDia, setTopBarDia] = useState<number>(8);
+  const [bottomBarDia, setBottomBarDia] = useState<number>(10);
   const [permittedBarSizes, setPermittedBarSizes] = useState<number[]>([8, 10, 12, 16]);
   const [activeFloorFilter, setActiveFloorFilter] = useState<string>('ALL');
 
@@ -211,12 +213,14 @@ export const SlabDesignView: React.FC = () => {
         liveLoad: p.liveLoad || liveLoad,
         floorFinishLoad,
         thickness: p.thickness || defaultThickness,
+        topBarDia,
+        bottomBarDia,
         permittedBarSizes,
       });
       results[p.panelId] = output;
     });
     return results;
-  }, [panelsInput, fck, fy, clearCover, liveLoad, floorFinishLoad, defaultThickness, permittedBarSizes]);
+  }, [panelsInput, fck, fy, clearCover, liveLoad, floorFinishLoad, defaultThickness, topBarDia, bottomBarDia, permittedBarSizes]);
 
   // Auto-Fix All Failing Slabs Handler
   const handleAutoFixFailingSlabs = () => {
@@ -465,7 +469,37 @@ export const SlabDesignView: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 bg-slate-950 p-2.5 rounded border border-amber-800/80">
+          <div className="flex flex-wrap items-center gap-4 bg-slate-950 p-2.5 rounded border border-amber-800/80">
+            <div className="flex items-center gap-1.5">
+              <span className="text-amber-400 font-bold">Bottom Steel:</span>
+              <select
+                value={bottomBarDia}
+                onChange={(e) => setBottomBarDia(Number(e.target.value))}
+                className="bg-slate-900 border border-slate-700 text-amber-300 font-bold text-xs px-2 py-1 rounded focus:border-amber-400"
+              >
+                <option value={8}>T8 (8mm)</option>
+                <option value={10}>T10 (10mm - Default)</option>
+                <option value={12}>T12 (12mm)</option>
+                <option value={16}>T16 (16mm)</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-sky-400 font-bold">Top Extra / Bent-Up:</span>
+              <select
+                value={topBarDia}
+                onChange={(e) => setTopBarDia(Number(e.target.value))}
+                className="bg-slate-900 border border-slate-700 text-sky-300 font-bold text-xs px-2 py-1 rounded focus:border-sky-400"
+              >
+                <option value={8}>T8 (8mm - Default)</option>
+                <option value={10}>T10 (10mm)</option>
+                <option value={12}>T12 (12mm)</option>
+                <option value={16}>T16 (16mm)</option>
+              </select>
+            </div>
+
+            <div className="h-4 border-r border-slate-700 mx-1"></div>
+
             {[8, 10, 12, 16, 20].map((dia) => {
               const checked = permittedBarSizes.includes(dia);
               return (
@@ -485,7 +519,7 @@ export const SlabDesignView: React.FC = () => {
                     }}
                     className="rounded border-slate-700 text-amber-500 focus:ring-amber-400 w-4 h-4 cursor-pointer"
                   />
-                  <span>T{dia} ({dia}mm)</span>
+                  <span>T{dia}</span>
                 </label>
               );
             })}
@@ -885,11 +919,13 @@ export const SlabDesignView: React.FC = () => {
                         </td>
 
                         <td className="border-r border-slate-300 p-2 text-left text-[10.5px]">
-                          <div className="font-bold text-indigo-900">{out.botRebarXCallout}</div>
+                          <div className="font-bold text-amber-900">Bot Main: {out.botRebarXCallout?.split(' — ')[0]}</div>
+                          <div className="text-[10px] text-sky-800 font-bold mt-0.5">Top Bent-Up: T{out.topBarDiaX || 8} @ {out.topBarSpacingX}mm (Crank: {out.crankLengthMm || 45}mm @ 0.25L)</div>
                         </td>
 
                         <td className="border-r border-slate-300 p-2 text-left text-[10.5px]">
-                          <div className="font-bold text-indigo-900">{out.botRebarYCallout}</div>
+                          <div className="font-bold text-amber-900">Bot Main: {out.botRebarYCallout?.split(' — ')[0]}</div>
+                          <div className="text-[10px] text-sky-800 font-bold mt-0.5">Top Bent-Up: T{out.topBarDiaY || 8} @ {out.topBarSpacingY}mm (Crank: {out.crankLengthMm || 45}mm @ 0.25L)</div>
                         </td>
 
                         <td className="border-r border-slate-300 p-2 text-center font-bold">
@@ -1182,10 +1218,10 @@ export const SlabDesignView: React.FC = () => {
                         <tr className="hover:bg-slate-100 font-sans text-[11px]">
                           <td className="p-2 border border-slate-300 text-center font-bold text-indigo-700">{panel.panelId}</td>
                           <td className="p-2 border border-slate-300 text-center">{panel.floorLevel?.split(' ')[0] || 'L1'}</td>
-                          <td className="p-2 border border-slate-300 font-bold text-sky-800">Bottom Short Way Main Steel</td>
+                          <td className="p-2 border border-slate-300 font-bold text-amber-800">Bottom Short Way Main Steel (T10)</td>
                           <td className="p-2 border border-slate-300 text-center text-amber-700 font-bold">U-BAR</td>
-                          <td className="p-2 border border-slate-300 text-center font-bold">{out.barDiaX}</td>
-                          <td className="p-2 border border-slate-300 text-center">{out.barSpacingX} mm</td>
+                          <td className="p-2 border border-slate-300 text-center font-bold">{out.bottomBarDiaX || 10}</td>
+                          <td className="p-2 border border-slate-300 text-center">{out.bottomBarSpacingX || out.barSpacingX} mm</td>
                           <td className="p-2 border border-slate-300 text-center">{cutX} m</td>
                           <td className="p-2 border border-slate-300 text-center font-bold">{numX}</td>
                           <td className="p-2 border border-slate-300 text-center font-bold text-emerald-700">{wtX} kg</td>
@@ -1193,13 +1229,24 @@ export const SlabDesignView: React.FC = () => {
                         <tr className="hover:bg-slate-100 font-sans text-[11px]">
                           <td className="p-2 border border-slate-300 text-center font-bold text-indigo-700">{panel.panelId}</td>
                           <td className="p-2 border border-slate-300 text-center">{panel.floorLevel?.split(' ')[0] || 'L1'}</td>
-                          <td className="p-2 border border-slate-300 font-bold text-sky-800">Bottom Long Way Main Steel</td>
+                          <td className="p-2 border border-slate-300 font-bold text-amber-800">Bottom Long Way Main Steel (T10)</td>
                           <td className="p-2 border border-slate-300 text-center text-amber-700 font-bold">U-BAR</td>
-                          <td className="p-2 border border-slate-300 text-center font-bold">{out.barDiaY}</td>
-                          <td className="p-2 border border-slate-300 text-center">{out.barSpacingY} mm</td>
+                          <td className="p-2 border border-slate-300 text-center font-bold">{out.bottomBarDiaY || 10}</td>
+                          <td className="p-2 border border-slate-300 text-center">{out.bottomBarSpacingY || out.barSpacingY} mm</td>
                           <td className="p-2 border border-slate-300 text-center">{cutY} m</td>
                           <td className="p-2 border border-slate-300 text-center font-bold">{numY}</td>
                           <td className="p-2 border border-slate-300 text-center font-bold text-emerald-700">{wtY} kg</td>
+                        </tr>
+                        <tr className="hover:bg-slate-100 font-sans text-[11px] bg-slate-50">
+                          <td className="p-2 border border-slate-300 text-center font-bold text-indigo-700">{panel.panelId}</td>
+                          <td className="p-2 border border-slate-300 text-center">{panel.floorLevel?.split(' ')[0] || 'L1'}</td>
+                          <td className="p-2 border border-slate-300 font-bold text-sky-800">Top Bent-Up / Extra Support Steel (T8 @ 0.25L)</td>
+                          <td className="p-2 border border-slate-300 text-center text-sky-700 font-bold">CRANKED</td>
+                          <td className="p-2 border border-slate-300 text-center font-bold text-sky-800">{out.topBarDiaX || 8}</td>
+                          <td className="p-2 border border-slate-300 text-center">{out.topBarSpacingX} mm</td>
+                          <td className="p-2 border border-slate-300 text-center">{Number((cutX * 0.45).toFixed(2))} m</td>
+                          <td className="p-2 border border-slate-300 text-center font-bold">{numX}</td>
+                          <td className="p-2 border border-slate-300 text-center font-bold text-emerald-700">{Number((wtX * 0.35).toFixed(1))} kg</td>
                         </tr>
                       </React.Fragment>
                     );
