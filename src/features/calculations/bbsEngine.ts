@@ -1319,6 +1319,35 @@ export class BbsEngine {
           totalLengthM: Number((topBarsX * topCutLenM).toFixed(2)),
           lengthByDia: { [topBarDiaX]: Number((topBarsX * topCutLenM).toFixed(2)) },
         });
+
+        // 4. Corner Torsion Mesh (IS 456 Cl. 24.4.1)
+        const bc = slab.boundaryCondition;
+        const isCornerPanel = bc === 'TWO_ADJACENT_DISCONTINUOUS' || bc === 'SIMPLY_SUPPORTED_ALL';
+        if (isCornerPanel) {
+          const distM = Number((lx / 5).toFixed(2));
+          const torsionBarDia = 8;
+          const torsionSpacing = 150;
+          const torsionBarsCount = Math.round((distM * 1000) / torsionSpacing) * 4; // 4 layers
+          const torsionCutLenM = Number((distM + (2 * (thickness - 2 * cover)) / 1000).toFixed(2));
+          items.push({
+            barNo: barIndex++,
+            elementCategory: 'SLAB',
+            elementTag: tag,
+            barDescription: `4-Layer Corner Torsion Reinforcement Mesh (T8@150 mm c/c over ${distM}m)`,
+            shapeType: 'STRAIGHT',
+            a: 0,
+            b: Math.round(distM * 1000),
+            c: 0,
+            diameter: torsionBarDia,
+            spacing: torsionSpacing,
+            cuttingLengthM: torsionCutLenM,
+            numElements: 1,
+            barsPerElement: torsionBarsCount,
+            totalCount: torsionBarsCount,
+            totalLengthM: Number((torsionBarsCount * torsionCutLenM).toFixed(2)),
+            lengthByDia: { [torsionBarDia]: Number((torsionBarsCount * torsionCutLenM).toFixed(2)) },
+          });
+        }
       });
     }
 

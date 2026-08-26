@@ -538,28 +538,30 @@ export const SlabDesignView: React.FC = () => {
             <div className="flex items-center gap-1.5">
               <span className="text-amber-400 font-bold">Bottom Steel:</span>
               <select
-                value={bottomBarDia}
+                value={permittedBarSizes.includes(bottomBarDia) ? bottomBarDia : permittedBarSizes[0]}
                 onChange={(e) => setBottomBarDia(Number(e.target.value))}
                 className="bg-slate-900 border border-slate-700 text-amber-300 font-bold text-xs px-2 py-1 rounded focus:border-amber-400"
               >
-                <option value={8}>T8 (8mm)</option>
-                <option value={10}>T10 (10mm - Default)</option>
-                <option value={12}>T12 (12mm)</option>
-                <option value={16}>T16 (16mm)</option>
+                {permittedBarSizes.map((d) => (
+                  <option key={`bot_dia_opt_${d}`} value={d}>
+                    T{d} ({d}mm)
+                  </option>
+                ))}
               </select>
             </div>
 
             <div className="flex items-center gap-1.5">
               <span className="text-sky-400 font-bold">Top Extra / Bent-Up:</span>
               <select
-                value={topBarDia}
+                value={permittedBarSizes.includes(topBarDia) ? topBarDia : permittedBarSizes[0]}
                 onChange={(e) => setTopBarDia(Number(e.target.value))}
                 className="bg-slate-900 border border-slate-700 text-sky-300 font-bold text-xs px-2 py-1 rounded focus:border-sky-400"
               >
-                <option value={8}>T8 (8mm - Default)</option>
-                <option value={10}>T10 (10mm)</option>
-                <option value={12}>T12 (12mm)</option>
-                <option value={16}>T16 (16mm)</option>
+                {permittedBarSizes.map((d) => (
+                  <option key={`top_dia_opt_${d}`} value={d}>
+                    T{d} ({d}mm)
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -576,10 +578,20 @@ export const SlabDesignView: React.FC = () => {
                     type="checkbox"
                     checked={checked}
                     onChange={(e) => {
+                      let next: number[];
                       if (e.target.checked) {
-                        setPermittedBarSizes([...permittedBarSizes, dia]);
+                        next = [...permittedBarSizes, dia].sort((a, b) => a - b);
                       } else if (permittedBarSizes.length > 1) {
-                        setPermittedBarSizes(permittedBarSizes.filter((d) => d !== dia));
+                        next = permittedBarSizes.filter((d) => d !== dia);
+                      } else {
+                        return;
+                      }
+                      setPermittedBarSizes(next);
+                      if (!next.includes(bottomBarDia)) {
+                        setBottomBarDia(next[0]);
+                      }
+                      if (!next.includes(topBarDia)) {
+                        setTopBarDia(next[0]);
                       }
                     }}
                     className="rounded border-slate-700 text-amber-500 focus:ring-amber-400 w-4 h-4 cursor-pointer"

@@ -304,10 +304,27 @@ export class SlabDesignEngine {
     const minAstRatio = fy >= 500 ? 0.0012 : 0.0015;
     const minAstPerM = minAstRatio * 1000 * proposedThickness;
 
-    const bottomBarDiaX = input.bottomBarDia || preferredBarDia || 10;
-    const topBarDiaX = input.topBarDia || 8;
-    const bottomBarDiaY = input.bottomBarDia || preferredBarDia || 10;
-    const topBarDiaY = input.topBarDia || 8;
+    const allowed = input.permittedBarSizes && input.permittedBarSizes.length > 0 ? input.permittedBarSizes : [8, 10, 12, 16];
+
+    let bottomBarDiaX = input.bottomBarDia || preferredBarDia || 10;
+    if (!allowed.includes(bottomBarDiaX)) {
+      bottomBarDiaX = allowed.find((d) => d >= bottomBarDiaX) || allowed[0];
+    }
+
+    let topBarDiaX = input.topBarDia || 8;
+    if (!allowed.includes(topBarDiaX)) {
+      topBarDiaX = allowed.find((d) => d >= topBarDiaX) || allowed[0];
+    }
+
+    let bottomBarDiaY = input.bottomBarDia || preferredBarDia || 10;
+    if (!allowed.includes(bottomBarDiaY)) {
+      bottomBarDiaY = allowed.find((d) => d >= bottomBarDiaY) || allowed[0];
+    }
+
+    let topBarDiaY = input.topBarDia || 8;
+    if (!allowed.includes(topBarDiaY)) {
+      topBarDiaY = allowed.find((d) => d >= topBarDiaY) || allowed[0];
+    }
 
     // Design X-Direction Bottom Main Steel (10mm)
     const maxMuX_pos = Math.max(Mux_pos, 0.1);
