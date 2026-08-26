@@ -162,6 +162,7 @@ export const Structural3DViewer: React.FC = () => {
 
   const [showLabels, setShowLabels] = useState(true);
   const [showWallLabels, setShowWallLabels] = useState(true);
+  const [showSlabLabels, setShowSlabLabels] = useState(true);
   const [showPileCaps, setShowPileCaps] = useState(true);
   const [showGradeBeams, setShowGradeBeams] = useState(true);
   const [showSlabs, setShowSlabs] = useState(true);
@@ -525,6 +526,47 @@ export const Structural3DViewer: React.FC = () => {
       });
     }
 
+    // 2c. Slab Numbers / Badges in 3D Model — respects showSlabLabels on/off switch
+    if (showSlabLabels && showSlabs && filterLayers.showPlates) {
+      let slabLabelCount = 1;
+      const slabPlates = Array.from(plates.values()).filter(
+        (p: any) => p.classification !== 'WALL' && !p.isLiftCore
+      );
+
+      const seenCenters: { x: number; y: number; z: number }[] = [];
+
+      slabPlates.forEach((plate: any) => {
+        const pNodes = plate.nodeIds.map((id) => nodes.get(id)).filter(Boolean) as Node3D[];
+        if (pNodes.length < 3) return;
+
+        const cx = pNodes.reduce((s: number, n: Node3D) => s + n.x, 0) / pNodes.length;
+        const cy = pNodes.reduce((s: number, n: Node3D) => s + n.y, 0) / pNodes.length;
+        const cz = pNodes.reduce((s: number, n: Node3D) => s + n.z, 0) / pNodes.length;
+
+        // Prevent overlapping badges for fine-meshed sub-plates within 2.2m radius
+        const isDuplicate = seenCenters.some(
+          (c) => Math.abs(c.y - cy) < 0.4 && Math.hypot(c.x - cx, c.z - cz) < 2.2
+        );
+        if (isDuplicate) return;
+
+        seenCenters.push({ x: cx, y: cy, z: cz });
+
+        const slabName = `S${slabLabelCount++}`;
+        const thk = Math.round((plate.thickness || 0.13) * 1000);
+        const isSelected = selectedPlateId === plate.id;
+
+        const sprite = createTextBadgeSprite(
+          slabName,
+          `${thk}mm SLAB`,
+          isSelected ? '#c2410c' : '#1e3a8a',
+          isSelected ? '#ea580c' : '#3b82f6',
+          '#ffffff'
+        );
+        sprite.position.set(cx, cy + 0.35, cz);
+        dynamicGroup.add(sprite);
+      });
+    }
+
     // 3. Draw Supports and Individual / Combined Pile Caps
     if (filterLayers.showSupports) {
       const availablePileTypes = projectPileTypes && projectPileTypes.length > 0
@@ -794,6 +836,7 @@ export const Structural3DViewer: React.FC = () => {
     filterLayers,
     showLabels,
     showWallLabels,
+    showSlabLabels,
     showSlabs,
     showWalls,
     showPileCaps,
@@ -1010,6 +1053,20 @@ export const Structural3DViewer: React.FC = () => {
         >
           <Layers className="w-3.5 h-3.5 text-sky-400" />
           <span>Slabs</span>
+        </button>
+
+        {/* Slab Numbers / Labels Toggle — ON/OFF switch per user request */}
+        <button
+          onClick={() => setShowSlabLabels(!showSlabLabels)}
+          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
+            showSlabLabels
+              ? 'bg-blue-500/25 text-blue-300 border border-blue-500/50 font-bold shadow-xs'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+          title="Toggle 3D Floor Slab Numbers (S1, S2, S3, S4, S5...) — ON/OFF"
+        >
+          <Tag className="w-3.5 h-3.5 text-blue-400" />
+          <span>Slab Numbers</span>
         </button>
 
         {/* Shear Walls Toggle — vertical lift core shear wall plates */}
