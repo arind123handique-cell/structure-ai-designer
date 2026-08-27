@@ -9,6 +9,7 @@ import { GradeBeamDesignEngine } from '@/features/design/gradebeam/gradeBeamEngi
 import { PileCapDesignEngine } from '@/features/design/pilecap/pileCapDesignEngine';
 import { PileDesignEngine } from '@/features/design/pile/pileDesignEngine';
 import { CombinedPileCapEngine, CombinedPileCapGroup } from '@/features/design/pilecap/combinedPileCapEngine';
+import { Architectural3DLayer } from '@/features/architectural/3d/Architectural3DLayer';
 import {
   RotateCcw,
   Eye,
@@ -23,6 +24,8 @@ import {
   CheckSquare,
   MousePointer,
   Zap,
+  DoorOpen,
+  AppWindow,
 } from 'lucide-react';
 
 /**
@@ -139,6 +142,10 @@ export const Structural3DViewer: React.FC = () => {
 
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
+  const arch3DLayerRef = useRef<Architectural3DLayer | null>(null);
+  if (!arch3DLayerRef.current) {
+    arch3DLayerRef.current = new Architectural3DLayer();
+  }
 
   const {
     activeModel,
@@ -161,6 +168,13 @@ export const Structural3DViewer: React.FC = () => {
     savedSlabDesigns,
     savedColumnDesigns,
     savedBeamDesigns,
+    architecturalWalls,
+    architecturalDoors,
+    architecturalWindows,
+    architecturalOpenings,
+    architecturalRooms,
+    selectedArchitecturalId,
+    selectArchitecturalElement,
   } = useProjectStore() as any;
 
   const [showLabels, setShowLabels] = useState(true);
@@ -170,6 +184,10 @@ export const Structural3DViewer: React.FC = () => {
   const [showGradeBeams, setShowGradeBeams] = useState(true);
   const [showSlabs, setShowSlabs] = useState(true);
   const [showWalls, setShowWalls] = useState(true);
+  const [showArchWalls, setShowArchWalls] = useState(true);
+  const [showArchDoors, setShowArchDoors] = useState(true);
+  const [showArchWindows, setShowArchWindows] = useState(true);
+  const [showArchRooms, setShowArchRooms] = useState(true);
   const [selectedGradeBeamId, setSelectedGradeBeamId] = useState<string | null>(null);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
 
@@ -286,6 +304,10 @@ export const Structural3DViewer: React.FC = () => {
     const dynamicGroup = new THREE.Group();
     scene.add(dynamicGroup);
     dynamicGroupRef.current = dynamicGroup;
+
+    if (arch3DLayerRef.current) {
+      scene.add(arch3DLayerRef.current.getGroup());
+    }
 
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 2000);
     camera.position.set(30, 25, 40);
@@ -921,6 +943,25 @@ export const Structural3DViewer: React.FC = () => {
         gradeBeamMeshesRef.current.push(gbGroup);
       });
     }
+
+    // 5. Update Live 3D Architectural BIM Layer
+    if (arch3DLayerRef.current) {
+      arch3DLayerRef.current.update(
+        architecturalWalls || {},
+        architecturalDoors || {},
+        architecturalWindows || {},
+        architecturalOpenings || {},
+        architecturalRooms || {},
+        selectedArchitecturalId,
+        {
+          showWalls: showArchWalls,
+          showDoors: showArchDoors,
+          showWindows: showArchWindows,
+          showOpenings: true,
+          showRoomLabels: showArchRooms,
+        }
+      );
+    }
   }, [
     activeModel,
     selectedMemberId,
@@ -935,6 +976,16 @@ export const Structural3DViewer: React.FC = () => {
     showWalls,
     showPileCaps,
     showGradeBeams,
+    showArchWalls,
+    showArchDoors,
+    showArchWindows,
+    showArchRooms,
+    architecturalWalls,
+    architecturalDoors,
+    architecturalWindows,
+    architecturalOpenings,
+    architecturalRooms,
+    selectedArchitecturalId,
     columnSupportMapping,
     columnMemberMapping,
     gradeBeamsList,
@@ -962,7 +1013,15 @@ export const Structural3DViewer: React.FC = () => {
     const gradeMeshes = gradeBeamMeshesRef.current.flatMap((g) => g.children.filter((c) => (c as any).isMesh));
     const pileCapMeshes = pileCapMeshesRef.current.flatMap((g) => g.children.filter((c) => (c as any).isMesh));
     const supportCones = supportConeMeshesRef.current;
-    const allMeshes = [...memberMeshes, ...plateMeshes, ...gradeMeshes, ...pileCapMeshes, ...supportCones];
+    const archMeshes: THREE.Object3D[] = [];
+    if (arch3DLayerRef.current) {
+      arch3DLayerRef.current.getGroup().traverse((child) => {
+        if ((child as any).isMesh || (child as any).isSprite) {
+          archMeshes.push(child);
+        }
+      });
+    }
+    const allMeshes = [...memberMeshes, ...plateMeshes, ...gradeMeshes, ...pileCapMeshes, ...supportCones, ...archMeshes];
     const intersects = raycasterRef.current.intersectObjects(allMeshes);
 
     const isMulti = e.shiftKey || e.ctrlKey || multiSelectMode;
@@ -970,9 +1029,40 @@ export const Structural3DViewer: React.FC = () => {
     if (intersects.length > 0) {
       const hit = intersects[0].object;
 
-      if (hit.userData.type === 'gradebeam' && hit.userData.gradeBeamId) {
+      if (hit.userData.type === 'arch_wall') {
+        selectArchitecturalElement(hit.userData.id, 'WALL');
+        selectMember(null);
+        setSelectedGradeBeamId(null);
+        (selectPlate as any)(null);
+        if (!isMulti) clearSelectedSupportNodes();
+      } else if (hit.userData.type === 'arch_door') {
+        selectArchitecturalElement(hit.userData.id, 'DOOR');
+        selectMember(null);
+        setSelectedGradeBeamId(null);
+        (selectPlate as any)(null);
+        if (!isMulti) clearSelectedSupportNodes();
+      } else if (hit.userData.type === 'arch_window') {
+        selectArchitecturalElement(hit.userData.id, 'WINDOW');
+        selectMember(null);
+        setSelectedGradeBeamId(null);
+        (selectPlate as any)(null);
+        if (!isMulti) clearSelectedSupportNodes();
+      } else if (hit.userData.type === 'arch_opening') {
+        selectArchitecturalElement(hit.userData.id, 'OPENING');
+        selectMember(null);
+        setSelectedGradeBeamId(null);
+        (selectPlate as any)(null);
+        if (!isMulti) clearSelectedSupportNodes();
+      } else if (hit.userData.type === 'arch_room') {
+        selectArchitecturalElement(hit.userData.id, 'ROOM');
+        selectMember(null);
+        setSelectedGradeBeamId(null);
+        (selectPlate as any)(null);
+        if (!isMulti) clearSelectedSupportNodes();
+      } else if (hit.userData.type === 'gradebeam' && hit.userData.gradeBeamId) {
         setSelectedGradeBeamId(hit.userData.gradeBeamId);
         selectMember(null);
+        selectArchitecturalElement(null);
         if (!isMulti) clearSelectedSupportNodes();
       } else if (hit.userData.type === 'combinedPileCap' && hit.userData.nodeIds) {
         const nodeIds: number[] = hit.userData.nodeIds;
@@ -983,19 +1073,23 @@ export const Structural3DViewer: React.FC = () => {
           nodeIds.forEach((nid) => selectSupportNode(nid, true));
         }
         selectMember(null);
+        selectArchitecturalElement(null);
         setSelectedGradeBeamId(null);
       } else if (hit.userData.type === 'support' && hit.userData.nodeId) {
         selectSupportNode(hit.userData.nodeId, isMulti);
         selectMember(null);
+        selectArchitecturalElement(null);
         setSelectedGradeBeamId(null);
         (selectPlate as any)(null);
       } else if (hit.userData.type === 'plate' && hit.userData.plateId) {
         (selectPlate as any)(hit.userData.plateId);
         selectMember(null);
+        selectArchitecturalElement(null);
         setSelectedGradeBeamId(null);
         if (!isMulti) clearSelectedSupportNodes();
       } else if (hit.userData.memberId) {
         selectMember(hit.userData.memberId);
+        selectArchitecturalElement(null);
         setSelectedGradeBeamId(null);
         (selectPlate as any)(null);
         if (!isMulti) {
@@ -1005,6 +1099,7 @@ export const Structural3DViewer: React.FC = () => {
     } else {
       if (!isMulti) {
         selectMember(null);
+        selectArchitecturalElement(null);
         setSelectedGradeBeamId(null);
         (selectPlate as any)(null);
         clearSelectedSupportNodes();
@@ -1235,6 +1330,61 @@ export const Structural3DViewer: React.FC = () => {
           <span className="w-2 h-2 rounded-full bg-red-400"></span>
           Supports
         </button>
+
+        <div className="w-[1px] h-4 bg-slate-700 mx-1" />
+
+        {/* Architectural 3D Layer Toggles */}
+        <button
+          onClick={() => setShowArchWalls(!showArchWalls)}
+          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
+            showArchWalls
+              ? 'bg-amber-500/25 text-amber-300 border border-amber-500/50 font-bold shadow-xs'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+          title="Toggle 3D Architectural Walls"
+        >
+          <Box className="w-3.5 h-3.5 text-amber-400" />
+          <span>Arch Walls {architecturalWalls && Object.keys(architecturalWalls).length > 0 ? `(${Object.keys(architecturalWalls).length})` : ''}</span>
+        </button>
+
+        <button
+          onClick={() => setShowArchDoors(!showArchDoors)}
+          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
+            showArchDoors
+              ? 'bg-amber-600/25 text-amber-200 border border-amber-600/50 font-bold shadow-xs'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+          title="Toggle 3D Hosted Doors"
+        >
+          <DoorOpen className="w-3.5 h-3.5 text-amber-400" />
+          <span>Doors {architecturalDoors && Object.keys(architecturalDoors).length > 0 ? `(${Object.keys(architecturalDoors).length})` : ''}</span>
+        </button>
+
+        <button
+          onClick={() => setShowArchWindows(!showArchWindows)}
+          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
+            showArchWindows
+              ? 'bg-sky-500/25 text-sky-200 border border-sky-500/50 font-bold shadow-xs'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+          title="Toggle 3D Hosted Windows"
+        >
+          <AppWindow className="w-3.5 h-3.5 text-sky-400" />
+          <span>Windows {architecturalWindows && Object.keys(architecturalWindows).length > 0 ? `(${Object.keys(architecturalWindows).length})` : ''}</span>
+        </button>
+
+        <button
+          onClick={() => setShowArchRooms(!showArchRooms)}
+          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
+            showArchRooms
+              ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-500/50 font-bold shadow-xs'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+          title="Toggle 3D Room Badges"
+        >
+          <Tag className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Rooms</span>
+        </button>
       </div>
 
       {/* Floating Action Banner: Merge Selected Pile Caps (When >= 2 supports selected) */}
@@ -1401,6 +1551,106 @@ export const Structural3DViewer: React.FC = () => {
             </span>
           </div>
           <button onClick={() => (selectPlate as any)(null)} className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-600 transition-colors">
+            Deselect
+          </button>
+        </div>
+      )}
+
+      {/* Selected Architectural Wall Floating HUD */}
+      {selectedArchitecturalId && architecturalWalls && architecturalWalls[selectedArchitecturalId] && (
+        <div className="absolute bottom-4 left-4 bg-deep-navy/95 backdrop-blur-md border border-amber-500/50 p-3.5 rounded-lg shadow-2xl z-10 flex items-center gap-4 text-xs font-mono text-slate-200 animate-in fade-in">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="px-2 py-0.5 bg-amber-600 text-white rounded font-bold text-xs">
+                ARCHITECTURAL WALL {selectedArchitecturalId}
+              </span>
+              <span className="px-2 py-0.5 bg-slate-700 text-slate-200 rounded font-bold text-xs">
+                {Math.round(architecturalWalls[selectedArchitecturalId].thickness * 1000)}mm {architecturalWalls[selectedArchitecturalId].wallType}
+              </span>
+            </div>
+            <span className="text-slate-300 block text-[11px]">
+              Length: {(Math.hypot(architecturalWalls[selectedArchitecturalId].end.x - architecturalWalls[selectedArchitecturalId].start.x, architecturalWalls[selectedArchitecturalId].end.y - architecturalWalls[selectedArchitecturalId].start.y)).toFixed(2)}m • Height: {architecturalWalls[selectedArchitecturalId].height.toFixed(2)}m • Base EL: +{architecturalWalls[selectedArchitecturalId].baseElevation.toFixed(2)}m
+            </span>
+          </div>
+          <button
+            onClick={() => selectArchitecturalElement(null)}
+            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-600 transition-colors"
+          >
+            Deselect
+          </button>
+        </div>
+      )}
+
+      {/* Selected Architectural Door Floating HUD */}
+      {selectedArchitecturalId && architecturalDoors && architecturalDoors[selectedArchitecturalId] && (
+        <div className="absolute bottom-4 left-4 bg-deep-navy/95 backdrop-blur-md border border-amber-500/50 p-3.5 rounded-lg shadow-2xl z-10 flex items-center gap-4 text-xs font-mono text-slate-200 animate-in fade-in">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="px-2 py-0.5 bg-amber-700 text-white rounded font-bold text-xs">
+                DOOR {selectedArchitecturalId}
+              </span>
+              <span className="px-2 py-0.5 bg-slate-700 text-slate-200 rounded font-bold text-xs">
+                {Math.round(architecturalDoors[selectedArchitecturalId].width * 1000)} × {Math.round(architecturalDoors[selectedArchitecturalId].height * 1000)} mm
+              </span>
+            </div>
+            <span className="text-slate-300 block text-[11px]">
+              Host: {architecturalDoors[selectedArchitecturalId].hostWallId} • Swing: {architecturalDoors[selectedArchitecturalId].swingDirection} • Type: {architecturalDoors[selectedArchitecturalId].doorType}
+            </span>
+          </div>
+          <button
+            onClick={() => selectArchitecturalElement(null)}
+            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-600 transition-colors"
+          >
+            Deselect
+          </button>
+        </div>
+      )}
+
+      {/* Selected Architectural Window Floating HUD */}
+      {selectedArchitecturalId && architecturalWindows && architecturalWindows[selectedArchitecturalId] && (
+        <div className="absolute bottom-4 left-4 bg-deep-navy/95 backdrop-blur-md border border-sky-500/50 p-3.5 rounded-lg shadow-2xl z-10 flex items-center gap-4 text-xs font-mono text-slate-200 animate-in fade-in">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="px-2 py-0.5 bg-sky-700 text-white rounded font-bold text-xs">
+                WINDOW {selectedArchitecturalId}
+              </span>
+              <span className="px-2 py-0.5 bg-slate-700 text-slate-200 rounded font-bold text-xs">
+                {Math.round(architecturalWindows[selectedArchitecturalId].width * 1000)} × {Math.round(architecturalWindows[selectedArchitecturalId].height * 1000)} mm
+              </span>
+            </div>
+            <span className="text-slate-300 block text-[11px]">
+              Host: {architecturalWindows[selectedArchitecturalId].hostWallId} • Sill: {Math.round(architecturalWindows[selectedArchitecturalId].sillHeight * 1000)}mm • Type: {architecturalWindows[selectedArchitecturalId].windowType}
+            </span>
+          </div>
+          <button
+            onClick={() => selectArchitecturalElement(null)}
+            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-600 transition-colors"
+          >
+            Deselect
+          </button>
+        </div>
+      )}
+
+      {/* Selected Architectural Room Floating HUD */}
+      {selectedArchitecturalId && architecturalRooms && architecturalRooms[selectedArchitecturalId] && (
+        <div className="absolute bottom-4 left-4 bg-deep-navy/95 backdrop-blur-md border border-emerald-500/50 p-3.5 rounded-lg shadow-2xl z-10 flex items-center gap-4 text-xs font-mono text-slate-200 animate-in fade-in">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="px-2 py-0.5 bg-emerald-700 text-white rounded font-bold text-xs">
+                {architecturalRooms[selectedArchitecturalId].name}
+              </span>
+              <span className="px-2 py-0.5 bg-slate-700 text-slate-200 rounded font-bold text-xs">
+                {architecturalRooms[selectedArchitecturalId].area.toFixed(2)} m² ({architecturalRooms[selectedArchitecturalId].roomType})
+              </span>
+            </div>
+            <span className="text-slate-300 block text-[11px]">
+              Perimeter: {architecturalRooms[selectedArchitecturalId].perimeter.toFixed(2)} m • Floor: {architecturalRooms[selectedArchitecturalId].floorId}
+            </span>
+          </div>
+          <button
+            onClick={() => selectArchitecturalElement(null)}
+            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-600 transition-colors"
+          >
             Deselect
           </button>
         </div>

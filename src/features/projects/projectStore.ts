@@ -6,6 +6,18 @@ import { NormalizedStructuralModel, Member3D, Node3D } from '../model/types';
 import { ProjectMetadata, DesignParameters } from '@/types';
 import { EngineeringWarning } from '../warnings/types';
 import { ColumnDesignEngine } from '../design/column/columnDesignEngine';
+import {
+  ArchitecturalWall,
+  ArchitecturalDoor,
+  ArchitecturalWindow,
+  ArchitecturalOpening,
+  ArchitecturalRoom,
+  ArchitecturalDimension,
+  ArchitecturalSettings,
+  ActivePlanTool,
+} from '../architectural/types/architecturalTypes';
+import { ArchitecturalIdGenerator } from '../architectural/utils/idGenerator';
+import { ArchitecturalGeometryEngine } from '../architectural/engines/architecturalGeometryEngine';
 
 export type ViewTab =
   | 'dashboard'
@@ -24,6 +36,7 @@ export type ViewTab =
   | 'shearwalls-design'
   | 'slabs-design'
   | 'floor-plans'
+  | 'architectural-plan'
   | 'drawings'
   | 'reports'
   | 'settings';
@@ -133,6 +146,46 @@ export interface ProjectState {
   customShearWallOverrides: Record<number, any>;
   customSlabOverrides: Record<string, any>;
 
+  // Architectural Floor Plan State
+  architecturalWalls: Record<string, ArchitecturalWall>;
+  architecturalDoors: Record<string, ArchitecturalDoor>;
+  architecturalWindows: Record<string, ArchitecturalWindow>;
+  architecturalOpenings: Record<string, ArchitecturalOpening>;
+  architecturalRooms: Record<string, ArchitecturalRoom>;
+  architecturalDimensions: Record<string, ArchitecturalDimension>;
+  architecturalSettings: ArchitecturalSettings;
+  activeFloorIndex: number;
+  activePlanTool: ActivePlanTool;
+  selectedArchitecturalId: string | null;
+  selectedArchitecturalType: 'WALL' | 'DOOR' | 'WINDOW' | 'OPENING' | 'ROOM' | 'DIMENSION' | null;
+
+  // Architectural Actions
+  setActiveFloorIndex: (idx: number) => void;
+  setActivePlanTool: (tool: ActivePlanTool) => void;
+  selectArchitecturalElement: (id: string | null, type?: 'WALL' | 'DOOR' | 'WINDOW' | 'OPENING' | 'ROOM' | 'DIMENSION' | null) => void;
+  addWall: (wall: ArchitecturalWall) => Promise<void>;
+  updateWall: (id: string, updates: Partial<ArchitecturalWall>) => Promise<void>;
+  deleteWall: (id: string, deleteHosted?: boolean) => Promise<void>;
+  addDoor: (door: ArchitecturalDoor) => Promise<void>;
+  updateDoor: (id: string, updates: Partial<ArchitecturalDoor>) => Promise<void>;
+  deleteDoor: (id: string) => Promise<void>;
+  addWindow: (win: ArchitecturalWindow) => Promise<void>;
+  updateWindow: (id: string, updates: Partial<ArchitecturalWindow>) => Promise<void>;
+  deleteWindow: (id: string) => Promise<void>;
+  addOpening: (op: ArchitecturalOpening) => Promise<void>;
+  updateOpening: (id: string, updates: Partial<ArchitecturalOpening>) => Promise<void>;
+  deleteOpening: (id: string) => Promise<void>;
+  addRoom: (room: ArchitecturalRoom) => Promise<void>;
+  updateRoom: (id: string, updates: Partial<ArchitecturalRoom>) => Promise<void>;
+  deleteRoom: (id: string) => Promise<void>;
+  setRoomsForFloor: (floorId: string, rooms: ArchitecturalRoom[]) => Promise<void>;
+  addDimension: (dim: ArchitecturalDimension) => Promise<void>;
+  deleteDimension: (id: string) => Promise<void>;
+  updateArchitecturalSettings: (settings: Partial<ArchitecturalSettings>) => Promise<void>;
+  copyFloorPlan: (sourceFloorId: string, targetFloorId: string) => Promise<void>;
+  undoArchitecturalAction: () => Promise<void>;
+  redoArchitecturalAction: () => Promise<void>;
+
   // Component Design Persistence Actions
   saveColumnDesigns: (designs: Map<number, any> | Record<number, any>, overrides?: Map<number, any> | Record<number, any>) => Promise<void>;
   saveBeamDesigns: (designs: Map<number, any> | Record<number, any>, overrides?: Map<number, any> | Record<number, any>) => Promise<void>;
@@ -163,6 +216,49 @@ const DEFAULT_DESIGN_SETTINGS: DesignParameters = {
   windTerrainCategory: 2,
 };
 
+export const DEFAULT_ARCHITECTURAL_SETTINGS: ArchitecturalSettings = {
+  standardInternalWallThickness: 115,
+  standardExternalWallThickness: 230,
+  standardStoryHeight: 3.2,
+  wallReferenceLine: 'CENTERLINE',
+  snapSettings: {
+    enabled: true,
+    endpoint: true,
+    midpoint: true,
+    intersection: true,
+    center: true,
+    perpendicular: true,
+    parallel: true,
+    nearest: true,
+    columnCenter: true,
+    columnFace: true,
+    beamCenterline: true,
+    grid: true,
+    tolerance: 0.25,
+  },
+  gridSettings: {
+    enabled: true,
+    spacing: 0.5,
+    majorInterval: 4,
+    adaptive: true,
+  },
+  showDimensions: true,
+  showRoomLabels: true,
+  showStructuralUnderlay: true,
+  showPreviousFloorUnderlay: false,
+  previousFloorOpacity: 0.35,
+};
+
+let architecturalUndoStack: any[] = [];
+let architecturalRedoStack: any[] = [];
+const MAX_UNDO_STACK = 50;
+
+function pushArchUndo(action: any) {
+  architecturalUndoStack.push(action);
+  if (architecturalUndoStack.length > MAX_UNDO_STACK) architecturalUndoStack.shift();
+  architecturalRedoStack = [];
+}
+
 export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
   activeProject: null,
@@ -181,6 +277,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   isImportModalOpen: false,
   isLoading: false,
+
+  // Architectural Floor Plan Initial State
+  architecturalWalls: {},
+  architecturalDoors: {},
+  architecturalWindows: {},
+  architecturalOpenings: {},
+  architecturalRooms: {},
+  architecturalDimensions: {},
+  architecturalSettings: DEFAULT_ARCHITECTURAL_SETTINGS,
+  activeFloorIndex: 1,
+  activePlanTool: 'SELECT',
+  selectedArchitecturalId: null,
+  selectedArchitecturalType: null,
 
   // Foundation Pile & Pile Cap Initial State
   projectPileTypes: [],
@@ -251,6 +360,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           customBeamRebarOverrides: first.customBeamRebarOverrides || {},
           customShearWallOverrides: first.customShearWallOverrides || {},
           customSlabOverrides: first.customSlabOverrides || {},
+          architecturalWalls: first.architecturalWalls || {},
+          architecturalDoors: first.architecturalDoors || {},
+          architecturalWindows: first.architecturalWindows || {},
+          architecturalOpenings: first.architecturalOpenings || {},
+          architecturalRooms: first.architecturalRooms || {},
+          architecturalDimensions: first.architecturalDimensions || {},
+          architecturalSettings: first.architecturalSettings || DEFAULT_ARCHITECTURAL_SETTINGS,
           universalRebarSelection: uRebar,
           allowedColumnRebarDiameters: uRebar.longitudinalDiameters,
           allowedBeamRebarDiameters: uRebar.longitudinalDiameters,
@@ -310,11 +426,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       metadata: fullMetadata,
       model: ProjectStorage.serializeModel(emptyModel),
       warnings: [],
+      architecturalWalls: {},
+      architecturalDoors: {},
+      architecturalWindows: {},
+      architecturalOpenings: {},
+      architecturalRooms: {},
+      architecturalDimensions: {},
+      architecturalSettings: DEFAULT_ARCHITECTURAL_SETTINGS,
     };
 
     await ProjectStorage.saveProject(storedProject);
     const updated = await ProjectStorage.getAllProjects();
-    set({ projects: updated, activeProject: storedProject, activeModel: emptyModel });
+    set({
+      projects: updated,
+      activeProject: storedProject,
+      activeModel: emptyModel,
+      architecturalWalls: {},
+      architecturalDoors: {},
+      architecturalWindows: {},
+      architecturalOpenings: {},
+      architecturalRooms: {},
+      architecturalDimensions: {},
+      architecturalSettings: DEFAULT_ARCHITECTURAL_SETTINGS,
+    });
     return storedProject;
   },
 
@@ -353,6 +487,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           customBeamRebarOverrides: project.customBeamRebarOverrides || {},
           customShearWallOverrides: project.customShearWallOverrides || {},
           customSlabOverrides: project.customSlabOverrides || {},
+          architecturalWalls: project.architecturalWalls || {},
+          architecturalDoors: project.architecturalDoors || {},
+          architecturalWindows: project.architecturalWindows || {},
+          architecturalOpenings: project.architecturalOpenings || {},
+          architecturalRooms: project.architecturalRooms || {},
+          architecturalDimensions: project.architecturalDimensions || {},
+          architecturalSettings: project.architecturalSettings || DEFAULT_ARCHITECTURAL_SETTINGS,
           universalRebarSelection: uRebar,
           allowedColumnRebarDiameters: uRebar.longitudinalDiameters,
           allowedBeamRebarDiameters: uRebar.longitudinalDiameters,
@@ -1260,5 +1401,855 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       savedSlabDesigns: slabObj,
       customSlabOverrides: ovObj,
     });
+  },
+
+  // Architectural Actions
+  setActiveFloorIndex: (idx: number) => {
+    set({ activeFloorIndex: idx });
+  },
+
+  setActivePlanTool: (tool: ActivePlanTool) => {
+    set({ activePlanTool: tool });
+  },
+
+  selectArchitecturalElement: (id, type = null) => {
+    set({ selectedArchitecturalId: id, selectedArchitecturalType: type });
+  },
+
+  addWall: async (wall: ArchitecturalWall) => {
+    const currentWalls = get().architecturalWalls || {};
+    const updatedWalls = { ...currentWalls, [wall.id]: wall };
+
+    pushArchUndo({ type: 'ADD_WALL', wall });
+
+    const currentProj = get().activeProject;
+    set({ architecturalWalls: updatedWalls, selectedArchitecturalId: wall.id, selectedArchitecturalType: 'WALL' });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalWalls: updatedWalls,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  updateWall: async (id: string, updates: Partial<ArchitecturalWall>) => {
+    const currentWalls = get().architecturalWalls || {};
+    const oldWall = currentWalls[id];
+    if (!oldWall) return;
+
+    const updatedWall = { ...oldWall, ...updates };
+    const updatedWalls = { ...currentWalls, [id]: updatedWall };
+
+    let updatedDoors = get().architecturalDoors || {};
+    let updatedWindows = get().architecturalWindows || {};
+    let updatedOpenings = get().architecturalOpenings || {};
+
+    if (updates.start || updates.end) {
+      const oldLen = ArchitecturalGeometryEngine.distance(oldWall.start, oldWall.end);
+      const newLen = ArchitecturalGeometryEngine.distance(updatedWall.start, updatedWall.end);
+      const ratio = oldLen > 1e-4 ? newLen / oldLen : 1;
+
+      // Adjust doors
+      let doorsChanged = false;
+      const newDoors = { ...updatedDoors };
+      for (const dId in newDoors) {
+        if (newDoors[dId].hostWallId === id) {
+          const halfW = newDoors[dId].width / 2;
+          const newPos = Math.max(halfW, Math.min(newLen - halfW, newDoors[dId].position * ratio));
+          newDoors[dId] = { ...newDoors[dId], position: newPos };
+          doorsChanged = true;
+        }
+      }
+      if (doorsChanged) updatedDoors = newDoors;
+
+      // Adjust windows
+      let winsChanged = false;
+      const newWins = { ...updatedWindows };
+      for (const wId in newWins) {
+        if (newWins[wId].hostWallId === id) {
+          const halfW = newWins[wId].width / 2;
+          const newPos = Math.max(halfW, Math.min(newLen - halfW, newWins[wId].position * ratio));
+          newWins[wId] = { ...newWins[wId], position: newPos };
+          winsChanged = true;
+        }
+      }
+      if (winsChanged) updatedWindows = newWins;
+
+      // Adjust openings
+      let opsChanged = false;
+      const newOps = { ...updatedOpenings };
+      for (const oId in newOps) {
+        if (newOps[oId].hostWallId === id) {
+          const halfW = newOps[oId].width / 2;
+          const newPos = Math.max(halfW, Math.min(newLen - halfW, newOps[oId].position * ratio));
+          newOps[oId] = { ...newOps[oId], position: newPos };
+          opsChanged = true;
+        }
+      }
+      if (opsChanged) updatedOpenings = newOps;
+    }
+
+    pushArchUndo({ type: 'UPDATE_WALL', previous: oldWall, current: updatedWall });
+
+    const currentProj = get().activeProject;
+    set({
+      architecturalWalls: updatedWalls,
+      architecturalDoors: updatedDoors,
+      architecturalWindows: updatedWindows,
+      architecturalOpenings: updatedOpenings,
+    });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalWalls: updatedWalls,
+        architecturalDoors: updatedDoors,
+        architecturalWindows: updatedWindows,
+        architecturalOpenings: updatedOpenings,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  deleteWall: async (id: string, deleteHosted = true) => {
+    const currentWalls = { ...(get().architecturalWalls || {}) };
+    const wallToDelete = currentWalls[id];
+    if (!wallToDelete) return;
+
+    delete currentWalls[id];
+
+    let currentDoors = { ...(get().architecturalDoors || {}) };
+    let currentWindows = { ...(get().architecturalWindows || {}) };
+    let currentOpenings = { ...(get().architecturalOpenings || {}) };
+
+    const deletedDoors: ArchitecturalDoor[] = [];
+    const deletedWindows: ArchitecturalWindow[] = [];
+    const deletedOpenings: ArchitecturalOpening[] = [];
+
+    if (deleteHosted) {
+      for (const dId in currentDoors) {
+        if (currentDoors[dId].hostWallId === id) {
+          deletedDoors.push(currentDoors[dId]);
+          delete currentDoors[dId];
+        }
+      }
+      for (const wId in currentWindows) {
+        if (currentWindows[wId].hostWallId === id) {
+          deletedWindows.push(currentWindows[wId]);
+          delete currentWindows[wId];
+        }
+      }
+      for (const oId in currentOpenings) {
+        if (currentOpenings[oId].hostWallId === id) {
+          deletedOpenings.push(currentOpenings[oId]);
+          delete currentOpenings[oId];
+        }
+      }
+    }
+
+    pushArchUndo({
+      type: 'DELETE_WALL',
+      wall: wallToDelete,
+      deletedDoors,
+      deletedWindows,
+      deletedOpenings,
+    });
+
+    const currentProj = get().activeProject;
+    set({
+      architecturalWalls: currentWalls,
+      architecturalDoors: currentDoors,
+      architecturalWindows: currentWindows,
+      architecturalOpenings: currentOpenings,
+      selectedArchitecturalId: get().selectedArchitecturalId === id ? null : get().selectedArchitecturalId,
+    });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalWalls: currentWalls,
+        architecturalDoors: currentDoors,
+        architecturalWindows: currentWindows,
+        architecturalOpenings: currentOpenings,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  addDoor: async (door: ArchitecturalDoor) => {
+    const currentDoors = get().architecturalDoors || {};
+    const updatedDoors = { ...currentDoors, [door.id]: door };
+    pushArchUndo({ type: 'ADD_DOOR', door });
+
+    const currentProj = get().activeProject;
+    set({ architecturalDoors: updatedDoors, selectedArchitecturalId: door.id, selectedArchitecturalType: 'DOOR' });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalDoors: updatedDoors,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  updateDoor: async (id: string, updates: Partial<ArchitecturalDoor>) => {
+    const currentDoors = get().architecturalDoors || {};
+    const oldDoor = currentDoors[id];
+    if (!oldDoor) return;
+
+    const updatedDoor = { ...oldDoor, ...updates };
+    const updatedDoors = { ...currentDoors, [id]: updatedDoor };
+    pushArchUndo({ type: 'UPDATE_DOOR', previous: oldDoor, current: updatedDoor });
+
+    const currentProj = get().activeProject;
+    set({ architecturalDoors: updatedDoors });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalDoors: updatedDoors,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  deleteDoor: async (id: string) => {
+    const currentDoors = { ...(get().architecturalDoors || {}) };
+    const door = currentDoors[id];
+    if (!door) return;
+    delete currentDoors[id];
+    pushArchUndo({ type: 'DELETE_DOOR', door });
+
+    const currentProj = get().activeProject;
+    set({
+      architecturalDoors: currentDoors,
+      selectedArchitecturalId: get().selectedArchitecturalId === id ? null : get().selectedArchitecturalId,
+    });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalDoors: currentDoors,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  addWindow: async (win: ArchitecturalWindow) => {
+    const currentWins = get().architecturalWindows || {};
+    const updatedWins = { ...currentWins, [win.id]: win };
+    pushArchUndo({ type: 'ADD_WINDOW', window: win });
+
+    const currentProj = get().activeProject;
+    set({ architecturalWindows: updatedWins, selectedArchitecturalId: win.id, selectedArchitecturalType: 'WINDOW' });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalWindows: updatedWins,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  updateWindow: async (id: string, updates: Partial<ArchitecturalWindow>) => {
+    const currentWins = get().architecturalWindows || {};
+    const oldWin = currentWins[id];
+    if (!oldWin) return;
+
+    const updatedWin = { ...oldWin, ...updates };
+    const updatedWins = { ...currentWins, [id]: updatedWin };
+    pushArchUndo({ type: 'UPDATE_WINDOW', previous: oldWin, current: updatedWin });
+
+    const currentProj = get().activeProject;
+    set({ architecturalWindows: updatedWins });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalWindows: updatedWins,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  deleteWindow: async (id: string) => {
+    const currentWins = { ...(get().architecturalWindows || {}) };
+    const win = currentWins[id];
+    if (!win) return;
+    delete currentWins[id];
+    pushArchUndo({ type: 'DELETE_WINDOW', window: win });
+
+    const currentProj = get().activeProject;
+    set({
+      architecturalWindows: currentWins,
+      selectedArchitecturalId: get().selectedArchitecturalId === id ? null : get().selectedArchitecturalId,
+    });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalWindows: currentWins,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  addOpening: async (op: ArchitecturalOpening) => {
+    const currentOps = get().architecturalOpenings || {};
+    const updatedOps = { ...currentOps, [op.id]: op };
+    pushArchUndo({ type: 'ADD_OPENING', opening: op });
+
+    const currentProj = get().activeProject;
+    set({ architecturalOpenings: updatedOps, selectedArchitecturalId: op.id, selectedArchitecturalType: 'OPENING' });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalOpenings: updatedOps,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  updateOpening: async (id: string, updates: Partial<ArchitecturalOpening>) => {
+    const currentOps = get().architecturalOpenings || {};
+    const oldOp = currentOps[id];
+    if (!oldOp) return;
+
+    const updatedOp = { ...oldOp, ...updates };
+    const updatedOps = { ...currentOps, [id]: updatedOp };
+    pushArchUndo({ type: 'UPDATE_OPENING', previous: oldOp, current: updatedOp });
+
+    const currentProj = get().activeProject;
+    set({ architecturalOpenings: updatedOps });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalOpenings: updatedOps,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  deleteOpening: async (id: string) => {
+    const currentOps = { ...(get().architecturalOpenings || {}) };
+    const op = currentOps[id];
+    if (!op) return;
+    delete currentOps[id];
+    pushArchUndo({ type: 'DELETE_OPENING', opening: op });
+
+    const currentProj = get().activeProject;
+    set({
+      architecturalOpenings: currentOps,
+      selectedArchitecturalId: get().selectedArchitecturalId === id ? null : get().selectedArchitecturalId,
+    });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalOpenings: currentOps,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  addRoom: async (room: ArchitecturalRoom) => {
+    const currentRooms = get().architecturalRooms || {};
+    const updatedRooms = { ...currentRooms, [room.id]: room };
+    pushArchUndo({ type: 'ADD_ROOM', room });
+
+    const currentProj = get().activeProject;
+    set({ architecturalRooms: updatedRooms, selectedArchitecturalId: room.id, selectedArchitecturalType: 'ROOM' });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalRooms: updatedRooms,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  updateRoom: async (id: string, updates: Partial<ArchitecturalRoom>) => {
+    const currentRooms = get().architecturalRooms || {};
+    const oldRoom = currentRooms[id];
+    if (!oldRoom) return;
+
+    const updatedRoom = { ...oldRoom, ...updates };
+    const updatedRooms = { ...currentRooms, [id]: updatedRoom };
+    pushArchUndo({ type: 'UPDATE_ROOM', previous: oldRoom, current: updatedRoom });
+
+    const currentProj = get().activeProject;
+    set({ architecturalRooms: updatedRooms });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalRooms: updatedRooms,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  deleteRoom: async (id: string) => {
+    const currentRooms = { ...(get().architecturalRooms || {}) };
+    const room = currentRooms[id];
+    if (!room) return;
+    delete currentRooms[id];
+    pushArchUndo({ type: 'DELETE_ROOM', room });
+
+    const currentProj = get().activeProject;
+    set({
+      architecturalRooms: currentRooms,
+      selectedArchitecturalId: get().selectedArchitecturalId === id ? null : get().selectedArchitecturalId,
+    });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalRooms: currentRooms,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  setRoomsForFloor: async (floorId: string, newFloorRooms: ArchitecturalRoom[]) => {
+    const currentRooms = { ...(get().architecturalRooms || {}) };
+    for (const rId in currentRooms) {
+      if (currentRooms[rId].floorId === floorId) {
+        delete currentRooms[rId];
+      }
+    }
+    for (const r of newFloorRooms) {
+      currentRooms[r.id] = r;
+    }
+
+    const currentProj = get().activeProject;
+    set({ architecturalRooms: currentRooms });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalRooms: currentRooms,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  addDimension: async (dim: ArchitecturalDimension) => {
+    const currentDims = get().architecturalDimensions || {};
+    const updatedDims = { ...currentDims, [dim.id]: dim };
+    pushArchUndo({ type: 'ADD_DIMENSION', dimension: dim });
+
+    const currentProj = get().activeProject;
+    set({ architecturalDimensions: updatedDims });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalDimensions: updatedDims,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  deleteDimension: async (id: string) => {
+    const currentDims = { ...(get().architecturalDimensions || {}) };
+    const dim = currentDims[id];
+    if (!dim) return;
+    delete currentDims[id];
+    pushArchUndo({ type: 'DELETE_DIMENSION', dimension: dim });
+
+    const currentProj = get().activeProject;
+    set({
+      architecturalDimensions: currentDims,
+      selectedArchitecturalId: get().selectedArchitecturalId === id ? null : get().selectedArchitecturalId,
+    });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalDimensions: currentDims,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  updateArchitecturalSettings: async (settings: Partial<ArchitecturalSettings>) => {
+    const current = get().architecturalSettings || DEFAULT_ARCHITECTURAL_SETTINGS;
+    const updated: ArchitecturalSettings = {
+      ...current,
+      ...settings,
+      snapSettings: { ...current.snapSettings, ...(settings.snapSettings || {}) },
+      gridSettings: { ...current.gridSettings, ...(settings.gridSettings || {}) },
+    };
+
+    const currentProj = get().activeProject;
+    set({ architecturalSettings: updated });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalSettings: updated,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  copyFloorPlan: async (sourceFloorId: string, targetFloorId: string) => {
+    const currentWalls = get().architecturalWalls || {};
+    const currentDoors = get().architecturalDoors || {};
+    const currentWindows = get().architecturalWindows || {};
+    const currentOpenings = get().architecturalOpenings || {};
+    const currentRooms = get().architecturalRooms || {};
+
+    const sourceWalls = Object.values(currentWalls).filter((w) => w.floorId === sourceFloorId);
+    const sourceDoors = Object.values(currentDoors).filter((d) => d.floorId === sourceFloorId);
+    const sourceWindows = Object.values(currentWindows).filter((w) => w.floorId === sourceFloorId);
+    const sourceOpenings = Object.values(currentOpenings).filter((o) => o.floorId === sourceFloorId);
+    const sourceRooms = Object.values(currentRooms).filter((r) => r.floorId === sourceFloorId);
+
+    const newWalls: Record<string, ArchitecturalWall> = { ...currentWalls };
+    const newDoors: Record<string, ArchitecturalDoor> = { ...currentDoors };
+    const newWindows: Record<string, ArchitecturalWindow> = { ...currentWindows };
+    const newOpenings: Record<string, ArchitecturalOpening> = { ...currentOpenings };
+    const newRooms: Record<string, ArchitecturalRoom> = { ...currentRooms };
+
+    const wallIdMap = new Map<string, string>();
+    const existingWallIds = Object.keys(newWalls);
+
+    // Copy walls with fresh unique IDs
+    for (const w of sourceWalls) {
+      const newId = ArchitecturalIdGenerator.generateWallId(existingWallIds);
+      existingWallIds.push(newId);
+      wallIdMap.set(w.id, newId);
+
+      const targetFloorIdx = parseInt(targetFloorId.replace('floor_', ''), 10) || 0;
+      const baseElev = targetFloorIdx * 3.2;
+
+      newWalls[newId] = {
+        ...w,
+        id: newId,
+        floorId: targetFloorId,
+        baseElevation: baseElev,
+        topElevation: baseElev + w.height,
+      };
+    }
+
+    // Copy hosted doors
+    const existingDoorIds = Object.keys(newDoors);
+    for (const d of sourceDoors) {
+      const mappedWallId = wallIdMap.get(d.hostWallId);
+      if (mappedWallId) {
+        const newId = ArchitecturalIdGenerator.generateDoorId(existingDoorIds);
+        existingDoorIds.push(newId);
+        newDoors[newId] = {
+          ...d,
+          id: newId,
+          floorId: targetFloorId,
+          hostWallId: mappedWallId,
+        };
+      }
+    }
+
+    // Copy hosted windows
+    const existingWinIds = Object.keys(newWindows);
+    for (const win of sourceWindows) {
+      const mappedWallId = wallIdMap.get(win.hostWallId);
+      if (mappedWallId) {
+        const newId = ArchitecturalIdGenerator.generateWindowId(existingWinIds);
+        existingWinIds.push(newId);
+        newWindows[newId] = {
+          ...win,
+          id: newId,
+          floorId: targetFloorId,
+          hostWallId: mappedWallId,
+        };
+      }
+    }
+
+    // Copy hosted openings
+    const existingOpIds = Object.keys(newOpenings);
+    for (const op of sourceOpenings) {
+      const mappedWallId = wallIdMap.get(op.hostWallId);
+      if (mappedWallId) {
+        const newId = ArchitecturalIdGenerator.generateOpeningId(existingOpIds);
+        existingOpIds.push(newId);
+        newOpenings[newId] = {
+          ...op,
+          id: newId,
+          floorId: targetFloorId,
+          hostWallId: mappedWallId,
+        };
+      }
+    }
+
+    // Copy rooms
+    const existingRoomIds = Object.keys(newRooms);
+    for (const r of sourceRooms) {
+      const newId = ArchitecturalIdGenerator.generateRoomId(existingRoomIds);
+      existingRoomIds.push(newId);
+      newRooms[newId] = {
+        ...r,
+        id: newId,
+        floorId: targetFloorId,
+      };
+    }
+
+    const currentProj = get().activeProject;
+    set({
+      architecturalWalls: newWalls,
+      architecturalDoors: newDoors,
+      architecturalWindows: newWindows,
+      architecturalOpenings: newOpenings,
+      architecturalRooms: newRooms,
+    });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalWalls: newWalls,
+        architecturalDoors: newDoors,
+        architecturalWindows: newWindows,
+        architecturalOpenings: newOpenings,
+        architecturalRooms: newRooms,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  undoArchitecturalAction: async () => {
+    if (architecturalUndoStack.length === 0) return;
+    const action = architecturalUndoStack.pop();
+    architecturalRedoStack.push(action);
+
+    const walls = { ...(get().architecturalWalls || {}) };
+    const doors = { ...(get().architecturalDoors || {}) };
+    const windows = { ...(get().architecturalWindows || {}) };
+    const openings = { ...(get().architecturalOpenings || {}) };
+    const rooms = { ...(get().architecturalRooms || {}) };
+    const dims = { ...(get().architecturalDimensions || {}) };
+
+    switch (action.type) {
+      case 'ADD_WALL':
+        delete walls[action.wall.id];
+        break;
+      case 'UPDATE_WALL':
+        walls[action.previous.id] = action.previous;
+        break;
+      case 'DELETE_WALL':
+        walls[action.wall.id] = action.wall;
+        if (action.deletedDoors) action.deletedDoors.forEach((d: any) => { doors[d.id] = d; });
+        if (action.deletedWindows) action.deletedWindows.forEach((w: any) => { windows[w.id] = w; });
+        if (action.deletedOpenings) action.deletedOpenings.forEach((o: any) => { openings[o.id] = o; });
+        break;
+      case 'ADD_DOOR':
+        delete doors[action.door.id];
+        break;
+      case 'UPDATE_DOOR':
+        doors[action.previous.id] = action.previous;
+        break;
+      case 'DELETE_DOOR':
+        doors[action.door.id] = action.door;
+        break;
+      case 'ADD_WINDOW':
+        delete windows[action.window.id];
+        break;
+      case 'UPDATE_WINDOW':
+        windows[action.previous.id] = action.previous;
+        break;
+      case 'DELETE_WINDOW':
+        windows[action.window.id] = action.window;
+        break;
+      case 'ADD_OPENING':
+        delete openings[action.opening.id];
+        break;
+      case 'UPDATE_OPENING':
+        openings[action.previous.id] = action.previous;
+        break;
+      case 'DELETE_OPENING':
+        openings[action.opening.id] = action.opening;
+        break;
+      case 'ADD_ROOM':
+        delete rooms[action.room.id];
+        break;
+      case 'UPDATE_ROOM':
+        rooms[action.previous.id] = action.previous;
+        break;
+      case 'DELETE_ROOM':
+        rooms[action.room.id] = action.room;
+        break;
+      case 'ADD_DIMENSION':
+        delete dims[action.dimension.id];
+        break;
+      case 'DELETE_DIMENSION':
+        dims[action.dimension.id] = action.dimension;
+        break;
+    }
+
+    const currentProj = get().activeProject;
+    set({
+      architecturalWalls: walls,
+      architecturalDoors: doors,
+      architecturalWindows: windows,
+      architecturalOpenings: openings,
+      architecturalRooms: rooms,
+      architecturalDimensions: dims,
+    });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalWalls: walls,
+        architecturalDoors: doors,
+        architecturalWindows: windows,
+        architecturalOpenings: openings,
+        architecturalRooms: rooms,
+        architecturalDimensions: dims,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  redoArchitecturalAction: async () => {
+    if (architecturalRedoStack.length === 0) return;
+    const action = architecturalRedoStack.pop();
+    architecturalUndoStack.push(action);
+
+    const walls = { ...(get().architecturalWalls || {}) };
+    const doors = { ...(get().architecturalDoors || {}) };
+    const windows = { ...(get().architecturalWindows || {}) };
+    const openings = { ...(get().architecturalOpenings || {}) };
+    const rooms = { ...(get().architecturalRooms || {}) };
+    const dims = { ...(get().architecturalDimensions || {}) };
+
+    switch (action.type) {
+      case 'ADD_WALL':
+        walls[action.wall.id] = action.wall;
+        break;
+      case 'UPDATE_WALL':
+        walls[action.current.id] = action.current;
+        break;
+      case 'DELETE_WALL':
+        delete walls[action.wall.id];
+        if (action.deletedDoors) action.deletedDoors.forEach((d: any) => { delete doors[d.id]; });
+        if (action.deletedWindows) action.deletedWindows.forEach((w: any) => { delete windows[w.id]; });
+        if (action.deletedOpenings) action.deletedOpenings.forEach((o: any) => { delete openings[o.id]; });
+        break;
+      case 'ADD_DOOR':
+        doors[action.door.id] = action.door;
+        break;
+      case 'UPDATE_DOOR':
+        doors[action.current.id] = action.current;
+        break;
+      case 'DELETE_DOOR':
+        delete doors[action.door.id];
+        break;
+      case 'ADD_WINDOW':
+        windows[action.window.id] = action.window;
+        break;
+      case 'UPDATE_WINDOW':
+        windows[action.current.id] = action.current;
+        break;
+      case 'DELETE_WINDOW':
+        delete windows[action.window.id];
+        break;
+      case 'ADD_OPENING':
+        openings[action.opening.id] = action.opening;
+        break;
+      case 'UPDATE_OPENING':
+        openings[action.current.id] = action.current;
+        break;
+      case 'DELETE_OPENING':
+        delete openings[action.opening.id];
+        break;
+      case 'ADD_ROOM':
+        rooms[action.room.id] = action.room;
+        break;
+      case 'UPDATE_ROOM':
+        rooms[action.current.id] = action.current;
+        break;
+      case 'DELETE_ROOM':
+        delete rooms[action.room.id];
+        break;
+      case 'ADD_DIMENSION':
+        dims[action.dimension.id] = action.dimension;
+        break;
+      case 'DELETE_DIMENSION':
+        delete dims[action.dimension.id];
+        break;
+    }
+
+    const currentProj = get().activeProject;
+    set({
+      architecturalWalls: walls,
+      architecturalDoors: doors,
+      architecturalWindows: windows,
+      architecturalOpenings: openings,
+      architecturalRooms: rooms,
+      architecturalDimensions: dims,
+    });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalWalls: walls,
+        architecturalDoors: doors,
+        architecturalWindows: windows,
+        architecturalOpenings: openings,
+        architecturalRooms: rooms,
+        architecturalDimensions: dims,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
   },
 }));

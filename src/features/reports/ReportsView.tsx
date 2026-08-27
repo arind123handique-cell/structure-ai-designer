@@ -4,10 +4,12 @@ import { ExcelWorkbookExporter } from './excelExport';
 import { PDFReportGenerator } from './pdfReportGenerator';
 import { CalculationPdfService } from '@/features/calculations/calculationPdfService';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
-import { FileSpreadsheet, Printer, Download, CheckCircle2, Layers, Building, Box, ShieldCheck, FileText, Sparkles, Hash, BookOpen } from 'lucide-react';
+import { ArchitecturalTakeoffEngine } from '@/features/architectural/engines/architecturalTakeoffEngine';
+import { FloorPlanEngine } from '@/features/drawings/floorPlanEngine';
+import { FileSpreadsheet, Printer, Download, CheckCircle2, Layers, Building, Box, ShieldCheck, FileText, Sparkles, Hash, BookOpen, Calculator, DoorOpen, AppWindow } from 'lucide-react';
 
 export const ReportsView: React.FC = () => {
-  const { activeProject, activeModel } = useProjectStore();
+  const { activeProject, activeModel, architecturalWalls, architecturalDoors, architecturalWindows, architecturalOpenings, architecturalRooms } = useProjectStore();
 
   if (!activeProject || !activeModel) {
     return (
@@ -42,6 +44,18 @@ export const ReportsView: React.FC = () => {
       dataset
     );
   }, [activeModel, activeProject, dataset]);
+
+  const archTakeoff = useMemo(() => {
+    const fps = FloorPlanEngine.extractFloorPlans(activeModel);
+    return ArchitecturalTakeoffEngine.calculateBuildingTakeoff(
+      architecturalWalls || {},
+      architecturalDoors || {},
+      architecturalWindows || {},
+      architecturalOpenings || {},
+      architecturalRooms || {},
+      fps
+    );
+  }, [activeModel, architecturalWalls, architecturalDoors, architecturalWindows, architecturalOpenings, architecturalRooms]);
 
   const handleDownloadExcel = () => {
     ExcelWorkbookExporter.downloadWorkbook(dataset as any);
@@ -237,6 +251,65 @@ export const ReportsView: React.FC = () => {
             </table>
           </div>
         </div>
+
+        {/* ARCHITECTURAL BIM QUANTITY TAKEOFF & MASONRY SUMMARY */}
+        {Object.keys(architecturalWalls || {}).length > 0 && (
+          <div className="bg-surface-card rounded-md border border-amber-300 shadow-sm overflow-hidden font-sans">
+            <div className="px-5 py-3.5 bg-gradient-to-r from-amber-950 via-slate-900 to-slate-900 border-b border-amber-800 flex items-center justify-between text-white flex-wrap gap-3">
+              <div className="flex items-center gap-2.5">
+                <Calculator className="w-5 h-5 text-amber-400 shrink-0" />
+                <div>
+                  <h3 className="font-mono text-sm font-bold text-amber-100">
+                    ARCHITECTURAL BIM QUANTITY SURVEY &amp; MASONRY TAKEOFF
+                  </h3>
+                  <p className="text-[11px] text-amber-200 font-sans mt-0.5">
+                    Parametric L × B × H wall volumes, opening deductions, plastering areas, and door/window schedules.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 font-mono text-xs text-amber-300">
+                <span>Net Masonry: <strong>{archTakeoff.grandTotalNetMasonryM3} m³</strong></span>
+                <span>•</span>
+                <span>Plaster: <strong>{archTakeoff.grandTotalInternalPlasterM2} m²</strong></span>
+                <span>•</span>
+                <span>Carpet: <strong>{archTakeoff.grandTotalFloorAreaM2} m²</strong></span>
+              </div>
+            </div>
+
+            <div className="p-4 overflow-x-auto">
+              <table className="w-full text-left font-mono text-xs">
+                <thead className="bg-amber-50/80 text-amber-950 uppercase text-[10px] font-bold">
+                  <tr>
+                    <th className="p-2.5">Story Name</th>
+                    <th className="p-2.5">Elevation</th>
+                    <th className="p-2.5 text-right">Net Masonry (m³)</th>
+                    <th className="p-2.5 text-right">Gross Vol (m³)</th>
+                    <th className="p-2.5 text-right">Int Plaster (m²)</th>
+                    <th className="p-2.5 text-right">Ext Plaster (m²)</th>
+                    <th className="p-2.5 text-center">Doors</th>
+                    <th className="p-2.5 text-center">Windows</th>
+                    <th className="p-2.5 text-right text-emerald-800">Carpet Area (m²)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 text-slate-700">
+                  {archTakeoff.floorSummaries.map((f) => (
+                    <tr key={f.floorId} className="hover:bg-slate-50">
+                      <td className="p-2.5 font-bold text-slate-900">{f.floorName}</td>
+                      <td className="p-2.5 text-slate-500">+{f.elevationY.toFixed(2)}m</td>
+                      <td className="p-2.5 text-right font-bold text-amber-900">{f.totalNetMasonryM3.toFixed(3)}</td>
+                      <td className="p-2.5 text-right text-slate-500">{f.totalGrossMasonryM3.toFixed(3)}</td>
+                      <td className="p-2.5 text-right text-sky-800">{f.totalInternalPlasterM2.toFixed(2)}</td>
+                      <td className="p-2.5 text-right text-sky-900">{f.totalExternalPlasterM2.toFixed(2)}</td>
+                      <td className="p-2.5 text-center font-bold">{f.totalDoorCount}</td>
+                      <td className="p-2.5 text-center font-bold">{f.totalWindowCount}</td>
+                      <td className="p-2.5 text-right font-bold text-emerald-800">{f.totalFloorAreaM2.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* ONE-TAP STRUCTURAL DESIGN CALCULATION SHEETS */}
         <div className="bg-surface-card rounded-md border border-indigo-200 shadow-sm overflow-hidden font-sans">

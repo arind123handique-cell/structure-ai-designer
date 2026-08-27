@@ -98,6 +98,10 @@ export class FloorPlanEngine {
   /**
    * Discovers and extracts all floor framing plans from foundation to top roof level.
    */
+  public static extractFloorPlans(model: NormalizedStructuralModel | null): FloorPlanLevel[] {
+    return this.extractAllFloorPlans(model);
+  }
+
   public static extractAllFloorPlans(
     model: NormalizedStructuralModel | null,
     projectPileTypes?: ProjectPileType[],

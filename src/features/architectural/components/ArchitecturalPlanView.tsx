@@ -1,0 +1,346 @@
+/**
+ * Unified Architectural BIM Plan Workspace View
+ * Combines 2D Floor Plan Canvas, 3D BIM Viewer Split Mode, Properties Inspector, and Material Takeoff.
+ */
+
+import React, { useState, useMemo } from 'react';
+import { useProjectStore } from '@/features/projects/projectStore';
+import { FloorPlanEngine, FloorPlanLevel } from '@/features/drawings/floorPlanEngine';
+import { RoomEngine } from '../engines/roomEngine';
+import { FloorSelector } from './FloorSelector';
+import { FloorPlanToolbar } from './FloorPlanToolbar';
+import { FloorPlanCanvas } from './FloorPlanCanvas';
+import { PlanPropertiesPanel } from './PlanPropertiesPanel';
+import { ArchitecturalTakeoffPanel } from './ArchitecturalTakeoffPanel';
+import { Structural3DViewer } from '@/components/model-viewer/Structural3DViewer';
+import {
+  Layout,
+  Columns2,
+  Calculator,
+  Box,
+  Layers,
+  Sparkles,
+} from 'lucide-react';
+
+export const ArchitecturalPlanView: React.FC = () => {
+  const {
+    activeModel,
+    activeFloorIndex,
+    setActiveFloorIndex,
+    activePlanTool,
+    setActivePlanTool,
+    selectedArchitecturalId,
+    selectedArchitecturalType,
+    selectArchitecturalElement,
+    architecturalWalls,
+    architecturalDoors,
+    architecturalWindows,
+    architecturalOpenings,
+    architecturalRooms,
+    architecturalDimensions,
+    architecturalSettings,
+    addWall,
+    updateWall,
+    deleteWall,
+    addDoor,
+    updateDoor,
+    deleteDoor,
+    addWindow,
+    updateWindow,
+    deleteWindow,
+    addOpening,
+    updateOpening,
+    deleteOpening,
+    addRoom,
+    updateRoom,
+    deleteRoom,
+    setRoomsForFloor,
+    addDimension,
+    deleteDimension,
+    updateArchitecturalSettings,
+    copyFloorPlan,
+    undoArchitecturalAction,
+    redoArchitecturalAction,
+  } = useProjectStore();
+
+  const [workspaceMode, setWorkspaceMode] = useState<'2D_PLAN' | 'SPLIT_2D_3D' | 'TAKEOFF'>('2D_PLAN');
+  const [wallThicknessPreset, setWallThicknessPreset] = useState<number>(0.23); // 230mm default
+  const [doorWidthPreset, setDoorWidthPreset] = useState<number>(0.9); // 900mm default
+  const [windowWidthPreset, setWindowWidthPreset] = useState<number>(1.2); // 1200mm default
+
+  // Extract Floor Levels from structural model
+  const floorPlans: FloorPlanLevel[] = useMemo(() => {
+    const createFallbackLevel = (index: number, name: string, elevation: number): FloorPlanLevel => ({
+      levelIndex: index,
+      levelName: name,
+      sheetNumber: `ARCH-${100 + index}`,
+      elevationY: elevation,
+      isFoundationLevel: index === 0,
+      beams: [],
+      columns: [],
+      gradeBeams: [],
+      slabs: [],
+      gridLinesX: [],
+      gridLinesZ: [],
+      combinedPileCaps: [],
+      absorbedCombinedCapNodeIds: new Set<number>(),
+      bounds: { minX: 0, maxX: 20, minZ: 0, maxZ: 20, width: 20, height: 20 },
+      metrics: { totalBeams: 0, totalColumns: 0, totalSlabs: 0, totalConcreteM3: 0, totalSteelKg: 0, totalFloorAreaM2: 0 },
+    });
+
+    if (!activeModel) {
+      return [
+        createFallbackLevel(0, 'Ground Floor', 0),
+        createFallbackLevel(1, '1st Floor', 3.2),
+      ];
+    }
+    const extracted = FloorPlanEngine.extractFloorPlans(activeModel);
+    return extracted.length > 0
+      ? extracted
+      : [
+          createFallbackLevel(0, 'Ground Floor', 0),
+        ];
+  }, [activeModel]);
+
+  // Auto-Detect Enclosed Rooms for active floor
+  const handleAutoDetectRooms = () => {
+    const activeFloorId = `floor_${activeFloorIndex}`;
+    const floorWallList = Object.values(architecturalWalls).filter((w) => w.floorId === activeFloorId);
+    const existingRoomIds = Object.keys(architecturalRooms);
+    const detected = RoomEngine.detectRoomsFromWalls(floorWallList, activeFloorId, existingRoomIds);
+    setRoomsForFloor(activeFloorId, detected);
+  };
+
+  // Delete Selected Element handler
+  const handleDeleteSelected = () => {
+    if (!selectedArchitecturalId) return;
+    if (selectedArchitecturalType === 'WALL') {
+      deleteWall(selectedArchitecturalId);
+    } else if (selectedArchitecturalType === 'DOOR') {
+      deleteDoor(selectedArchitecturalId);
+    } else if (selectedArchitecturalType === 'WINDOW') {
+      deleteWindow(selectedArchitecturalId);
+    } else if (selectedArchitecturalType === 'OPENING') {
+      deleteOpening(selectedArchitecturalId);
+    } else if (selectedArchitecturalType === 'ROOM') {
+      deleteRoom(selectedArchitecturalId);
+    } else if (selectedArchitecturalType === 'DIMENSION') {
+      deleteDimension(selectedArchitecturalId);
+    } else {
+      // Check which map contains it
+      if (architecturalWalls[selectedArchitecturalId]) deleteWall(selectedArchitecturalId);
+      else if (architecturalDoors[selectedArchitecturalId]) deleteDoor(selectedArchitecturalId);
+      else if (architecturalWindows[selectedArchitecturalId]) deleteWindow(selectedArchitecturalId);
+      else if (architecturalOpenings[selectedArchitecturalId]) deleteOpening(selectedArchitecturalId);
+      else if (architecturalRooms[selectedArchitecturalId]) deleteRoom(selectedArchitecturalId);
+      else if (architecturalDimensions[selectedArchitecturalId]) deleteDimension(selectedArchitecturalId);
+    }
+  };
+
+  return (
+    <div className="flex-1 flex flex-col h-full bg-slate-950 overflow-hidden font-mono text-xs select-none">
+      {/* Top Application Sub-Header */}
+      <header className="h-12 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-3">
+          <FloorSelector
+            floorPlans={floorPlans}
+            activeFloorIndex={activeFloorIndex}
+            onSelectFloor={setActiveFloorIndex}
+            showStructuralUnderlay={architecturalSettings.showStructuralUnderlay}
+            onToggleStructuralUnderlay={() =>
+              updateArchitecturalSettings({
+                showStructuralUnderlay: !architecturalSettings.showStructuralUnderlay,
+              })
+            }
+            showPreviousFloorUnderlay={architecturalSettings.showPreviousFloorUnderlay}
+            onTogglePreviousFloorUnderlay={() =>
+              updateArchitecturalSettings({
+                showPreviousFloorUnderlay: !architecturalSettings.showPreviousFloorUnderlay,
+              })
+            }
+            previousFloorOpacity={architecturalSettings.previousFloorOpacity || 0.35}
+            onChangePreviousFloorOpacity={(op) => updateArchitecturalSettings({ previousFloorOpacity: op })}
+            onCopyFloorPlan={copyFloorPlan}
+          />
+        </div>
+
+        {/* View Layout Mode Buttons */}
+        <div className="flex items-center gap-1.5 bg-slate-800/80 p-1 rounded-lg border border-slate-700">
+          <button
+            onClick={() => setWorkspaceMode('2D_PLAN')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs transition-colors font-bold ${
+              workspaceMode === '2D_PLAN'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Layout className="w-3.5 h-3.5" />
+            <span>2D Plan</span>
+          </button>
+          <button
+            onClick={() => setWorkspaceMode('SPLIT_2D_3D')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs transition-colors font-bold ${
+              workspaceMode === 'SPLIT_2D_3D'
+                ? 'bg-sky-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Columns2 className="w-3.5 h-3.5" />
+            <span>2D / 3D Split</span>
+          </button>
+          <button
+            onClick={() => setWorkspaceMode('TAKEOFF')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs transition-colors font-bold ${
+              workspaceMode === 'TAKEOFF'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Calculator className="w-3.5 h-3.5" />
+            <span>Takeoff & Schedules</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Main Workspace Body */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Toolbar (Shown in 2D and Split Modes) */}
+        {workspaceMode !== 'TAKEOFF' && (
+          <FloorPlanToolbar
+            activeTool={activePlanTool}
+            onSelectTool={setActivePlanTool}
+            settings={architecturalSettings}
+            onUpdateSettings={updateArchitecturalSettings}
+            onAutoDetectRooms={handleAutoDetectRooms}
+            onUndo={undoArchitecturalAction}
+            onRedo={redoArchitecturalAction}
+            onFitView={() => {
+              // triggers fitView via floor index re-eval
+              setActiveFloorIndex(activeFloorIndex);
+            }}
+            wallThickness={wallThicknessPreset}
+            onChangeWallThickness={setWallThicknessPreset}
+            doorWidth={doorWidthPreset}
+            onChangeDoorWidth={setDoorWidthPreset}
+            windowWidth={windowWidthPreset}
+            onChangeWindowWidth={setWindowWidthPreset}
+          />
+        )}
+
+        {/* Center Workspace Canvas */}
+        <div className="flex-1 flex h-full relative overflow-hidden bg-slate-950">
+          {workspaceMode === '2D_PLAN' && (
+            <FloorPlanCanvas
+              activeFloorIndex={activeFloorIndex}
+              floorPlans={floorPlans}
+              structuralModel={activeModel}
+              activeTool={activePlanTool}
+              selectedId={selectedArchitecturalId}
+              selectedType={selectedArchitecturalType}
+              walls={architecturalWalls}
+              doors={architecturalDoors}
+              windows={architecturalWindows}
+              openings={architecturalOpenings}
+              rooms={architecturalRooms}
+              dimensions={architecturalDimensions}
+              settings={architecturalSettings}
+              wallThickness={wallThicknessPreset}
+              doorWidth={doorWidthPreset}
+              windowWidth={windowWidthPreset}
+              onSelectElement={selectArchitecturalElement}
+              onAddWall={addWall}
+              onUpdateWall={updateWall}
+              onAddDoor={addDoor}
+              onAddWindow={addWindow}
+              onAddOpening={addOpening}
+              onAddDimension={addDimension}
+              onAutoDetectRooms={handleAutoDetectRooms}
+              onDeleteSelected={handleDeleteSelected}
+              onUndo={undoArchitecturalAction}
+              onRedo={redoArchitecturalAction}
+            />
+          )}
+
+          {workspaceMode === 'SPLIT_2D_3D' && (
+            <div className="flex-1 flex h-full w-full">
+              <div className="w-1/2 h-full border-r border-slate-800 relative">
+                <FloorPlanCanvas
+                  activeFloorIndex={activeFloorIndex}
+                  floorPlans={floorPlans}
+                  structuralModel={activeModel}
+                  activeTool={activePlanTool}
+                  selectedId={selectedArchitecturalId}
+                  selectedType={selectedArchitecturalType}
+                  walls={architecturalWalls}
+                  doors={architecturalDoors}
+                  windows={architecturalWindows}
+                  openings={architecturalOpenings}
+                  rooms={architecturalRooms}
+                  dimensions={architecturalDimensions}
+                  settings={architecturalSettings}
+                  wallThickness={wallThicknessPreset}
+                  doorWidth={doorWidthPreset}
+                  windowWidth={windowWidthPreset}
+                  onSelectElement={selectArchitecturalElement}
+                  onAddWall={addWall}
+                  onUpdateWall={updateWall}
+                  onAddDoor={addDoor}
+                  onAddWindow={addWindow}
+                  onAddOpening={addOpening}
+                  onAddDimension={addDimension}
+                  onAutoDetectRooms={handleAutoDetectRooms}
+                  onDeleteSelected={handleDeleteSelected}
+                  onUndo={undoArchitecturalAction}
+                  onRedo={redoArchitecturalAction}
+                />
+              </div>
+              <div className="w-1/2 h-full relative">
+                <Structural3DViewer />
+              </div>
+            </div>
+          )}
+
+          {workspaceMode === 'TAKEOFF' && (
+            <ArchitecturalTakeoffPanel
+              walls={architecturalWalls}
+              doors={architecturalDoors}
+              windows={architecturalWindows}
+              openings={architecturalOpenings}
+              rooms={architecturalRooms}
+              floorPlans={floorPlans}
+              activeFloorIndex={activeFloorIndex}
+            />
+          )}
+        </div>
+
+        {/* Right Properties Panel (Shown in 2D and Split Modes) */}
+        {workspaceMode !== 'TAKEOFF' && (
+          <PlanPropertiesPanel
+            selectedId={selectedArchitecturalId}
+            selectedType={selectedArchitecturalType}
+            walls={architecturalWalls}
+            doors={architecturalDoors}
+            windows={architecturalWindows}
+            openings={architecturalOpenings}
+            rooms={architecturalRooms}
+            dimensions={architecturalDimensions}
+            onUpdateWall={updateWall}
+            onDeleteWall={deleteWall}
+            onUpdateDoor={updateDoor}
+            onDeleteDoor={deleteDoor}
+            onUpdateWindow={updateWindow}
+            onDeleteWindow={deleteWindow}
+            onUpdateOpening={updateOpening}
+            onDeleteOpening={deleteOpening}
+            onUpdateRoom={updateRoom}
+            onDeleteRoom={deleteRoom}
+            onDeleteDimension={deleteDimension}
+            onDeselect={() => selectArchitecturalElement(null)}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default ArchitecturalPlanView;

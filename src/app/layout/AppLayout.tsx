@@ -25,6 +25,7 @@ const FootingDesignView = lazy(() => import('@/features/design/footing/FootingDe
 const ShearWallDesignView = lazy(() => import('@/features/design/shearwall/ShearWallDesignView').then(m => ({ default: m.ShearWallDesignView })));
 const SlabDesignView = lazy(() => import('@/features/design/slab/SlabDesignView').then(m => ({ default: m.SlabDesignView })));
 const FloorPlanViewer = lazy(() => import('@/features/drawings/FloorPlanViewer').then(m => ({ default: m.FloorPlanViewer })));
+const ArchitecturalPlanView = lazy(() => import('@/features/architectural/components/ArchitecturalPlanView').then(m => ({ default: m.ArchitecturalPlanView })));
 const DrawingsView = lazy(() => import('@/features/drawings/DrawingsView').then(m => ({ default: m.DrawingsView })));
 const ReportsView = lazy(() => import('@/features/reports/ReportsView').then(m => ({ default: m.ReportsView })));
 
@@ -85,6 +86,8 @@ export const AppLayout: React.FC = () => {
         return <ShearWallDesignView />;
       case 'slabs-design':
         return <SlabDesignView />;
+      case 'architectural-plan':
+        return <ArchitecturalPlanView />;
       case 'floor-plans':
         return <FloorPlanViewer />;
       case 'drawings':

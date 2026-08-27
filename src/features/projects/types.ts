@@ -76,4 +76,11 @@ export interface StoredProject {
   customBeamRebarOverrides?: Record<number, any>;
   customShearWallOverrides?: Record<number, any>;
   customSlabOverrides?: Record<string, any>;
+  architecturalWalls?: Record<string, any>;
+  architecturalDoors?: Record<string, any>;
+  architecturalWindows?: Record<string, any>;
+  architecturalOpenings?: Record<string, any>;
+  architecturalRooms?: Record<string, any>;
+  architecturalDimensions?: Record<string, any>;
+  architecturalSettings?: any;
 }
