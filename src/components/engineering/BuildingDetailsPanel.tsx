@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useProjectStore } from '@/features/projects/projectStore';
 import { FloorPlanEngine } from '@/features/drawings/floorPlanEngine';
+import { ConcreteVolumeEngine } from '@/features/calculations/concreteVolumeEngine';
 import { exportToCsv } from '@/utils/exportUtils';
 import {
   Building,
@@ -16,6 +17,8 @@ import {
   Grid,
   Box,
   Compass,
+  HardHat,
+  Layers3,
 } from 'lucide-react';
 
 export const BuildingDetailsPanel: React.FC = () => {
@@ -27,6 +30,27 @@ export const BuildingDetailsPanel: React.FC = () => {
     if (!activeModel) return [];
     return FloorPlanEngine.extractAllFloorPlans(activeModel);
   }, [activeModel]);
+
+  // Compute Comprehensive Concrete Volume by Structure Part
+  const concreteSummary = useMemo(() => {
+    if (!activeModel) return null;
+    return ConcreteVolumeEngine.calculateBuildingConcreteSummary(
+      activeModel,
+      activeProject?.metadata,
+      {
+        savedColumnDesigns: activeProject?.savedColumnDesigns,
+        savedBeamDesigns: activeProject?.savedBeamDesigns,
+        savedShearWallDesigns: activeProject?.savedShearWallDesigns,
+        savedGradeBeamDesigns: activeProject?.savedGradeBeamDesigns,
+        savedFootingDesigns: activeProject?.savedFootingDesigns,
+        savedSlabDesigns: activeProject?.savedSlabDesigns,
+        manualMergedPileCapGroups: activeProject?.manualMergedPileCapGroups,
+        detachedCombinedCapNodeIds: activeProject?.detachedCombinedCapNodeIds,
+        customCombinedCapOverrides: activeProject?.customCombinedCapOverrides,
+        projectPileTypes: activeProject?.projectPileTypes,
+      }
+    );
+  }, [activeModel, activeProject]);
 
   // Compute Floor-by-Floor Centerline & Estimation Data
   const floorCenterlineData = useMemo(() => {
@@ -89,12 +113,12 @@ export const BuildingDetailsPanel: React.FC = () => {
         totalBuiltUpM2: 0,
         totalBuiltUpSqFt: 0,
         totalCenterlineM: 0,
-        totalConcreteM3: 0,
+        totalConcreteM3: concreteSummary?.grandTotalConcreteM3 || 0,
         totalSteelKg: 0,
         totalSteelMT: 0,
         totalMasonryM3: 0,
         totalPlasteringM2: 0,
-        totalFormworkM2: 0,
+        totalFormworkM2: concreteSummary?.totalFormworkM2 || 0,
         totalColumns: 0,
         totalBeams: 0,
         totalSlabs: 0,
@@ -111,12 +135,12 @@ export const BuildingDetailsPanel: React.FC = () => {
     const totalBuiltUpSqFt = Math.round(totalBuiltUpM2 * 10.7639);
     const totalCenterlineM = Number(floorCenterlineData.reduce((sum, f) => sum + f.totalCenterlineM, 0).toFixed(2));
 
-    const totalConcreteM3 = Number(floorCenterlineData.reduce((sum, f) => sum + f.concreteM3, 0).toFixed(2));
+    const totalConcreteM3 = concreteSummary?.grandTotalConcreteM3 || Number(floorCenterlineData.reduce((sum, f) => sum + f.concreteM3, 0).toFixed(2));
     const totalSteelKg = Number(floorCenterlineData.reduce((sum, f) => sum + f.steelKg, 0).toFixed(2));
     const totalSteelMT = Number((totalSteelKg / 1000).toFixed(2));
     const totalMasonryM3 = Number(floorCenterlineData.reduce((sum, f) => sum + f.masonryVolM3, 0).toFixed(2));
     const totalPlasteringM2 = Number(floorCenterlineData.reduce((sum, f) => sum + f.plasteringAreaM2, 0).toFixed(2));
-    const totalFormworkM2 = Number(floorCenterlineData.reduce((sum, f) => sum + f.formworkAreaM2, 0).toFixed(2));
+    const totalFormworkM2 = concreteSummary?.totalFormworkM2 || Number(floorCenterlineData.reduce((sum, f) => sum + f.formworkAreaM2, 0).toFixed(2));
 
     const totalColumns = activeModel?.members
       ? Array.from(activeModel.members.values()).filter((m: any) => m.classification === 'COLUMN').length
@@ -144,13 +168,12 @@ export const BuildingDetailsPanel: React.FC = () => {
       totalBeams,
       totalSlabs,
     };
-  }, [floorCenterlineData, activeModel]);
+  }, [floorCenterlineData, activeModel, concreteSummary]);
 
   // Export CSV Handler
   const handleExportCsv = () => {
-    if (floorCenterlineData.length === 0) return;
-    const exportRows = floorCenterlineData.map((f) => ({
-      'Floor Level': f.levelName,
+    const csvData = floorCenterlineData.map((f) => ({
+      'Level': f.levelName,
       'Elevation (m)': f.elevationY,
       'Beam Centerline (m)': f.beamCenterlineM,
       'Wall Centerline (m)': f.wallCenterlineM,
@@ -159,36 +182,37 @@ export const BuildingDetailsPanel: React.FC = () => {
       'Floor Area (m²)': f.areaM2,
       'Floor Area (sq.ft)': f.areaSqFt,
       'Concrete Vol (m³)': f.concreteM3,
-      'Steel Rebar (kg)': f.steelKg,
+      'Rebar Steel (kg)': f.steelKg,
       'Masonry Brickwork (m³)': f.masonryVolM3,
-      'Plaster Area (m²)': f.plasteringAreaM2,
-      'Shuttering Formwork (m²)': f.formworkAreaM2,
+      'Plastering Area (m²)': f.plasteringAreaM2,
+      'Formwork Area (m²)': f.formworkAreaM2,
     }));
 
-    const projName = activeProject?.metadata?.name || 'Building_Project';
-    exportToCsv(exportRows, `${projName}_Building_Details_Centerline_Estimation.csv`);
+    exportToCsv(csvData, 'Building_Details_Centerline_BOQ.csv');
   };
 
-  // Copy Centerline Summary to Clipboard
+  // Copy Centerline Summary text
   const handleCopySummary = () => {
-    let summaryText = `BUILDING DETAILS & CENTERLINE ESTIMATION SUMMARY\n`;
-    summaryText += `===================================================\n`;
-    summaryText += `Project Name: ${activeProject?.metadata?.name || 'STAAD Building'}\n`;
-    summaryText += `Total Storeys: ${buildingSummary.totalFloors} Floors\n`;
-    summaryText += `Building Height: ${buildingSummary.buildingHeightM} m\n`;
-    summaryText += `Total Built-Up Area: ${buildingSummary.totalBuiltUpM2} m² (${buildingSummary.totalBuiltUpSqFt} sq.ft)\n`;
+    let summaryText = `BUILDING DETAILS & CENTERLINE QUANTITY SURVEY REPORT\n`;
+    summaryText += `====================================================\n`;
+    summaryText += `Project: ${activeProject?.metadata.name || 'Structural Model'}\n`;
+    summaryText += `Total Levels: ${buildingSummary.totalFloors} Stories (Height: ${buildingSummary.buildingHeightM}m)\n`;
+    summaryText += `Total Built-Up Area: ${buildingSummary.totalBuiltUpM2} m² (${buildingSummary.totalBuiltUpSqFt.toLocaleString()} sq.ft)\n`;
     summaryText += `Total Building Centerline: ${buildingSummary.totalCenterlineM} m\n`;
     summaryText += `Total Concrete Volume: ${buildingSummary.totalConcreteM3} m³\n`;
-    summaryText += `Total Steel Reinforcement: ${buildingSummary.totalSteelMT} MT (${buildingSummary.totalSteelKg} kg)\n\n`;
-    summaryText += `FLOOR-BY-FLOOR CENTERLINE BREAKDOWN:\n`;
-    summaryText += `---------------------------------------------------\n`;
+    if (concreteSummary) {
+      summaryText += `  - Substructure Concrete: ${concreteSummary.substructureConcreteM3} m³ (${concreteSummary.substructurePercent}%)\n`;
+      summaryText += `  - Superstructure Concrete: ${concreteSummary.superstructureConcreteM3} m³ (${concreteSummary.superstructurePercent}%)\n`;
+    }
+    summaryText += `Total Steel Reinforcement: ${buildingSummary.totalSteelMT} MT (${buildingSummary.totalSteelKg.toLocaleString()} kg)\n`;
+    summaryText += `Total Brickwork Masonry: ${buildingSummary.totalMasonryM3} m³\n`;
+    summaryText += `Total Formwork Shuttering: ${buildingSummary.totalFormworkM2} m²\n\n`;
 
+    summaryText += `FLOOR-BY-FLOOR BREAKDOWN:\n`;
     floorCenterlineData.forEach((f) => {
-      summaryText += `${f.levelName} (EL. ${f.elevationY}m):\n`;
-      summaryText += `  - Beam Centerline: ${f.beamCenterlineM} m\n`;
-      summaryText += `  - Wall Centerline: ${f.wallCenterlineM} m\n`;
-      summaryText += `  - Total Floor Centerline: ${f.totalCenterlineM} m\n`;
-      summaryText += `  - Floor Area: ${f.areaM2} m² (${f.areaSqFt} sq.ft)\n`;
+      summaryText += `${f.levelName} (EL. +${f.elevationY}m):\n`;
+      summaryText += `  - Centerline: ${f.totalCenterlineM} m (Beams: ${f.beamCenterlineM}m, Walls: ${f.wallCenterlineM}m)\n`;
+      summaryText += `  - Area: ${f.areaM2} m² (${f.areaSqFt} sq.ft)\n`;
       summaryText += `  - Concrete: ${f.concreteM3} m³ | Steel: ${f.steelKg} kg\n\n`;
     });
 
@@ -200,70 +224,66 @@ export const BuildingDetailsPanel: React.FC = () => {
   if (!activeModel) {
     return (
       <div className="flex items-center justify-center h-full text-slate-400 font-mono text-sm">
-        No active structural model loaded.
+        No active model loaded.
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full w-full bg-slate-950 text-slate-100 font-mono p-4 space-y-4 overflow-y-auto select-none">
-      {/* Top Banner Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900 p-4 rounded-lg border border-slate-800 shadow-xl">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-indigo-950 rounded-lg border border-indigo-800 text-indigo-400">
-            <Building className="w-6 h-6" />
-          </div>
-          <div>
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              BUILDING DETAILS &amp; TOTAL CENTERLINE ESTIMATION PANEL
-            </h2>
-            <p className="text-xs text-slate-400">
-              Floor-by-Floor Centerline Lengths, Built-Up Areas &amp; Architectural Quantity Survey Takeoff
-            </p>
-          </div>
+    <div className="p-6 space-y-6 overflow-y-auto font-mono text-slate-100 bg-slate-950 min-h-full">
+      {/* Header with Title and Action Buttons */}
+      <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/80 p-4 rounded-lg border border-slate-800 backdrop-blur shadow-md">
+        <div>
+          <h2 className="text-base font-bold text-white flex items-center gap-2">
+            <Building className="w-5 h-5 text-indigo-400" />
+            BUILDING DETAILS, CENTERLINE &amp; CONCRETE VOLUME SCHEDULE
+          </h2>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Architectural centerline lengths, separate concrete volume ($m^3$) per structure part, built-up areas, and material quantities.
+          </p>
         </div>
 
-        <div className="flex items-center gap-2 text-xs font-mono">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={handleCopySummary}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded font-bold transition-all border border-slate-700 shadow"
-            title="Copy Building Details & Centerline Summary to Clipboard"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 text-xs font-semibold shadow transition-all"
+            title="Copy Centerline & Quantity Summary to Clipboard"
           >
-            {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-indigo-400" />}
-            <span>{copied ? 'Copied!' : 'Copy Summary'}</span>
+            {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{copied ? 'Copied Summary' : 'Copy Summary'}</span>
           </button>
 
           <button
             onClick={handleExportCsv}
-            className="flex items-center gap-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold shadow transition-all"
-            title="Export Building Estimation & Centerline data to CSV file"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-semibold shadow transition-all"
+            title="Download CSV spreadsheet of all floor-by-floor centerline metrics"
           >
-            <Download className="w-4 h-4" />
-            <span>Export Estimation CSV</span>
+            <Download className="w-3.5 h-3.5" />
+            <span>Export CSV</span>
           </button>
         </div>
       </div>
 
-      {/* Hero Estimation Key Metrics Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 font-mono">
+      {/* Building Master KPI Summary Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="bg-slate-900/90 p-3.5 rounded-lg border border-slate-800 flex flex-col justify-between shadow">
           <div className="flex items-center justify-between text-slate-400 text-[11px]">
-            <span>TOTAL STOREYS</span>
-            <Building className="w-4 h-4 text-indigo-400" />
+            <span>STOREYS &amp; HEIGHT</span>
+            <Building className="w-4 h-4 text-sky-400" />
           </div>
           <div className="mt-2">
             <div className="text-xl font-bold text-white">{buildingSummary.totalFloors} Floors</div>
-            <div className="text-[10px] text-slate-500">Height: {buildingSummary.buildingHeightM}m</div>
+            <div className="text-[10px] text-slate-400">Total Height: {buildingSummary.buildingHeightM} m</div>
           </div>
         </div>
 
         <div className="bg-slate-900/90 p-3.5 rounded-lg border border-slate-800 flex flex-col justify-between shadow">
           <div className="flex items-center justify-between text-slate-400 text-[11px]">
-            <span>TOTAL BUILT-UP AREA</span>
-            <Maximize2 className="w-4 h-4 text-sky-400" />
+            <span>BUILT-UP AREA</span>
+            <Maximize2 className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="mt-2">
-            <div className="text-xl font-bold text-sky-400">{buildingSummary.totalBuiltUpM2} m²</div>
+            <div className="text-xl font-bold text-emerald-400">{buildingSummary.totalBuiltUpM2} m²</div>
             <div className="text-[10px] text-slate-400">{buildingSummary.totalBuiltUpSqFt.toLocaleString()} sq.ft</div>
           </div>
         </div>
@@ -286,7 +306,7 @@ export const BuildingDetailsPanel: React.FC = () => {
           </div>
           <div className="mt-2">
             <div className="text-xl font-bold text-amber-300">{buildingSummary.totalConcreteM3} m³</div>
-            <div className="text-[10px] text-slate-500">Cols, Beams, Slabs, Caps</div>
+            <div className="text-[10px] text-slate-500">Every Part Calculated Separately</div>
           </div>
         </div>
 
@@ -312,6 +332,73 @@ export const BuildingDetailsPanel: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* SEPARATE CONCRETE VOLUME BREAKDOWN BY STRUCTURAL PART                      */}
+      {/* ========================================================================= */}
+      {concreteSummary && (
+        <div className="bg-slate-900/90 p-4 rounded-lg border border-slate-800 shadow-xl space-y-4 font-mono">
+          <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2">
+              <Box className="w-4 h-4 text-sky-400" />
+              <h3 className="text-sm font-bold text-white">
+                CONCRETE VOLUME CALCULATED SEPARATELY BY STRUCTURAL PART
+              </h3>
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <span className="text-emerald-400 font-bold">Substructure: {concreteSummary.substructureConcreteM3} m³ ({concreteSummary.substructurePercent}%)</span>
+              <span className="text-slate-600">|</span>
+              <span className="text-sky-400 font-bold">Superstructure: {concreteSummary.superstructureConcreteM3} m³ ({concreteSummary.superstructurePercent}%)</span>
+              <span className="text-slate-600">|</span>
+              <span className="text-amber-300 font-extrabold">Total: {concreteSummary.grandTotalConcreteM3} m³</span>
+            </div>
+          </div>
+
+          {/* Component Volume Cards Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            {concreteSummary.components.map((comp) => (
+              <div
+                key={comp.id}
+                className="bg-slate-950 p-3 rounded border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-300">{comp.component}</span>
+                    <span
+                      className={`text-[9px] px-1 py-0.2 rounded font-bold ${
+                        comp.category === 'SUPERSTRUCTURE' ? 'bg-sky-950 text-sky-300 border border-sky-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
+                      }`}
+                    >
+                      {comp.count} units
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5 truncate">{comp.typicalDimensions}</div>
+                </div>
+
+                <div className="mt-3">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-lg font-bold text-sky-400">{comp.concreteM3} m³</span>
+                    <span className="text-xs font-bold text-slate-400">{comp.percentageShare}%</span>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-1.5">
+                    <div
+                      className={`h-full rounded-full ${comp.category === 'SUPERSTRUCTURE' ? 'bg-sky-500' : 'bg-amber-500'}`}
+                      style={{ width: `${Math.min(100, comp.percentageShare)}%` }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 mt-2">
+                    <span>{comp.cementBags} Cement Bags</span>
+                    <span>{comp.formworkM2 > 0 ? `${comp.formworkM2} m² form` : 'In-situ'}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Per-Floor Centerline Quick Reference Cards */}
       <div className="bg-indigo-950/30 p-4 rounded-lg border border-indigo-800/60 shadow-xl space-y-3 font-mono">

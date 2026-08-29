@@ -27,7 +27,10 @@ import {
   Share2,
   Link2,
   Check,
+  Box,
+  HardHat,
 } from 'lucide-react';
+import { ConcreteVolumeEngine } from '@/features/calculations/concreteVolumeEngine';
 
 export const ProjectDashboard: React.FC = () => {
   const {
@@ -99,6 +102,26 @@ export const ProjectDashboard: React.FC = () => {
   const warnings = activeProject?.warnings || [];
   const criticalCount = warnings.filter((w) => w.severity === 'CRITICAL').length;
   const warningCount = warnings.filter((w) => w.severity === 'WARNING').length;
+
+  const concreteSummary = React.useMemo(() => {
+    if (!activeModel) return null;
+    return ConcreteVolumeEngine.calculateBuildingConcreteSummary(
+      activeModel,
+      activeProject?.metadata,
+      {
+        savedColumnDesigns: activeProject?.savedColumnDesigns,
+        savedBeamDesigns: activeProject?.savedBeamDesigns,
+        savedShearWallDesigns: activeProject?.savedShearWallDesigns,
+        savedGradeBeamDesigns: activeProject?.savedGradeBeamDesigns,
+        savedFootingDesigns: activeProject?.savedFootingDesigns,
+        savedSlabDesigns: activeProject?.savedSlabDesigns,
+        manualMergedPileCapGroups: activeProject?.manualMergedPileCapGroups,
+        detachedCombinedCapNodeIds: activeProject?.detachedCombinedCapNodeIds,
+        customCombinedCapOverrides: activeProject?.customCombinedCapOverrides,
+        projectPileTypes: activeProject?.projectPileTypes,
+      }
+    );
+  }, [activeModel, activeProject]);
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-ui-background font-sans">
@@ -304,6 +327,77 @@ export const ProjectDashboard: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Concrete Volume Schedule by Structure Part */}
+        {concreteSummary && (
+          <div className="bg-surface-card border border-ui-border rounded-md shadow-sm overflow-hidden p-4 space-y-3 font-sans">
+            <div className="flex items-center justify-between border-b border-ui-border pb-2 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Box className="w-4 h-4 text-sky-600" />
+                <h3 className="font-mono text-xs font-bold text-deep-navy uppercase">
+                  Concrete Volume by Structure Part (Separately Calculated)
+                </h3>
+              </div>
+              <div className="flex items-center gap-3 font-mono text-xs">
+                <span className="text-slate-600">Total: <strong className="text-deep-navy text-sm">{concreteSummary.grandTotalConcreteM3} m³</strong></span>
+                <span className="text-slate-400">•</span>
+                <span className="text-emerald-700">Substructure: <strong>{concreteSummary.substructureConcreteM3} m³ ({concreteSummary.substructurePercent}%)</strong></span>
+                <span className="text-slate-400">•</span>
+                <span className="text-sky-700">Superstructure: <strong>{concreteSummary.superstructureConcreteM3} m³ ({concreteSummary.superstructurePercent}%)</strong></span>
+                <button
+                  type="button"
+                  onClick={() => setActiveView('reports')}
+                  className="text-secondary-brand hover:underline font-semibold ml-2"
+                >
+                  Full BOQ Report →
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
+              {concreteSummary.components.map((comp) => (
+                <div
+                  key={comp.id}
+                  onClick={() => {
+                    if (comp.id === 'columns') setActiveView('columns-design');
+                    else if (comp.id === 'beams') setActiveView('beams-design');
+                    else if (comp.id === 'slabs') setActiveView('slabs-design');
+                    else if (comp.id === 'shearwalls') setActiveView('shearwalls-design');
+                    else if (comp.id === 'gradebeams') setActiveView('gradebeams-design');
+                    else if (comp.id === 'pilecaps') setActiveView('pilecaps-design');
+                    else if (comp.id === 'piles') setActiveView('piles-design');
+                    else if (comp.id === 'footings') setActiveView('footings-design');
+                    else setActiveView('reports');
+                  }}
+                  className="bg-slate-50 hover:bg-slate-100/80 p-2.5 rounded border border-ui-border transition-all cursor-pointer flex flex-col justify-between"
+                  title={`Click to open ${comp.component} Design`}
+                >
+                  <div>
+                    <span className="font-mono text-[11px] font-bold text-slate-800 block truncate">
+                      {comp.component}
+                    </span>
+                    <span className="font-mono text-[10px] text-slate-500 block">
+                      {comp.count} elements
+                    </span>
+                  </div>
+
+                  <div className="mt-2 font-mono">
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-sm font-bold text-sky-700">{comp.concreteM3} m³</span>
+                      <span className="text-[10px] font-semibold text-slate-500">{comp.percentageShare}%</span>
+                    </div>
+                    <div className="w-full bg-slate-200 h-1 rounded-full overflow-hidden mt-1">
+                      <div
+                        className={`h-full rounded-full ${comp.category === 'SUPERSTRUCTURE' ? 'bg-sky-600' : 'bg-amber-600'}`}
+                        style={{ width: `${Math.min(100, comp.percentageShare)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Quick Access to Key Modules */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

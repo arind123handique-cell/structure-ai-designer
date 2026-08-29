@@ -2,6 +2,7 @@ import { NormalizedStructuralModel } from '@/features/model/types';
 import { ProjectMetadata } from '@/types';
 import { EngineeringWarning } from '@/features/warnings/types';
 import { BbsEngine } from '@/features/calculations/bbsEngine';
+import { ConcreteVolumeEngine } from '@/features/calculations/concreteVolumeEngine';
 
 export interface ProjectReportDataset {
   metadata: ProjectMetadata;
@@ -21,7 +22,10 @@ export interface ProjectReportDataset {
   savedColumnDesigns?: Record<number, any>;
   savedBeamDesigns?: Record<number, any>;
   savedShearWallDesigns?: Record<number, any>;
+  savedGradeBeamDesigns?: any[];
+  savedFootingDesigns?: Record<number, any>;
   savedSlabDesigns?: Record<string, any>;
+  projectPileTypes?: any[];
 }
 
 export class ExcelWorkbookExporter {
@@ -72,61 +76,133 @@ export class ExcelWorkbookExporter {
     ];
     const sheet1 = makeXmlTable(['PARAMETER', 'VALUE'], metaRows);
 
-    // Sheet 2: Beams Schedule
-    const beams = Array.from(model.members.values()).filter((m) => m.classification === 'BEAM');
-    const beamRows: (string | number)[][] = beams.map((b) => [
-      `B-${b.id}`,
-      b.section.name || '300x450 mm',
-      b.length.toFixed(2),
-      'M25 / Fe500D',
-      '3-T20 Top',
-      '3-T20 Bottom',
-      '2L-8mm @ 125 mm c/c',
-      'PASS',
+    // Sheet 2: Concrete Volume Schedule & BOQ (Every Structural Part Separately)
+    const concSummary = ConcreteVolumeEngine.calculateBuildingConcreteSummary(model, metadata, dataset);
+    const concRows: (string | number)[][] = concSummary.components.map((c) => [
+      c.component,
+      c.category,
+      c.codeRef,
+      c.count,
+      c.typicalDimensions,
+      c.concreteGrade,
+      c.concreteM3.toFixed(2),
+      `${c.percentageShare}%`,
+      c.formworkM2.toFixed(1),
+      c.cementBags,
+      c.sandM3.toFixed(2),
+      c.sandMT.toFixed(2),
+      c.aggregateM3.toFixed(2),
+      c.aggregateMT.toFixed(2),
+      c.waterLiters,
     ]);
+
+    // Add Grand Total Row
+    concRows.push([
+      'GRAND TOTAL BUILDING CONCRETE',
+      'FULL STRUCTURE',
+      'IS 456 / IS 13920 / IS 2911',
+      concSummary.components.reduce((sum, c) => sum + c.count, 0),
+      'All Structural Parts',
+      'ALL GRADES',
+      concSummary.grandTotalConcreteM3.toFixed(2),
+      '100.0%',
+      concSummary.totalFormworkM2.toFixed(1),
+      concSummary.totalCementBags,
+      concSummary.totalSandM3.toFixed(2),
+      concSummary.totalSandMT.toFixed(2),
+      concSummary.totalAggregateM3.toFixed(2),
+      concSummary.totalAggregateMT.toFixed(2),
+      concSummary.totalWaterLiters,
+    ]);
+
     const sheet2 = makeXmlTable(
-      ['BEAM ID', 'SECTION (b x D)', 'SPAN (m)', 'MATERIALS', 'TOP REBAR', 'BOTTOM REBAR', 'STIRRUPS', 'STATUS'],
+      [
+        'STRUCTURAL COMPONENT',
+        'CATEGORY',
+        'IS CODE CLAUSE',
+        'COUNT',
+        'TYPICAL DIMENSIONS',
+        'GRADE',
+        'CONCRETE VOL (m³)',
+        '% SHARE',
+        'FORMWORK (m²)',
+        'CEMENT (50kg Bags)',
+        'SAND (m³)',
+        'SAND (MT)',
+        'AGGREGATE (m³)',
+        'AGGREGATE (MT)',
+        'WATER (L)',
+      ],
+      concRows
+    );
+
+    // Sheet 3: Beams Schedule
+    const beams = Array.from(model.members.values()).filter((m) => m.classification === 'BEAM');
+    const beamRows: (string | number)[][] = beams.map((b) => {
+      const zd = b.section.zd || 0.30;
+      const yd = b.section.yd || 0.45;
+      const vol = (zd * yd * b.length).toFixed(3);
+      return [
+        `B-${b.id}`,
+        b.section.name || '300x450 mm',
+        b.length.toFixed(2),
+        vol,
+        'M25 / Fe500D',
+        '3-T20 Top',
+        '3-T20 Bottom',
+        '2L-8mm @ 125 mm c/c',
+        'PASS',
+      ];
+    });
+    const sheet3 = makeXmlTable(
+      ['BEAM ID', 'SECTION (b x D)', 'SPAN (m)', 'CONCRETE VOL (m³)', 'MATERIALS', 'TOP REBAR', 'BOTTOM REBAR', 'STIRRUPS', 'STATUS'],
       beamRows
     );
 
-    // Sheet 3: Columns Schedule
+    // Sheet 4: Columns Schedule
     const cols = Array.from(model.members.values()).filter((m) => m.classification === 'COLUMN');
-    const colRows: (string | number)[][] = cols.map((c) => [
-      `C-${c.id}`,
-      c.section.name || '450x550 mm',
-      c.length.toFixed(2),
-      'M25 / Fe500D',
-      '8-T20 (pt = 1.02%)',
-      '0.742',
-      '8mm ties @ 100 mm c/c',
-      'PASS',
-    ]);
-    const sheet3 = makeXmlTable(
-      ['COLUMN ID', 'SECTION (b x D)', 'HEIGHT (m)', 'MATERIALS', 'MAIN REBAR', 'BIAXIAL IR', 'CONFINING TIES', 'STATUS'],
+    const colRows: (string | number)[][] = cols.map((c) => {
+      const zd = c.section.zd || 0.45;
+      const yd = c.section.yd || 0.55;
+      const vol = (zd * yd * c.length).toFixed(3);
+      return [
+        `C-${c.id}`,
+        c.section.name || '450x550 mm',
+        c.length.toFixed(2),
+        vol,
+        'M25 / Fe500D',
+        '8-T20 (pt = 1.02%)',
+        '0.742',
+        '8mm ties @ 100 mm c/c',
+        'PASS',
+      ];
+    });
+    const sheet4 = makeXmlTable(
+      ['COLUMN ID', 'SECTION (b x D)', 'HEIGHT (m)', 'CONCRETE VOL (m³)', 'MATERIALS', 'MAIN REBAR', 'BIAXIAL IR', 'CONFINING TIES', 'STATUS'],
       colRows
     );
 
-    // Sheet 4: Piles & Foundations
+    // Sheet 5: Piles & Foundations
     const supports = Array.from(model.supports.values());
     const pileRows: (string | number)[][] = supports.map((s, idx) => [
       `C${idx + 1}`,
       `PC-${idx + 1}`,
       `Joint #${s.nodeId}`,
-      'Dia 500 mm',
+      'Dia 350 mm',
       '12.0 m',
-      '450.0 kN',
-      '4-Pile Cap (2.5m x 2.5m x 0.8m)',
+      '280.0 kN',
+      '2.4m x 1.2m x 0.7m',
+      '2.016 m³',
       'T16 @ 125 c/c B.W. (Bottom)',
       'T12 @ 150 c/c B.W. (Top)',
-      '2-T12 @ 200 c/c (Side Face)',
       'PASS',
     ]);
-    const sheet4 = makeXmlTable(
-      ['COLUMN SL NO', 'PILE CAP #', 'SUPPORT JOINT', 'PILE DIA', 'LENGTH', 'SAFE CAPACITY', 'CAP GEOMETRY', 'BOTTOM MAT', 'TOP MAT', 'SIDE FACE STEEL', 'STATUS'],
+    const sheet5 = makeXmlTable(
+      ['COLUMN SL NO', 'PILE CAP #', 'SUPPORT JOINT', 'PILE DIA', 'LENGTH', 'SAFE CAPACITY', 'CAP GEOMETRY', 'CONCRETE VOL', 'BOTTOM MAT', 'TOP MAT', 'STATUS'],
       pileRows
     );
 
-    // Sheet 5: Floor Slabs Schedule (IS 456 / RCDC)
+    // Sheet 6: Floor Slabs Schedule (IS 456 / RCDC)
     const savedSlabs: Record<string, any> = dataset.savedSlabDesigns || {};
     const slabEntries = Object.values(savedSlabs);
     const slabRows: (string | number)[][] = slabEntries.map((s) => [
@@ -134,18 +210,19 @@ export class ExcelWorkbookExporter {
       s.floorLevel || '1ST FLOOR SLAB',
       `${s.lx} m × ${s.ly} m`,
       `${s.thickness} mm`,
+      `${((s.lx * s.ly * (s.thickness || 130)) / 1000).toFixed(3)} m³`,
       `T${s.bottomBarDiaX || s.barDiaX || 10} @ ${s.bottomBarSpacingX || s.barSpacingX || 150} mm c/c`,
       `T${s.bottomBarDiaY || s.barDiaY || 10} @ ${s.bottomBarSpacingY || s.barSpacingY || 150} mm c/c`,
       `T${s.topBarDiaX || 8} @ ${s.topBarSpacingX || 150} mm c/c (0.25L)`,
       `${s.deflectionRatioActual || '14.2'} ≤ ${s.deflectionRatioLimit || '24.0'}`,
       s.isManualOverride ? `MANUAL ${s.status}` : s.status,
     ]);
-    const sheet5 = makeXmlTable(
-      ['PANEL ID', 'FLOOR LEVEL', 'SPAN (Lx x Ly)', 'THICKNESS (D)', 'BOTTOM MAIN SHORT WAY', 'BOTTOM MAIN LONG WAY', 'TOP SUPPORT BENT-UP STEEL', 'DEFLECTION L/d', 'STATUS'],
-      slabRows.length > 0 ? slabRows : [['S1', '1ST FLOOR SLAB (+2.8m)', '3.5m × 4.5m', '130 mm', 'T10 @ 150 mm c/c', 'T10 @ 150 mm c/c', 'T8 @ 150 mm c/c (Crank @ 0.25L)', '14.2 ≤ 24.0', 'PASS']]
+    const sheet6 = makeXmlTable(
+      ['PANEL ID', 'FLOOR LEVEL', 'SPAN (Lx x Ly)', 'THICKNESS (D)', 'CONCRETE VOL (m³)', 'BOTTOM MAIN SHORT WAY', 'BOTTOM MAIN LONG WAY', 'TOP SUPPORT BENT-UP STEEL', 'DEFLECTION L/d', 'STATUS'],
+      slabRows.length > 0 ? slabRows : [['S1', '1ST FLOOR SLAB (+2.8m)', '3.5m × 4.5m', '130 mm', '2.048 m³', 'T10 @ 150 mm c/c', 'T10 @ 150 mm c/c', 'T8 @ 150 mm c/c (Crank @ 0.25L)', '14.2 ≤ 24.0', 'PASS']]
     );
 
-    // Sheet 6: Bar Bending Schedule (BBS) - All Slabs, Beams, Columns, Pile Caps
+    // Sheet 7: Bar Bending Schedule (BBS) - All Slabs, Beams, Columns, Pile Caps
     const bbs = BbsEngine.generateBuildingBbs(model, dataset as any);
     const bbsRows: (string | number)[][] = bbs.items.map((item) => [
       item.barNo,
@@ -194,9 +271,9 @@ export class ExcelWorkbookExporter {
       'TOTAL LEN (m)',
       'WEIGHT (kg)',
     ];
-    const sheet6 = makeXmlTable(bbsHeaders, bbsRows);
+    const sheet7 = makeXmlTable(bbsHeaders, bbsRows);
 
-    // Sheet 7: Warnings & Audit
+    // Sheet 8: Warnings & Audit
     const warnRows: (string | number)[][] = warnings.map((w) => [
       w.severity,
       w.category,
@@ -204,7 +281,7 @@ export class ExcelWorkbookExporter {
       w.message,
       w.source,
     ]);
-    const sheet7 = makeXmlTable(['SEVERITY', 'CATEGORY', 'ELEMENT', 'MESSAGE', 'SOURCE'], warnRows);
+    const sheet8 = makeXmlTable(['SEVERITY', 'CATEGORY', 'ELEMENT', 'MESSAGE', 'SOURCE'], warnRows);
 
     // Combine all sheets in Excel HTML Workbook format
     const fullWorkbook = `
@@ -215,6 +292,7 @@ export class ExcelWorkbookExporter {
           <x:ExcelWorkbook>
             <x:ExcelWorksheets>
               <x:ExcelWorksheet><x:Name>Project Info</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>
+              <x:ExcelWorksheet><x:Name>Concrete Volume (BOQ)</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>
               <x:ExcelWorksheet><x:Name>Beams Schedule</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>
               <x:ExcelWorksheet><x:Name>Columns Schedule</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>
               <x:ExcelWorksheet><x:Name>Foundation Schedule</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>
@@ -231,23 +309,26 @@ export class ExcelWorkbookExporter {
         <h2>1. PROJECT METADATA & DESIGN PARAMETERS</h2>
         ${sheet1}
         <br/><hr/><br/>
-        <h2>2. RCC BEAM REINFORCEMENT SCHEDULE</h2>
+        <h2>2. CONCRETE VOLUME SCHEDULE & BOQ (EVERY STRUCTURAL PART SEPARATELY)</h2>
         ${sheet2}
         <br/><hr/><br/>
-        <h2>3. RCC COLUMN SCHEDULE & BIAXIAL INTERACTION</h2>
+        <h2>3. RCC BEAM REINFORCEMENT SCHEDULE</h2>
         ${sheet3}
         <br/><hr/><br/>
-        <h2>4. PILES & FOUNDATION SCHEDULE</h2>
+        <h2>4. RCC COLUMN SCHEDULE & BIAXIAL INTERACTION</h2>
         ${sheet4}
         <br/><hr/><br/>
-        <h2>5. FLOOR SLABS REINFORCEMENT SCHEDULE (IS 456 / RCDC)</h2>
+        <h2>5. PILES & FOUNDATION SCHEDULE</h2>
         ${sheet5}
         <br/><hr/><br/>
-        <h2>6. BAR BENDING SCHEDULE (BBS) — IS 2502 / SP:34</h2>
+        <h2>6. FLOOR SLABS REINFORCEMENT SCHEDULE (IS 456 / RCDC)</h2>
         ${sheet6}
         <br/><hr/><br/>
-        <h2>7. ANALYSIS & VALIDATION WARNINGS</h2>
+        <h2>7. BAR BENDING SCHEDULE (BBS) — IS 2502 / SP:34</h2>
         ${sheet7}
+        <br/><hr/><br/>
+        <h2>8. ANALYSIS & VALIDATION WARNINGS</h2>
+        ${sheet8}
       </body>
       </html>
     `;

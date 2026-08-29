@@ -613,7 +613,21 @@ export const ColumnDesignView: React.FC = () => {
       sortable: true,
       align: 'right',
       cell: (r) => <span className="font-mono">{r.height.toFixed(2)}</span>,
-      width: '90px',
+      width: '85px',
+    },
+    {
+      header: 'CONCRETE (m³)',
+      sortable: true,
+      align: 'right',
+      cell: (r) => {
+        const vol = (r.b_mm / 1000) * (r.D_mm / 1000) * r.height * (r.count || 1);
+        return (
+          <span className="font-mono font-bold text-sky-700">
+            {vol.toFixed(3)} m³
+          </span>
+        );
+      },
+      width: '110px',
     },
     {
       header: 'AXIAL Pu (kN)',
@@ -981,21 +995,30 @@ export const ColumnDesignView: React.FC = () => {
         variant="card"
         contentClassName="p-3"
       >
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-mono text-slate-500 font-semibold uppercase">Filter Status:</span>
-          {(['ALL', 'PASS', 'WARNING', 'FAIL'] as const).map((st) => (
-            <button
-              key={st}
-              onClick={() => setFilterStatus(st)}
-              className={`px-3 py-1 text-xs font-mono rounded border transition-colors ${
-                filterStatus === st
-                  ? 'bg-deep-navy text-white border-deep-navy shadow-sm'
-                  : 'bg-white text-slate-700 border-ui-border hover:bg-slate-50'
-              }`}
-            >
-              {st} (              {st === 'ALL' ? groundColumns.length : Array.from(designedColumns.values()).filter((c) => c.status === st && groundColumns.some((gc) => gc.id === c.memberId)).length})
-            </button>
-          ))}
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono text-slate-500 font-semibold uppercase">Filter Status:</span>
+            {(['ALL', 'PASS', 'WARNING', 'FAIL'] as const).map((st) => (
+              <button
+                key={st}
+                onClick={() => setFilterStatus(st)}
+                className={`px-3 py-1 text-xs font-mono rounded border transition-colors ${
+                  filterStatus === st
+                    ? 'bg-deep-navy text-white border-deep-navy shadow-sm'
+                    : 'bg-white text-slate-700 border-ui-border hover:bg-slate-50'
+                }`}
+              >
+                {st} (                {st === 'ALL' ? groundColumns.length : Array.from(designedColumns.values()).filter((c) => c.status === st && groundColumns.some((gc) => gc.id === c.memberId)).length})
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 font-mono text-xs bg-slate-100 px-3 py-1 rounded border border-ui-border">
+            <span className="text-slate-500 font-semibold">Total Columns Concrete:</span>
+            <span className="font-bold text-sky-700">
+              {rows.reduce((sum: number, r: any) => sum + (r.b_mm / 1000) * (r.D_mm / 1000) * r.height * (r.count || 1), 0).toFixed(2)} m³
+            </span>
+          </div>
         </div>
       </CollapsiblePanel>
 

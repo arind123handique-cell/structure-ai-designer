@@ -580,7 +580,22 @@ export const PileCapDesignView: React.FC = () => {
           </div>
         );
       },
-      width: '190px',
+      width: '180px',
+    },
+    {
+      header: 'CONCRETE (m³)',
+      sortable: true,
+      align: 'right',
+      cell: (r) => {
+        if (!r.design) return <span className="text-slate-400 font-mono">—</span>;
+        const vol = (r.design.capLength / 1000) * (r.design.capWidth / 1000) * (r.design.capDepth / 1000);
+        return (
+          <span className="font-mono font-bold text-sky-700">
+            {vol.toFixed(3)} m³
+          </span>
+        );
+      },
+      width: '110px',
     },
     {
       header: 'PUNCHING SHEAR',

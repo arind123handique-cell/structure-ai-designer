@@ -868,6 +868,7 @@ export const SlabDesignView: React.FC = () => {
               <th className="border-r border-slate-400 p-2 w-24">Lx × Ly (m)</th>
               <th className="border-r border-slate-400 p-2 w-16">Ly / Lx</th>
               <th className="border-r border-slate-400 p-2 w-16">Thk (mm)</th>
+              <th className="border-r border-slate-400 p-2 w-18 text-sky-800 font-bold">Conc (m³)</th>
               <th className="border-r border-slate-400 p-2 w-44">Boundary Condition</th>
               <th className="border-r border-slate-400 p-2 w-24">Mux+ / Mux- (kNm)</th>
               <th className="border-r border-slate-400 p-2 w-48 text-left">Main Rebar (X-Dir)</th>
@@ -973,6 +974,10 @@ export const SlabDesignView: React.FC = () => {
                             onChange={(e) => handleUpdatePanel(panel.panelId, 'thickness', Number(e.target.value))}
                             className="w-12 text-center bg-transparent border-b border-slate-400 font-bold text-indigo-800 focus:border-indigo-600 focus:outline-none"
                           />
+                        </td>
+
+                        <td className="border-r border-slate-300 p-2 text-center font-bold text-sky-700">
+                          {((panel.lx * panel.ly * (panel.thickness || out.thickness || 130)) / 1000).toFixed(3)} m³
                         </td>
 
                         <td className="border-r border-slate-300 p-1.5">

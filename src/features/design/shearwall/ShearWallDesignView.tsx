@@ -468,7 +468,24 @@ export const ShearWallDesignView: React.FC = () => {
           </span>
         </div>
       ),
-      width: '190px',
+      width: '180px',
+    },
+    {
+      header: 'CONCRETE (m³)',
+      sortable: true,
+      align: 'right',
+      cell: (r) => {
+        const Lw = Number(r.design?.length || 3.2);
+        const tw = Number(r.design?.thickness || 230);
+        const Hw = Number(r.design?.height || 3.5);
+        const vol = Lw * (tw / 1000) * Hw;
+        return (
+          <span className="font-mono font-bold text-sky-700">
+            {vol.toFixed(3)} m³
+          </span>
+        );
+      },
+      width: '110px',
     },
     {
       header: 'SHEAR STRESS (τv / τc,max)',

@@ -609,7 +609,24 @@ export const BeamDesignView: React.FC = () => {
       sortable: true,
       align: 'right',
       cell: (r) => <span className="font-mono">{r.spanLength.toFixed(2)}</span>,
-      width: '80px',
+      width: '75px',
+    },
+    {
+      header: 'CONCRETE (m³)',
+      sortable: true,
+      align: 'right',
+      cell: (r) => {
+        const mem = allBeams.find((b) => b.id === r.memberId);
+        const zd = mem?.section.zd || 0.30;
+        const yd = mem?.section.yd || 0.45;
+        const vol = zd * yd * r.spanLength;
+        return (
+          <span className="font-mono font-bold text-sky-700">
+            {vol.toFixed(3)} m³
+          </span>
+        );
+      },
+      width: '105px',
     },
     {
       header: 'GOV. LOAD CASE',

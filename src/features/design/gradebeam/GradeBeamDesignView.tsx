@@ -8,7 +8,7 @@ import { DataTable, ColumnDef } from '@/components/tables/DataTable';
 import { exportToCsv } from '@/utils/exportUtils';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
 import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
-import { Play, Compass, FileText, Download, X, Layers, ShieldCheck, Activity, Save, CheckCircle2, Eye, EyeOff } from 'lucide-react';
+import { Play, Compass, FileText, Download, X, Layers, ShieldCheck, Activity, Save, CheckCircle2, Eye, EyeOff, Box } from 'lucide-react';
 
 export const GradeBeamDesignView: React.FC = () => {
   const { activeModel, activeProject, saveGradeBeamDesigns } = useProjectStore();
@@ -104,7 +104,21 @@ export const GradeBeamDesignView: React.FC = () => {
           {r.b} × {r.D} mm
         </span>
       ),
-      width: '135px',
+      width: '125px',
+    },
+    {
+      header: 'CONCRETE (m³)',
+      sortable: true,
+      align: 'right',
+      cell: (r) => {
+        const vol = (r.b / 1000) * (r.D / 1000) * r.spanLength;
+        return (
+          <span className="font-mono font-bold text-sky-700">
+            {vol.toFixed(3)} m³
+          </span>
+        );
+      },
+      width: '110px',
     },
     {
       header: 'TIE FORCE (P_tie)',
@@ -336,17 +350,19 @@ export const GradeBeamDesignView: React.FC = () => {
         </div>
         <div className="bg-surface-card border border-ui-border rounded p-3 shadow-2xs">
           <span className="text-[10px] text-slate-500 font-bold uppercase block flex items-center gap-1">
+            <Box className="w-3.5 h-3.5 text-sky-600" />
+            Total Concrete Volume
+          </span>
+          <span className="text-lg font-bold text-sky-700">
+            {designedGradeBeams.reduce((sum, gb) => sum + (gb.b / 1000) * (gb.D / 1000) * (gb.spanLength || 4.0), 0).toFixed(2)} m³
+          </span>
+        </div>
+        <div className="bg-surface-card border border-ui-border rounded p-3 shadow-2xs">
+          <span className="text-[10px] text-slate-500 font-bold uppercase block flex items-center gap-1">
             <Activity className="w-3.5 h-3.5 text-emerald-600" />
             Max Axial Tie Force (P_tie)
           </span>
           <span className="text-lg font-bold text-emerald-700">{maxTieForce.toFixed(1)} kN</span>
-        </div>
-        <div className="bg-surface-card border border-ui-border rounded p-3 shadow-2xs">
-          <span className="text-[10px] text-slate-500 font-bold uppercase block flex items-center gap-1">
-            <Compass className="w-3.5 h-3.5 text-indigo-600" />
-            Standard Sizing
-          </span>
-          <span className="text-lg font-bold text-indigo-900">300 × 450 mm</span>
         </div>
         <div className="bg-surface-card border border-ui-border rounded p-3 shadow-2xs">
           <span className="text-[10px] text-slate-500 font-bold uppercase block flex items-center gap-1">

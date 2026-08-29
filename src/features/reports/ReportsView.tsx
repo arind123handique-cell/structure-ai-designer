@@ -1,15 +1,49 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useProjectStore } from '@/features/projects/projectStore';
 import { ExcelWorkbookExporter } from './excelExport';
 import { PDFReportGenerator } from './pdfReportGenerator';
 import { CalculationPdfService } from '@/features/calculations/calculationPdfService';
+import { ConcreteVolumeEngine, ConcreteComponentVolume } from '@/features/calculations/concreteVolumeEngine';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
 import { ArchitecturalTakeoffEngine } from '@/features/architectural/engines/architecturalTakeoffEngine';
 import { FloorPlanEngine } from '@/features/drawings/floorPlanEngine';
-import { FileSpreadsheet, Printer, Download, CheckCircle2, Layers, Building, Box, ShieldCheck, FileText, Sparkles, Hash, BookOpen, Calculator, DoorOpen, AppWindow } from 'lucide-react';
+import { exportToCsv } from '@/utils/exportUtils';
+import {
+  FileSpreadsheet,
+  Printer,
+  Download,
+  CheckCircle2,
+  Layers,
+  Building,
+  Box,
+  ShieldCheck,
+  FileText,
+  Sparkles,
+  Hash,
+  BookOpen,
+  PieChart,
+  HardHat,
+  Droplets,
+  Layers3,
+  ChevronDown,
+  ChevronUp,
+  Calculator,
+  DoorOpen,
+  AppWindow,
+} from 'lucide-react';
 
 export const ReportsView: React.FC = () => {
-  const { activeProject, activeModel, architecturalWalls, architecturalDoors, architecturalWindows, architecturalOpenings, architecturalRooms } = useProjectStore();
+  const {
+    activeProject,
+    activeModel,
+    architecturalWalls,
+    architecturalDoors,
+    architecturalWindows,
+    architecturalOpenings,
+    architecturalRooms,
+  } = useProjectStore();
+  const [concreteViewMode, setConcreteViewMode] = useState<'BY_COMPONENT' | 'BY_FLOOR' | 'ITEMIZED'>('BY_COMPONENT');
+  const [expandedComponentId, setExpandedComponentId] = useState<string | null>(null);
 
   if (!activeProject || !activeModel) {
     return (
@@ -57,6 +91,14 @@ export const ReportsView: React.FC = () => {
     );
   }, [activeModel, architecturalWalls, architecturalDoors, architecturalWindows, architecturalOpenings, architecturalRooms]);
 
+  const concreteSummary = useMemo(() => {
+    return ConcreteVolumeEngine.calculateBuildingConcreteSummary(
+      activeModel,
+      activeProject.metadata,
+      dataset
+    );
+  }, [activeModel, activeProject, dataset]);
+
   const handleDownloadExcel = () => {
     ExcelWorkbookExporter.downloadWorkbook(dataset as any);
   };
@@ -89,6 +131,28 @@ export const ReportsView: React.FC = () => {
     PDFReportGenerator.printProjectReport(dataset as any);
   };
 
+  const handleExportConcreteCsv = () => {
+    const csvRows = concreteSummary.components.map((c) => ({
+      Component: c.component,
+      Category: c.category,
+      CodeClause: c.codeRef,
+      ElementCount: c.count,
+      TypicalDimensions: c.typicalDimensions,
+      Grade: c.concreteGrade,
+      ConcreteVolume_m3: c.concreteM3,
+      PercentageShare: `${c.percentageShare}%`,
+      FormworkArea_m2: c.formworkM2,
+      CementBags_50kg: c.cementBags,
+      Sand_m3: c.sandM3,
+      Sand_MT: c.sandMT,
+      CoarseAggregate_m3: c.aggregateM3,
+      CoarseAggregate_MT: c.aggregateMT,
+      Water_Liters: c.waterLiters,
+    }));
+
+    exportToCsv(csvRows, `${activeProject.metadata.code || 'PRJ'}_Concrete_Volume_Schedule_BOQ.csv`);
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-ui-background font-sans">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -100,7 +164,7 @@ export const ReportsView: React.FC = () => {
               COMPREHENSIVE A4 STRUCTURAL REPORTS &amp; DETAILED DESIGN CALCULATIONS
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Multi-page A4 PDF engineering report with 2D plans, diameter-wise reinforcement take-off (kg &amp; MT), and step-by-step IS code calculations.
+              Multi-page A4 PDF engineering report with 2D plans, separate concrete volume schedule ($m^3$), diameter-wise rebar take-off, and IS calculations.
             </p>
           </div>
 
@@ -146,47 +210,382 @@ export const ReportsView: React.FC = () => {
         {/* Universal Rebar Master Selection Toolbar */}
         <UniversalRebarBar moduleName="Reports & BOQ Take-Off" />
 
-        {/* Bill of Quantities (BOQ) Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        {/* Bill of Quantities (BOQ) Master Metric Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+          {/* Total Concrete */}
           <div className="bg-surface-card p-4 rounded-md border border-ui-border shadow-sm flex flex-col justify-between">
-            <span className="font-mono text-xs font-semibold text-slate-500 uppercase">
-              Total Concrete (RCC)
-            </span>
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-xs font-semibold text-slate-500 uppercase">
+                Total Concrete (RCC)
+              </span>
+              <Box className="w-4 h-4 text-sky-600" />
+            </div>
             <div className="mt-3">
-              <span className="font-mono text-2xl font-bold text-deep-navy">{reportData.totalConcreteM3.toFixed(1)}</span>
-              <span className="font-mono text-xs text-slate-500 ml-1">m³ (M25/M30)</span>
+              <span className="font-mono text-2xl font-bold text-deep-navy">{concreteSummary.grandTotalConcreteM3.toFixed(1)}</span>
+              <span className="font-mono text-xs text-slate-500 ml-1">m³</span>
+              <div className="flex items-center gap-2 mt-1 text-[11px] font-mono text-slate-500">
+                <span className="text-emerald-700 font-semibold">Sub: {concreteSummary.substructureConcreteM3.toFixed(1)} m³ ({concreteSummary.substructurePercent}%)</span>
+                <span>•</span>
+                <span className="text-sky-700 font-semibold">Super: {concreteSummary.superstructureConcreteM3.toFixed(1)} m³ ({concreteSummary.superstructurePercent}%)</span>
+              </div>
             </div>
           </div>
 
+          {/* Formwork & Shuttering Area */}
           <div className="bg-surface-card p-4 rounded-md border border-ui-border shadow-sm flex flex-col justify-between">
-            <span className="font-mono text-xs font-semibold text-slate-500 uppercase">
-              Total Reinforcing Steel
-            </span>
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-xs font-semibold text-slate-500 uppercase">
+                Total Shuttering Area
+              </span>
+              <Layers3 className="w-4 h-4 text-amber-600" />
+            </div>
+            <div className="mt-3">
+              <span className="font-mono text-2xl font-bold text-amber-700">{concreteSummary.totalFormworkM2.toFixed(0)}</span>
+              <span className="font-mono text-xs text-slate-500 ml-1">m²</span>
+              <p className="text-[11px] font-mono text-slate-500 mt-1">
+                {(concreteSummary.totalFormworkM2 * 10.7639).toFixed(0)} sq.ft formwork contact area
+              </p>
+            </div>
+          </div>
+
+          {/* Cement Bags */}
+          <div className="bg-surface-card p-4 rounded-md border border-ui-border shadow-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-xs font-semibold text-slate-500 uppercase">
+                Cement Bags (50kg)
+              </span>
+              <HardHat className="w-4 h-4 text-indigo-600" />
+            </div>
+            <div className="mt-3">
+              <span className="font-mono text-2xl font-bold text-indigo-700">{concreteSummary.totalCementBags.toLocaleString()}</span>
+              <span className="font-mono text-xs text-slate-500 ml-1">Bags</span>
+              <p className="text-[11px] font-mono text-slate-500 mt-1">
+                {(concreteSummary.totalCementBags * 0.05).toFixed(1)} MT OPC/PPC Cement
+              </p>
+            </div>
+          </div>
+
+          {/* Total Steel & Intensity */}
+          <div className="bg-surface-card p-4 rounded-md border border-ui-border shadow-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-xs font-semibold text-slate-500 uppercase">
+                Steel Take-Off &amp; Index
+              </span>
+              <Hash className="w-4 h-4 text-emerald-600" />
+            </div>
             <div className="mt-3">
               <span className="font-mono text-2xl font-bold text-secondary-brand">{reportData.grandTotals.grandTotalMT.toFixed(2)}</span>
-              <span className="font-mono text-xs text-slate-500 ml-1">MT ({reportData.grandTotals.grandTotalKg.toFixed(0)} kg)</span>
+              <span className="font-mono text-xs text-slate-500 ml-1">MT</span>
+              <p className="text-[11px] font-mono text-emerald-700 font-semibold mt-1">
+                Intensity: {(reportData.totalSteelKg / (concreteSummary.grandTotalConcreteM3 || 1)).toFixed(1)} kg/m³
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* ========================================================================= */}
+        {/* CONCRETE VOLUME SCHEDULE & BOQ BREAKDOWN BY STRUCTURAL PART               */}
+        {/* ========================================================================= */}
+        <div className="bg-surface-card rounded-md border border-ui-border shadow-sm overflow-hidden">
+          <div className="px-5 py-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between text-white flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Box className="w-4 h-4 text-sky-400" />
+              <div>
+                <h3 className="font-mono text-xs font-bold uppercase tracking-wider">
+                  CONCRETE VOLUME SCHEDULE &amp; BOQ BREAKDOWN BY STRUCTURAL PART (m³)
+                </h3>
+                <p className="text-[11px] text-slate-300 font-sans mt-0.5">
+                  Separate geometric volume calculation for every structural member category with material consumption &amp; formwork.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* View Mode Switcher */}
+              <div className="flex items-center bg-slate-800 p-0.5 rounded border border-slate-700 text-[11px] font-mono">
+                <button
+                  type="button"
+                  onClick={() => setConcreteViewMode('BY_COMPONENT')}
+                  className={`px-2.5 py-1 rounded transition-colors ${
+                    concreteViewMode === 'BY_COMPONENT' ? 'bg-secondary-brand text-white font-bold' : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  By Component
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConcreteViewMode('BY_FLOOR')}
+                  className={`px-2.5 py-1 rounded transition-colors ${
+                    concreteViewMode === 'BY_FLOOR' ? 'bg-secondary-brand text-white font-bold' : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  Floor Distribution
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConcreteViewMode('ITEMIZED')}
+                  className={`px-2.5 py-1 rounded transition-colors ${
+                    concreteViewMode === 'ITEMIZED' ? 'bg-secondary-brand text-white font-bold' : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  Itemized Members
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExportConcreteCsv}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded text-xs font-mono font-semibold transition-colors"
+                title="Export detailed Concrete Volume CSV"
+              >
+                <Download className="w-3.5 h-3.5" />
+                CSV
+              </button>
             </div>
           </div>
 
-          <div className="bg-surface-card p-4 rounded-md border border-ui-border shadow-sm flex flex-col justify-between">
-            <span className="font-mono text-xs font-semibold text-slate-500 uppercase">
-              Steel Intensity
-            </span>
-            <div className="mt-3">
-              <span className="font-mono text-2xl font-bold text-emerald-700">{(reportData.totalSteelKg / reportData.totalConcreteM3).toFixed(1)}</span>
-              <span className="font-mono text-xs text-slate-500 ml-1">kg/m³</span>
-            </div>
-          </div>
+          {/* VIEW 1: BY STRUCTURAL COMPONENT */}
+          {concreteViewMode === 'BY_COMPONENT' && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left font-mono text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-800 border-b border-ui-border font-bold">
+                    <th className="p-3">STRUCTURAL COMPONENT &amp; IS CODE</th>
+                    <th className="p-3 text-center">CATEGORY</th>
+                    <th className="p-3 text-center">COUNT</th>
+                    <th className="p-3">TYPICAL SECTION / SPECS</th>
+                    <th className="p-3 text-center">GRADE</th>
+                    <th className="p-3 text-right text-sky-800 font-bold">CONCRETE (m³)</th>
+                    <th className="p-3 text-center w-36">% SHARE</th>
+                    <th className="p-3 text-right">FORMWORK (m²)</th>
+                    <th className="p-3 text-right">CEMENT (Bags)</th>
+                    <th className="p-3 text-right">SAND (m³)</th>
+                    <th className="p-3 text-right">AGGREGATE (m³)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ui-border text-slate-700">
+                  {concreteSummary.components.map((row, idx) => (
+                    <React.Fragment key={row.id}>
+                      <tr className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60 hover:bg-slate-100/60'}>
+                        <td className="p-3 font-bold text-slate-900">
+                          <div className="flex items-center gap-1.5">
+                            <span>{row.component}</span>
+                            {row.itemizedMembers && row.itemizedMembers.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setExpandedComponentId(expandedComponentId === row.id ? null : row.id)}
+                                className="text-slate-400 hover:text-secondary-brand transition-colors p-0.5"
+                                title="Toggle itemized member list"
+                              >
+                                {expandedComponentId === row.id ? (
+                                  <ChevronUp className="w-3.5 h-3.5" />
+                                ) : (
+                                  <ChevronDown className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                          <span className="text-[10px] font-normal text-slate-500 block">{row.codeRef}</span>
+                        </td>
+                        <td className="p-3 text-center">
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              row.category === 'SUPERSTRUCTURE'
+                                ? 'bg-sky-50 text-sky-800 border border-sky-200'
+                                : 'bg-amber-50 text-amber-800 border border-amber-200'
+                            }`}
+                          >
+                            {row.category}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center font-bold text-slate-800">{row.count}</td>
+                        <td className="p-3 text-slate-600">{row.typicalDimensions}</td>
+                        <td className="p-3 text-center font-bold text-indigo-700">{row.concreteGrade}</td>
+                        <td className="p-3 text-right font-mono font-bold text-sky-700 text-sm">
+                          {row.concreteM3.toFixed(2)} m³
+                        </td>
+                        <td className="p-3">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 bg-slate-200 h-2 rounded-full overflow-hidden">
+                              <div
+                                className="bg-sky-600 h-full rounded-full"
+                                style={{ width: `${Math.min(100, row.percentageShare)}%` }}
+                              />
+                            </div>
+                            <span className="text-[11px] font-bold text-slate-700 w-10 text-right">
+                              {row.percentageShare}%
+                            </span>
+                          </div>
+                        </td>
+                        <td className="p-3 text-right font-mono">{row.formworkM2 > 0 ? row.formworkM2.toFixed(1) : '—'}</td>
+                        <td className="p-3 text-right font-mono font-bold text-indigo-800">{row.cementBags}</td>
+                        <td className="p-3 text-right font-mono">{row.sandM3.toFixed(1)}</td>
+                        <td className="p-3 text-right font-mono">{row.aggregateM3.toFixed(1)}</td>
+                      </tr>
 
-          <div className="bg-surface-card p-4 rounded-md border border-ui-border shadow-sm flex flex-col justify-between">
-            <span className="font-mono text-xs font-semibold text-slate-500 uppercase">
-              IS Code Compliance
-            </span>
-            <div className="mt-3">
-              <span className="font-mono text-2xl font-bold text-emerald-600">100% PASS</span>
-              <span className="font-mono text-xs text-slate-500 ml-1">IS 456 / 13920</span>
+                      {/* Inline Itemized Members Dropdown */}
+                      {expandedComponentId === row.id && row.itemizedMembers && (
+                        <tr className="bg-slate-900/5">
+                          <td colSpan={11} className="p-3">
+                            <div className="bg-white rounded border border-slate-300 p-3 max-h-48 overflow-y-auto space-y-1">
+                              <div className="flex items-center justify-between text-[11px] font-bold text-slate-800 border-b pb-1">
+                                <span>ITEMIZED {row.component.toUpperCase()} MEMBERS ({row.itemizedMembers.length})</span>
+                                <span>NET CONCRETE VOL: {row.concreteM3.toFixed(2)} m³</span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-[11px]">
+                                {row.itemizedMembers.map((item: any, i: number) => (
+                                  <div key={i} className="flex items-center justify-between bg-slate-50 p-1.5 rounded border border-slate-200">
+                                    <div>
+                                      <span className="font-bold text-slate-900">{item.label}</span>
+                                      <span className="text-[10px] text-slate-500 block">{item.dimensions}</span>
+                                    </div>
+                                    <span className="font-bold text-sky-700">{item.volumeM3} m³</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+
+                  {/* Substructure Subtotal */}
+                  <tr className="bg-amber-50/70 font-bold border-t border-amber-200 text-amber-950">
+                    <td className="p-2.5">SUBSTRUCTURE TOTAL (FOUNDATIONS, PILES, GRADE BEAMS, PCC)</td>
+                    <td className="p-2.5 text-center">SUBSTRUCTURE</td>
+                    <td className="p-2.5 text-center">—</td>
+                    <td className="p-2.5 text-slate-600">—</td>
+                    <td className="p-2.5 text-center">M25/M30/M15</td>
+                    <td className="p-2.5 text-right font-bold text-amber-900">{concreteSummary.substructureConcreteM3.toFixed(2)} m³</td>
+                    <td className="p-2.5 text-center font-bold">{concreteSummary.substructurePercent}%</td>
+                    <td className="p-2.5 text-right">
+                      {concreteSummary.components.filter(c => c.category === 'SUBSTRUCTURE').reduce((s, c) => s + c.formworkM2, 0).toFixed(1)}
+                    </td>
+                    <td className="p-2.5 text-right font-bold">
+                      {concreteSummary.components.filter(c => c.category === 'SUBSTRUCTURE').reduce((s, c) => s + c.cementBags, 0)}
+                    </td>
+                    <td className="p-2.5 text-right">
+                      {concreteSummary.components.filter(c => c.category === 'SUBSTRUCTURE').reduce((s, c) => s + c.sandM3, 0).toFixed(1)}
+                    </td>
+                    <td className="p-2.5 text-right">
+                      {concreteSummary.components.filter(c => c.category === 'SUBSTRUCTURE').reduce((s, c) => s + c.aggregateM3, 0).toFixed(1)}
+                    </td>
+                  </tr>
+
+                  {/* Superstructure Subtotal */}
+                  <tr className="bg-sky-50/70 font-bold border-t border-sky-200 text-sky-950">
+                    <td className="p-2.5">SUPERSTRUCTURE TOTAL (COLUMNS, BEAMS, SLABS, SHEAR WALLS)</td>
+                    <td className="p-2.5 text-center">SUPERSTRUCTURE</td>
+                    <td className="p-2.5 text-center">—</td>
+                    <td className="p-2.5 text-slate-600">—</td>
+                    <td className="p-2.5 text-center">{activeProject.metadata.designSettings.concreteGrade}</td>
+                    <td className="p-2.5 text-right font-bold text-sky-900">{concreteSummary.superstructureConcreteM3.toFixed(2)} m³</td>
+                    <td className="p-2.5 text-center font-bold">{concreteSummary.superstructurePercent}%</td>
+                    <td className="p-2.5 text-right">
+                      {concreteSummary.components.filter(c => c.category === 'SUPERSTRUCTURE').reduce((s, c) => s + c.formworkM2, 0).toFixed(1)}
+                    </td>
+                    <td className="p-2.5 text-right font-bold">
+                      {concreteSummary.components.filter(c => c.category === 'SUPERSTRUCTURE').reduce((s, c) => s + c.cementBags, 0)}
+                    </td>
+                    <td className="p-2.5 text-right">
+                      {concreteSummary.components.filter(c => c.category === 'SUPERSTRUCTURE').reduce((s, c) => s + c.sandM3, 0).toFixed(1)}
+                    </td>
+                    <td className="p-2.5 text-right">
+                      {concreteSummary.components.filter(c => c.category === 'SUPERSTRUCTURE').reduce((s, c) => s + c.aggregateM3, 0).toFixed(1)}
+                    </td>
+                  </tr>
+
+                  {/* Grand Total Row */}
+                  <tr className="bg-slate-900 text-white font-bold border-t-2 border-slate-800 text-xs">
+                    <td className="p-3 font-extrabold uppercase text-amber-300">
+                      GRAND TOTAL BUILDING CONCRETE (m³)
+                    </td>
+                    <td className="p-3 text-center text-slate-300">FULL BUILDING</td>
+                    <td className="p-3 text-center">{concreteSummary.components.reduce((s, c) => s + c.count, 0)}</td>
+                    <td className="p-3 text-slate-300">IS 456 / 13920 / 2911</td>
+                    <td className="p-3 text-center text-amber-300">ALL GRADES</td>
+                    <td className="p-3 text-right text-base text-amber-300 font-extrabold">
+                      {concreteSummary.grandTotalConcreteM3.toFixed(2)} m³
+                    </td>
+                    <td className="p-3 text-center font-extrabold text-amber-300">100.0%</td>
+                    <td className="p-3 text-right font-mono">{concreteSummary.totalFormworkM2.toFixed(1)} m²</td>
+                    <td className="p-3 text-right font-mono text-amber-300 font-bold">{concreteSummary.totalCementBags}</td>
+                    <td className="p-3 text-right font-mono">{concreteSummary.totalSandM3.toFixed(1)}</td>
+                    <td className="p-3 text-right font-mono">{concreteSummary.totalAggregateM3.toFixed(1)}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-          </div>
+          )}
+
+          {/* VIEW 2: FLOOR-BY-FLOOR DISTRIBUTION */}
+          {concreteViewMode === 'BY_FLOOR' && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left font-mono text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-800 border-b border-ui-border font-bold">
+                    <th className="p-3">FLOOR LEVEL</th>
+                    <th className="p-3 text-right">ELEVATION (Y)</th>
+                    <th className="p-3 text-right">COLUMNS (m³)</th>
+                    <th className="p-3 text-right">BEAMS (m³)</th>
+                    <th className="p-3 text-right">SLABS (m³)</th>
+                    <th className="p-3 text-right">SHEAR WALLS (m³)</th>
+                    <th className="p-3 text-right">FOUNDATIONS (m³)</th>
+                    <th className="p-3 text-right text-sky-800 font-bold">TOTAL LEVEL VOL (m³)</th>
+                    <th className="p-3 text-right">FORMWORK (m²)</th>
+                    <th className="p-3 text-right">CEMENT (Bags)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ui-border text-slate-700">
+                  {concreteSummary.floorBreakdown.map((f, idx) => (
+                    <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
+                      <td className="p-3 font-bold text-slate-900">
+                        {f.levelName} {f.isFoundation && <span className="text-[10px] text-amber-700 bg-amber-50 px-1 py-0.2 rounded border border-amber-200 ml-1">Foundation</span>}
+                      </td>
+                      <td className="p-3 text-right font-mono text-slate-600">+{f.elevationY.toFixed(2)} m</td>
+                      <td className="p-3 text-right font-mono">{f.columnsConcreteM3 > 0 ? f.columnsConcreteM3.toFixed(2) : '—'}</td>
+                      <td className="p-3 text-right font-mono">{f.beamsConcreteM3 > 0 ? f.beamsConcreteM3.toFixed(2) : '—'}</td>
+                      <td className="p-3 text-right font-mono">{f.slabsConcreteM3 > 0 ? f.slabsConcreteM3.toFixed(2) : '—'}</td>
+                      <td className="p-3 text-right font-mono">{f.shearWallsConcreteM3 > 0 ? f.shearWallsConcreteM3.toFixed(2) : '—'}</td>
+                      <td className="p-3 text-right font-mono">{f.foundationConcreteM3 > 0 ? f.foundationConcreteM3.toFixed(2) : '—'}</td>
+                      <td className="p-3 text-right font-mono font-bold text-sky-700">{f.totalFloorConcreteM3.toFixed(2)} m³</td>
+                      <td className="p-3 text-right font-mono">{f.totalFormworkM2.toFixed(1)}</td>
+                      <td className="p-3 text-right font-mono font-bold text-indigo-800">{f.totalCementBags}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* VIEW 3: ITEMIZED MEMBERS */}
+          {concreteViewMode === 'ITEMIZED' && (
+            <div className="p-4 space-y-4 max-h-96 overflow-y-auto font-mono text-xs">
+              {concreteSummary.components.map((comp) => (
+                <div key={comp.id} className="bg-slate-50 rounded border border-slate-200 p-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                    <span className="font-bold text-slate-900">{comp.component} ({comp.count} Members)</span>
+                    <span className="font-bold text-sky-700">{comp.concreteM3.toFixed(2)} m³ ({comp.percentageShare}%)</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
+                    {comp.itemizedMembers?.map((item: any, i: number) => (
+                      <div key={i} className="bg-white p-2 rounded border border-slate-200 flex items-center justify-between">
+                        <div>
+                          <span className="font-semibold text-slate-800 block">{item.label}</span>
+                          <span className="text-[10px] text-slate-500">{item.dimensions}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-bold text-sky-700 block">{item.volumeM3} m³</span>
+                          <span className="text-[10px] text-slate-400">{item.formworkM2} m² form</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Live Diameter-Wise Reinforcement Weight Schedule Table (kg & MT) */}
@@ -447,7 +846,7 @@ export const ReportsView: React.FC = () => {
                 <span className="w-6 h-6 rounded bg-slate-200 text-slate-700 flex items-center justify-center font-bold">1</span>
                 <div>
                   <span className="font-bold text-slate-800">Executive Summary &amp; Material Take-Off (BOQ)</span>
-                  <p className="text-[11px] text-slate-500 font-sans">Concrete volumes, steel tonnage, design parameters, and steel intensity index</p>
+                  <p className="text-[11px] text-slate-500 font-sans">Concrete volumes for every structure part, steel tonnage, design parameters, and intensity</p>
                 </div>
               </div>
               <span className="text-slate-400">Page 1</span>
