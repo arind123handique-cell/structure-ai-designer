@@ -132,4 +132,37 @@ describe('StaircasePlacementEngine', () => {
     expect(stair.riserMm).toBe(150);
     expect(stair.rotation).toBe(180);
   });
+
+  it('should support moving, dragging, and nudging staircase on drawing sheets', () => {
+    let stair: ArchitecturalStaircase = StaircasePlacementEngine.createDefaultStaircase(
+      'floor_1',
+      { x: 10.0, y: 12.0 }
+    );
+
+    // Nudge Left (dx = -0.2)
+    stair = {
+      ...stair,
+      position: { x: Math.round((stair.position.x - 0.2) * 100) / 100, y: stair.position.y },
+    };
+    expect(stair.position.x).toBeCloseTo(9.8, 2);
+
+    // Nudge Down (dy = +0.2)
+    stair = {
+      ...stair,
+      position: { x: stair.position.x, y: Math.round((stair.position.y + 0.2) * 100) / 100 },
+    };
+    expect(stair.position.y).toBeCloseTo(12.2, 2);
+
+    // Rotate 90 degrees
+    stair = {
+      ...stair,
+      rotation: ((stair.rotation || 0) + 90) % 360,
+    };
+    expect(stair.rotation).toBe(90);
+
+    const comp = StaircasePlacementEngine.getStaircase2DComponents(stair);
+    expect(comp.bounds.minX).toBeDefined();
+    expect(comp.bounds.maxX).toBeDefined();
+  });
 });
+

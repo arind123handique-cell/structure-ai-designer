@@ -17,6 +17,15 @@ import {
   ArrowRight,
   Sparkles,
   FileSpreadsheet,
+  Footprints,
+  Move,
+  RotateCw,
+  ChevronUp,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  PlusCircle,
+  ExternalLink,
 } from 'lucide-react';
 
 export const FloorPlanViewer: React.FC = () => {
@@ -28,6 +37,12 @@ export const FloorPlanViewer: React.FC = () => {
     customPileCapOverrides,
     manualMergedPileCapGroups,
     detachedCombinedCapNodeIds,
+    architecturalStaircases,
+    updateStaircase,
+    addStaircase,
+    customStaircaseGeometry,
+    customStaircaseLandingEntry,
+    setActiveView,
   } = useProjectStore();
 
   // Extract all floor plans from the model
@@ -57,11 +72,65 @@ export const FloorPlanViewer: React.FC = () => {
   const [showSlabs, setShowSlabs] = useState(true);
   const [showPileCaps, setShowPileCaps] = useState(true);
   const [showGradeBeams, setShowGradeBeams] = useState(true);
+  const [showStaircases, setShowStaircases] = useState(true);
   const [showLiftCore] = useState(false); // hidden per user request — lift core tw=230 not shown in 2D plan
   const [selectedSectionType, setSelectedSectionType] = useState<string>('ALL');
   const [pileCapDisplayMode, setPileCapDisplayMode] = useState<'BOTH' | 'PLAN' | 'SECTION'>('BOTH');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [pdfSuccessMessage, setPdfSuccessMessage] = useState<string | null>(null);
+
+  // Active floor staircase helper
+  const activeFloorId = `floor_${activePlan?.levelIndex || 0}`;
+  const activeLevelStaircases = useMemo(() => {
+    const all = Object.values(architecturalStaircases || {});
+    const match = all.filter((s) => s.floorId === activeFloorId);
+    if (match.length > 0) return match;
+    if (activePlan && !activePlan.isFoundationLevel && all.length > 0) return all;
+    return [];
+  }, [architecturalStaircases, activeFloorId, activePlan]);
+
+  const selectedStair = activeLevelStaircases[0] || null;
+
+  // Add / Place Staircase on active level
+  const handleAddStaircaseToLevel = () => {
+    if (!activePlan) return;
+    const geom = customStaircaseGeometry || {};
+    const entry = customStaircaseLandingEntry || {};
+    const centerX = (activePlan.bounds.minX + activePlan.bounds.maxX) / 2 - 2.4;
+    const centerZ = (activePlan.bounds.minZ + activePlan.bounds.maxZ) / 2 - 1.2;
+
+    const newStair: any = {
+      id: `STAIR-${Date.now().toString(36).substr(-4).toUpperCase()}`,
+      floorId: activeFloorId,
+      name: `Staircase FL-${(activePlan.levelIndex || 0) + 1}`,
+      position: { x: Math.round(centerX * 10) / 10, y: Math.round(centerZ * 10) / 10 },
+      rotation: 0,
+      staircaseType: 'DOG_LEGGED',
+      roomLength: geom.roomLength || 4.8,
+      roomWidth: geom.roomWidth || 2.4,
+      flightWidth: geom.flightWidth || 1.1,
+      wellGap: geom.wellGap || 0.2,
+      landingDepth: geom.landingDepth || 1.2,
+      treadMm: geom.treadMm || 275,
+      riserMm: geom.riserMm || 160,
+      riserCount: geom.riserCount || 10,
+      treadCount: geom.treadCount || 9,
+      waistThicknessMm: geom.waistThicknessMm || 160,
+      wallThicknessMm: geom.wallThicknessMm || 230,
+      hasEnclosureWalls: true,
+      hasLeftDoor: entry.hasLeftDoor !== undefined ? entry.hasLeftDoor : true,
+      leftDoorWidth: entry.leftDoorWidth || 1.0,
+      hasRightDoor: entry.hasRightDoor !== undefined ? entry.hasRightDoor : true,
+      rightDoorWidth: entry.rightDoorWidth || 1.0,
+      hasFrontDoor: entry.hasFrontDoor !== undefined ? entry.hasFrontDoor : true,
+      frontDoorWidth: entry.frontDoorWidth || 1.2,
+      direction: 'UP',
+      startElevation: activePlan.elevationY,
+      endElevation: activePlan.elevationY + 3.2,
+    };
+
+    addStaircase(newStair);
+  };
 
   if (!activeModel || floorPlans.length === 0) {
     return (
@@ -327,6 +396,19 @@ export const FloorPlanViewer: React.FC = () => {
               <span>Floor Slabs</span>
             </label>
 
+            <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 hover:text-slate-900 font-bold text-amber-700">
+              <input
+                type="checkbox"
+                checked={showStaircases}
+                onChange={(e) => setShowStaircases(e.target.checked)}
+                className="rounded text-amber-600 focus:ring-amber-600"
+              />
+              <span className="flex items-center gap-1">
+                <Footprints className="w-3.5 h-3.5 text-amber-600" />
+                Staircases (Moveable)
+              </span>
+            </label>
+
             {activePlan.isFoundationLevel && (
               <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 hover:text-slate-900">
                 <input
@@ -465,6 +547,127 @@ export const FloorPlanViewer: React.FC = () => {
         </div>
       )}
 
+      {/* Staircase Moving & Positioning Toolbar on the Drawing */}
+      {showStaircases && (
+        <div className="bg-surface-card p-3 rounded-lg border border-amber-300/80 shadow-2xs flex flex-wrap items-center justify-between gap-3 font-mono text-xs">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-amber-500/20 text-amber-600 rounded">
+              <Move className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                Staircase Moving &amp; Placement on Drawing
+              </span>
+              <span className="text-[11px] text-slate-500 block">
+                {selectedStair
+                  ? `Position: X = ${selectedStair.position.x.toFixed(2)} m, Z = ${selectedStair.position.y.toFixed(2)} m | Rotation = ${selectedStair.rotation || 0}° (Drag staircase directly on plan to move)`
+                  : 'No staircase currently placed on this floor framing level.'}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {selectedStair ? (
+              <>
+                {/* Nudge Controls */}
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded border border-slate-300">
+                  <span className="text-[10px] text-slate-500 font-bold px-1 uppercase">Nudge:</span>
+                  <button
+                    onClick={() =>
+                      updateStaircase(selectedStair.id, {
+                        position: { x: selectedStair.position.x, y: Math.round((selectedStair.position.y - 0.2) * 20) / 20 },
+                      })
+                    }
+                    className="p-1 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded shadow-2xs"
+                    title="Nudge Up (Z - 0.2m)"
+                  >
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() =>
+                      updateStaircase(selectedStair.id, {
+                        position: { x: selectedStair.position.x, y: Math.round((selectedStair.position.y + 0.2) * 20) / 20 },
+                      })
+                    }
+                    className="p-1 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded shadow-2xs"
+                    title="Nudge Down (Z + 0.2m)"
+                  >
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() =>
+                      updateStaircase(selectedStair.id, {
+                        position: { x: Math.round((selectedStair.position.x - 0.2) * 20) / 20, y: selectedStair.position.y },
+                      })
+                    }
+                    className="p-1 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded shadow-2xs"
+                    title="Nudge Left (X - 0.2m)"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() =>
+                      updateStaircase(selectedStair.id, {
+                        position: { x: Math.round((selectedStair.position.x + 0.2) * 20) / 20, y: selectedStair.position.y },
+                      })
+                    }
+                    className="p-1 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded shadow-2xs"
+                    title="Nudge Right (X + 0.2m)"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* Rotate 90 deg */}
+                <button
+                  onClick={() =>
+                    updateStaircase(selectedStair.id, {
+                      rotation: ((selectedStair.rotation || 0) + 90) % 360,
+                    })
+                  }
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded shadow-2xs transition-colors text-xs"
+                  title="Rotate Staircase 90° Clockwise"
+                >
+                  <RotateCw className="w-3.5 h-3.5" />
+                  <span>Rotate 90°</span>
+                </button>
+
+                {/* Center Staircase on Floor */}
+                <button
+                  onClick={() => {
+                    const cx = (activePlan.bounds.minX + activePlan.bounds.maxX) / 2 - 2.4;
+                    const cz = (activePlan.bounds.minZ + activePlan.bounds.maxZ) / 2 - 1.2;
+                    updateStaircase(selectedStair.id, {
+                      position: { x: Math.round(cx * 10) / 10, y: Math.round(cz * 10) / 10 },
+                    });
+                  }}
+                  className="px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded shadow-2xs text-xs font-semibold"
+                >
+                  Center on Plan
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={handleAddStaircaseToLevel}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded shadow-2xs text-xs"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                <span>Place Designed Staircase on this Level</span>
+              </button>
+            )}
+
+            {/* Jump to Staircase IS 456 Designer */}
+            <button
+              onClick={() => setActiveView('staircase-design')}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded text-xs font-semibold"
+            >
+              <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
+              <span>IS 456 Calc Sheet</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main 2D CAD SVG Canvas Plan */}
       <div className="w-full flex justify-center">
         <FloorPlanSvg
@@ -478,6 +681,9 @@ export const FloorPlanViewer: React.FC = () => {
           showPileCaps={showPileCaps}
           showGradeBeams={showGradeBeams}
           showLiftCore={showLiftCore}
+          showStaircases={showStaircases}
+          staircases={architecturalStaircases}
+          onUpdateStaircase={updateStaircase}
           pileCapDisplayMode={pileCapDisplayMode}
           selectedSectionType={selectedSectionType}
           onSelectSection={setSelectedSectionType}

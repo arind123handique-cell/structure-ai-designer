@@ -1343,15 +1343,23 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     });
   };
 
-  // Keyboard Shortcuts
+  // Keyboard Shortcuts & Arrow Key Nudge Moving
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Prevent scrolling if manipulating canvas elements
+      if (
+        ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space'].includes(e.key) &&
+        (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'SELECT')
+      ) {
+        e.preventDefault();
+      }
+
       if (e.key === 'Escape') {
         setDrawStartPoint(null);
         setMeasureStart(null);
         onSelectElement(null);
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedId) {
+        if (selectedId && (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'SELECT')) {
           onDeleteSelected();
         }
       } else if (e.ctrlKey && e.key.toLowerCase() === 'z') {
@@ -1360,12 +1368,42 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       } else if (e.ctrlKey && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         onRedo();
+      } else if (
+        selectedId &&
+        staircases[selectedId] &&
+        onUpdateStaircase &&
+        (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'SELECT')
+      ) {
+        const stair = staircases[selectedId];
+        const delta = e.shiftKey ? 0.5 : 0.1;
+
+        if (e.key === 'ArrowLeft') {
+          onUpdateStaircase(selectedId, {
+            position: { x: Math.round((stair.position.x - delta) * 100) / 100, y: stair.position.y },
+          });
+        } else if (e.key === 'ArrowRight') {
+          onUpdateStaircase(selectedId, {
+            position: { x: Math.round((stair.position.x + delta) * 100) / 100, y: stair.position.y },
+          });
+        } else if (e.key === 'ArrowUp') {
+          onUpdateStaircase(selectedId, {
+            position: { x: stair.position.x, y: Math.round((stair.position.y - delta) * 100) / 100 },
+          });
+        } else if (e.key === 'ArrowDown') {
+          onUpdateStaircase(selectedId, {
+            position: { x: stair.position.x, y: Math.round((stair.position.y + delta) * 100) / 100 },
+          });
+        } else if (e.key.toLowerCase() === 'r') {
+          onUpdateStaircase(selectedId, {
+            rotation: ((stair.rotation || 0) + 90) % 360,
+          });
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedId, onDeleteSelected, onUndo, onRedo]);
+  }, [selectedId, staircases, onUpdateStaircase, onDeleteSelected, onUndo, onRedo]);
 
   return (
     <div ref={containerRef} className="flex-1 h-full w-full relative overflow-hidden select-none">

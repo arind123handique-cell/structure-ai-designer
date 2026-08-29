@@ -3,6 +3,9 @@ import { FloorPlanLevel, FloorColumnInfo } from './floorPlanEngine';
 import { StoredProject } from '@/features/projects/types';
 import { PileCapDesignOutput } from '@/features/design/pilecap/pileCapDesignEngine';
 import { CombinedPileCapGroup } from '@/features/design/pilecap/combinedPileCapEngine';
+import { ArchitecturalStaircase } from '@/features/architectural/types/architecturalTypes';
+import { StaircasePlacementEngine } from '@/features/architectural/engines/staircasePlacementEngine';
+import { Footprints, Move, RotateCw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface FloorPlanSvgProps {
   floorPlan: FloorPlanLevel;
@@ -17,6 +20,11 @@ interface FloorPlanSvgProps {
   showPileCaps?: boolean;
   showGradeBeams?: boolean;
   showLiftCore?: boolean;
+  showStaircases?: boolean;
+  staircases?: Record<string, ArchitecturalStaircase>;
+  onUpdateStaircase?: (id: string, updates: Partial<ArchitecturalStaircase>) => void;
+  selectedStaircaseId?: string | null;
+  onSelectStaircase?: (id: string | null) => void;
   pileCapDisplayMode?: 'BOTH' | 'PLAN' | 'SECTION';
   selectedSectionType?: string;
   onSelectSection?: (sectionId: string) => void;
@@ -54,6 +62,11 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
   showPileCaps = true,
   showGradeBeams = true,
   showLiftCore = false,
+  showStaircases = true,
+  staircases = {},
+  onUpdateStaircase,
+  selectedStaircaseId = null,
+  onSelectStaircase,
   pileCapDisplayMode = 'BOTH',
   selectedSectionType = 'ALL',
   onSelectSection,
@@ -63,6 +76,34 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
   const modelH = Math.max(bounds.height, 10);
 
   const isFoundation = floorPlan.isFoundationLevel;
+
+  // Staircase Interactive Moving State
+  const [draggingStairId, setDraggingStairId] = useState<string | null>(null);
+  const [dragStartPos, setDragStartPos] = useState<{
+    mouseX: number;
+    mouseY: number;
+    stairX: number;
+    stairY: number;
+  } | null>(null);
+  const [hoveredStairId, setHoveredStairId] = useState<string | null>(null);
+  const [internalSelectedStairId, setInternalSelectedStairId] = useState<string | null>(null);
+
+  const activeSelectedStairId = selectedStaircaseId !== undefined && selectedStaircaseId !== null
+    ? selectedStaircaseId
+    : internalSelectedStairId;
+
+  // Active Floor Staircases
+  const activeFloorId = `floor_${floorPlan.levelIndex}`;
+  const levelStaircases = useMemo(() => {
+    const allStairs = Object.values(staircases || {});
+    const filtered = allStairs.filter((s) => s.floorId === activeFloorId);
+    if (filtered.length > 0) return filtered;
+    // Fallback: if no specific stair for this floor, show stairs defined on floor 0 / 1 on superstructures
+    if (!isFoundation && allStairs.length > 0) {
+      return allStairs;
+    }
+    return [];
+  }, [staircases, activeFloorId, isFoundation]);
 
   // Viewport for Layout Plan
   const drawX0 = isFoundation ? 60 : 100;
@@ -80,6 +121,23 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
 
   const toSvgX = (x: number) => planCenterX + (x - modelCenterX) * scale;
   const toSvgY = (z: number) => planCenterY + (z - modelCenterZ) * scale;
+  const toWorldX = (svgX: number) => modelCenterX + (svgX - planCenterX) / scale;
+  const toWorldZ = (svgY: number) => modelCenterZ + (svgY - planCenterY) / scale;
+
+  // Nudge movement handler
+  const handleNudgeStaircase = (stair: ArchitecturalStaircase, dx: number, dz: number) => {
+    if (!onUpdateStaircase) return;
+    const newX = Math.round((stair.position.x + dx) * 20) / 20;
+    const newY = Math.round((stair.position.y + dz) * 20) / 20;
+    onUpdateStaircase(stair.id, { position: { x: newX, y: newY } });
+  };
+
+  // Rotate staircase handler
+  const handleRotateStaircase = (stair: ArchitecturalStaircase) => {
+    if (!onUpdateStaircase) return;
+    const newRot = ((stair.rotation || 0) + 90) % 360;
+    onUpdateStaircase(stair.id, { rotation: newRot });
+  };
 
   // Extract pile cap types present in the building model + combined/shear wall caps
   const uniquePileCapTypes: UniquePileCapType[] = useMemo(() => {
@@ -328,7 +386,29 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
         </div>
       </div>
 
-      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="select-none text-xs">
+      <svg
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        className="select-none text-xs"
+        onMouseMove={(e) => {
+          if (draggingStairId && dragStartPos && onUpdateStaircase) {
+            const dx = (e.clientX - dragStartPos.mouseX) / scale;
+            const dz = (e.clientY - dragStartPos.mouseY) / scale;
+            const newX = Math.round((dragStartPos.stairX + dx) * 20) / 20;
+            const newZ = Math.round((dragStartPos.stairY + dz) * 20) / 20;
+            onUpdateStaircase(draggingStairId, { position: { x: newX, y: newZ } });
+          }
+        }}
+        onMouseUp={() => {
+          setDraggingStairId(null);
+          setDragStartPos(null);
+        }}
+        onMouseLeave={() => {
+          setDraggingStairId(null);
+          setDragStartPos(null);
+        }}
+      >
         {/* SVG Arrowhead & Marker Definitions */}
         <defs>
           <marker id="arrow-dim" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -1159,6 +1239,341 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
             );
           })}
         </g>
+
+        {/* 6.5. RCC STAIRCASE FRAMING & PARAMETRIC IN-DRAWING MOVING / DRAGGING LAYER */}
+        {showStaircases && (
+          <g id="staircases_layer">
+            {levelStaircases.map((stair) => {
+              const comp = StaircasePlacementEngine.getStaircase2DComponents(stair);
+              const isHovered = hoveredStairId === stair.id;
+              const isSelected = activeSelectedStairId === stair.id;
+              const isDragging = draggingStairId === stair.id;
+
+              const polyToSvgPoints = (poly: { x: number; y: number }[]) =>
+                poly.map((p) => `${toSvgX(p.x)},${toSvgY(p.y)}`).join(' ');
+
+              const centerSvgX = toSvgX(comp.center.x);
+              const centerSvgY = toSvgY(comp.center.y);
+
+              return (
+                <g
+                  key={`stair_dwg_${stair.id}`}
+                  style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+                  onMouseEnter={() => setHoveredStairId(stair.id)}
+                  onMouseLeave={() => setHoveredStairId(null)}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    setDraggingStairId(stair.id);
+                    setInternalSelectedStairId(stair.id);
+                    onSelectStaircase?.(stair.id);
+                    setDragStartPos({
+                      mouseX: e.clientX,
+                      mouseY: e.clientY,
+                      stairX: stair.position.x,
+                      stairY: stair.position.y,
+                    });
+                  }}
+                >
+                  {/* Outer Enclosure Wall */}
+                  {stair.hasEnclosureWalls && comp.enclosurePolygon.length > 0 && (
+                    <polygon
+                      points={polyToSvgPoints(comp.enclosurePolygon)}
+                      fill="#090d16"
+                      stroke={isSelected ? '#f59e0b' : isHovered ? '#fbbf24' : '#475569'}
+                      strokeWidth={isSelected ? '2' : '1.5'}
+                      strokeLinejoin="round"
+                    />
+                  )}
+
+                  {/* Floor Landing & Mid-Landing */}
+                  {comp.floorLandingPolygon.length > 0 && (
+                    <polygon
+                      points={polyToSvgPoints(comp.floorLandingPolygon)}
+                      fill="#312e81"
+                      fillOpacity="0.5"
+                      stroke="#818cf8"
+                      strokeWidth="1"
+                    />
+                  )}
+
+                  {comp.midLandingPolygon.length > 0 && (
+                    <polygon
+                      points={polyToSvgPoints(comp.midLandingPolygon)}
+                      fill="#064e3b"
+                      fillOpacity="0.5"
+                      stroke="#34d399"
+                      strokeWidth="1"
+                    />
+                  )}
+
+                  {/* Flights */}
+                  {comp.flight1Polygon.length > 0 && (
+                    <polygon
+                      points={polyToSvgPoints(comp.flight1Polygon)}
+                      fill="#082f49"
+                      fillOpacity="0.4"
+                      stroke="#0284c7"
+                      strokeWidth="0.8"
+                    />
+                  )}
+
+                  {comp.flight2Polygon.length > 0 && (
+                    <polygon
+                      points={polyToSvgPoints(comp.flight2Polygon)}
+                      fill="#082f49"
+                      fillOpacity="0.4"
+                      stroke="#0284c7"
+                      strokeWidth="0.8"
+                    />
+                  )}
+
+                  {/* Central Well Gap */}
+                  {comp.wellGapPolygon.length > 0 && (
+                    <polygon
+                      points={polyToSvgPoints(comp.wellGapPolygon)}
+                      fill="#020617"
+                      stroke="#64748b"
+                      strokeWidth="0.8"
+                      strokeDasharray="3,3"
+                    />
+                  )}
+
+                  {/* Tread Lines */}
+                  {comp.flight1TreadLines.map((t, idx) => (
+                    <line
+                      key={`f1_t_${idx}`}
+                      x1={toSvgX(t.start.x)}
+                      y1={toSvgY(t.start.y)}
+                      x2={toSvgX(t.end.x)}
+                      y2={toSvgY(t.end.y)}
+                      stroke="#38bdf8"
+                      strokeWidth="0.8"
+                    />
+                  ))}
+
+                  {comp.flight2TreadLines.map((t, idx) => (
+                    <line
+                      key={`f2_t_${idx}`}
+                      x1={toSvgX(t.start.x)}
+                      y1={toSvgY(t.start.y)}
+                      x2={toSvgX(t.end.x)}
+                      y2={toSvgY(t.end.y)}
+                      stroke="#38bdf8"
+                      strokeWidth="0.8"
+                    />
+                  ))}
+
+                  {/* Direction Arrows */}
+                  <line
+                    x1={toSvgX(comp.flight1Arrow.start.x)}
+                    y1={toSvgY(comp.flight1Arrow.start.y)}
+                    x2={toSvgX(comp.flight1Arrow.end.x)}
+                    y2={toSvgY(comp.flight1Arrow.end.y)}
+                    stroke="#10b981"
+                    strokeWidth="1.6"
+                    markerEnd="url(#arrow-green)"
+                  />
+                  <line
+                    x1={toSvgX(comp.flight2Arrow.start.x)}
+                    y1={toSvgY(comp.flight2Arrow.start.y)}
+                    x2={toSvgX(comp.flight2Arrow.end.x)}
+                    y2={toSvgY(comp.flight2Arrow.end.y)}
+                    stroke="#10b981"
+                    strokeWidth="1.6"
+                    markerEnd="url(#arrow-green)"
+                  />
+
+                  {/* Landing Entry Doors */}
+                  {comp.leftDoor && (
+                    <g>
+                      <line
+                        x1={toSvgX(comp.leftDoor.opening.start.x)}
+                        y1={toSvgY(comp.leftDoor.opening.start.y)}
+                        x2={toSvgX(comp.leftDoor.opening.end.x)}
+                        y2={toSvgY(comp.leftDoor.opening.end.y)}
+                        stroke="#020617"
+                        strokeWidth="2.5"
+                      />
+                      <line
+                        x1={toSvgX(comp.leftDoor.leaf.start.x)}
+                        y1={toSvgY(comp.leftDoor.leaf.start.y)}
+                        x2={toSvgX(comp.leftDoor.leaf.end.x)}
+                        y2={toSvgY(comp.leftDoor.leaf.end.y)}
+                        stroke="#f59e0b"
+                        strokeWidth="1.2"
+                      />
+                    </g>
+                  )}
+
+                  {comp.rightDoor && (
+                    <g>
+                      <line
+                        x1={toSvgX(comp.rightDoor.opening.start.x)}
+                        y1={toSvgY(comp.rightDoor.opening.start.y)}
+                        x2={toSvgX(comp.rightDoor.opening.end.x)}
+                        y2={toSvgY(comp.rightDoor.opening.end.y)}
+                        stroke="#020617"
+                        strokeWidth="2.5"
+                      />
+                      <line
+                        x1={toSvgX(comp.rightDoor.leaf.start.x)}
+                        y1={toSvgY(comp.rightDoor.leaf.start.y)}
+                        x2={toSvgX(comp.rightDoor.leaf.end.x)}
+                        y2={toSvgY(comp.rightDoor.leaf.end.y)}
+                        stroke="#f59e0b"
+                        strokeWidth="1.2"
+                      />
+                    </g>
+                  )}
+
+                  {/* Title & Dimension Text */}
+                  <text
+                    x={centerSvgX}
+                    y={centerSvgY - 4}
+                    fill="#fef08a"
+                    fontSize="7.5"
+                    fontWeight="bold"
+                    textAnchor="middle"
+                  >
+                    {stair.name || 'RCC STAIRCASE'}
+                  </text>
+                  <text
+                    x={centerSvgX}
+                    y={centerSvgY + 6}
+                    fill="#93c5fd"
+                    fontSize="6.5"
+                    textAnchor="middle"
+                  >
+                    {`${stair.roomLength}m × ${stair.roomWidth}m (${stair.treadMm}T / ${stair.riserMm}R)`}
+                  </text>
+
+                  {/* Selection & Moving UI Overlay */}
+                  {(isSelected || isHovered || isDragging) && (
+                    <g>
+                      {/* Bounding Highlight Rectangle */}
+                      <rect
+                        x={toSvgX(comp.bounds.minX) - 3}
+                        y={toSvgY(comp.bounds.minY) - 3}
+                        width={Math.abs(toSvgX(comp.bounds.maxX) - toSvgX(comp.bounds.minX)) + 6}
+                        height={Math.abs(toSvgY(comp.bounds.maxY) - toSvgY(comp.bounds.minY)) + 6}
+                        fill="none"
+                        stroke="#f59e0b"
+                        strokeWidth="1.5"
+                        strokeDasharray="4,4"
+                        rx="3"
+                      />
+
+                      {/* Moving Coordinates Badge */}
+                      <g transform={`translate(${centerSvgX}, ${toSvgY(comp.bounds.minY) - 18})`}>
+                        <rect
+                          x="-80"
+                          y="0"
+                          width="160"
+                          height="15"
+                          fill="#0f172a"
+                          fillOpacity="0.95"
+                          stroke="#f59e0b"
+                          strokeWidth="0.8"
+                          rx="3"
+                        />
+                        <text
+                          x="0"
+                          y="10.5"
+                          fill="#fbbf24"
+                          fontSize="7"
+                          fontWeight="bold"
+                          textAnchor="middle"
+                        >
+                          {isDragging ? 'DRAGGING STAIR...' : `MOVE: X=${stair.position.x.toFixed(1)}m, Z=${stair.position.y.toFixed(1)}m`}
+                        </text>
+                      </g>
+
+                      {/* In-Drawing Nudge Movement Buttons */}
+                      {isSelected && onUpdateStaircase && (
+                        <g transform={`translate(${toSvgX(comp.bounds.maxX) + 8}, ${centerSvgY - 32})`}>
+                          {/* Background Pill */}
+                          <rect
+                            x="0"
+                            y="0"
+                            width="58"
+                            height="64"
+                            fill="#020617"
+                            fillOpacity="0.9"
+                            stroke="#f59e0b"
+                            strokeWidth="1"
+                            rx="4"
+                          />
+
+                          {/* Up Button */}
+                          <g
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleNudgeStaircase(stair, 0, -0.2);
+                            }}
+                            className="cursor-pointer hover:opacity-75"
+                          >
+                            <rect x="20" y="4" width="18" height="14" fill="#1e293b" stroke="#475569" rx="2" />
+                            <text x="29" y="14" fill="#38bdf8" fontSize="8" fontWeight="bold" textAnchor="middle">▲</text>
+                          </g>
+
+                          {/* Left Button */}
+                          <g
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleNudgeStaircase(stair, -0.2, 0);
+                            }}
+                            className="cursor-pointer hover:opacity-75"
+                          >
+                            <rect x="3" y="22" width="18" height="14" fill="#1e293b" stroke="#475569" rx="2" />
+                            <text x="12" y="32" fill="#38bdf8" fontSize="8" fontWeight="bold" textAnchor="middle">◀</text>
+                          </g>
+
+                          {/* Right Button */}
+                          <g
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleNudgeStaircase(stair, 0.2, 0);
+                            }}
+                            className="cursor-pointer hover:opacity-75"
+                          >
+                            <rect x="37" y="22" width="18" height="14" fill="#1e293b" stroke="#475569" rx="2" />
+                            <text x="46" y="32" fill="#38bdf8" fontSize="8" fontWeight="bold" textAnchor="middle">▶</text>
+                          </g>
+
+                          {/* Down Button */}
+                          <g
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleNudgeStaircase(stair, 0, 0.2);
+                            }}
+                            className="cursor-pointer hover:opacity-75"
+                          >
+                            <rect x="20" y="22" width="18" height="14" fill="#1e293b" stroke="#475569" rx="2" />
+                            <text x="29" y="32" fill="#38bdf8" fontSize="8" fontWeight="bold" textAnchor="middle">▼</text>
+                          </g>
+
+                          {/* Rotate 90 deg Button */}
+                          <g
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRotateStaircase(stair);
+                            }}
+                            className="cursor-pointer hover:opacity-75"
+                          >
+                            <rect x="4" y="42" width="50" height="16" fill="#3b82f6" stroke="#60a5fa" rx="2" />
+                            <text x="29" y="53" fill="#ffffff" fontSize="7" fontWeight="bold" textAnchor="middle">
+                              ↻ ROT 90°
+                            </text>
+                          </g>
+                        </g>
+                      )}
+                    </g>
+                  )}
+                </g>
+              );
+            })}
+          </g>
+        )}
 
         {/* 7. Column Bay Dimension Chains */}
         {showDimensions && (

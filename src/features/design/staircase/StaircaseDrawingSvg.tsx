@@ -151,6 +151,38 @@ export const StaircaseDrawingSvg: React.FC<StaircaseDrawingSvgProps> = ({
           >
             <ZoomOut className="w-3.5 h-3.5" />
           </button>
+          {/* Move / Nudge controls */}
+          <div className="flex items-center gap-1 bg-slate-950 px-1 py-0.5 rounded border border-slate-800">
+            <button
+              onClick={() => setPan((p) => ({ ...p, x: p.x + 40 }))}
+              className="p-1 hover:bg-slate-800 text-slate-300 rounded text-[10px] font-bold"
+              title="Move Drawing Left"
+            >
+              ◀
+            </button>
+            <button
+              onClick={() => setPan((p) => ({ ...p, y: p.y + 40 }))}
+              className="p-1 hover:bg-slate-800 text-slate-300 rounded text-[10px] font-bold"
+              title="Move Drawing Up"
+            >
+              ▲
+            </button>
+            <button
+              onClick={() => setPan((p) => ({ ...p, y: p.y - 40 }))}
+              className="p-1 hover:bg-slate-800 text-slate-300 rounded text-[10px] font-bold"
+              title="Move Drawing Down"
+            >
+              ▼
+            </button>
+            <button
+              onClick={() => setPan((p) => ({ ...p, x: p.x - 40 }))}
+              className="p-1 hover:bg-slate-800 text-slate-300 rounded text-[10px] font-bold"
+              title="Move Drawing Right"
+            >
+              ▶
+            </button>
+          </div>
+
           <button
             onClick={handleResetView}
             className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition-colors"
