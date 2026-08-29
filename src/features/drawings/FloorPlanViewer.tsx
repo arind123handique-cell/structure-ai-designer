@@ -27,6 +27,7 @@ import {
   ChevronRight,
   PlusCircle,
   ExternalLink,
+  Trash2,
 } from 'lucide-react';
 
 export const FloorPlanViewer: React.FC = () => {
@@ -41,6 +42,9 @@ export const FloorPlanViewer: React.FC = () => {
     architecturalStaircases,
     updateStaircase,
     addStaircase,
+    deleteStaircase,
+    deleteStaircaseFromFloor,
+    restoreStaircaseForFloor,
     customStaircaseGeometry,
     customStaircaseLandingEntry,
     setActiveView,
@@ -84,10 +88,14 @@ export const FloorPlanViewer: React.FC = () => {
   const activeFloorId = `floor_${activePlan?.levelIndex || 0}`;
   const activeLevelStaircases = useMemo(() => {
     const all = Object.values(architecturalStaircases || {});
-    const match = all.filter((s) => s.floorId === activeFloorId);
-    if (match.length > 0) return match;
-    if (activePlan && !activePlan.isFoundationLevel && all.length > 0) return all;
-    return [];
+    return all.filter((s) => {
+      if (s.disabledFloorIds && s.disabledFloorIds.includes(activeFloorId)) {
+        return false;
+      }
+      if (s.floorId === activeFloorId) return true;
+      if (activePlan && !activePlan.isFoundationLevel && s.allFloors !== false) return true;
+      return false;
+    });
   }, [architecturalStaircases, activeFloorId, activePlan]);
 
   const selectedStair = activeLevelStaircases[0] || null;
@@ -651,10 +659,37 @@ export const FloorPlanViewer: React.FC = () => {
                 >
                   Center on Plan
                 </button>
+
+                {/* Delete Floorwise vs All Floors */}
+                <div className="flex items-center gap-1 border-l border-slate-700 pl-2">
+                  <button
+                    onClick={() => deleteStaircaseFromFloor(selectedStair.id, activeFloorId)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded shadow-2xs transition-colors text-xs"
+                    title={`Delete Staircase on ${activePlan.levelName} Only`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete on this Level</span>
+                  </button>
+                  <button
+                    onClick={() => deleteStaircase(selectedStair.id)}
+                    className="p-1.5 bg-slate-800 hover:bg-rose-950 text-rose-400 hover:text-rose-200 border border-rose-800/40 rounded shadow-2xs text-xs font-semibold"
+                    title="Delete Staircase from ALL Floors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </>
             ) : (
               <button
-                onClick={handleAddStaircaseToLevel}
+                onClick={() => {
+                  const allStairs = Object.values(architecturalStaircases || {});
+                  const disabledStair = allStairs.find((s) => s.disabledFloorIds?.includes(activeFloorId));
+                  if (disabledStair) {
+                    restoreStaircaseForFloor(disabledStair.id, activeFloorId);
+                  } else {
+                    handleAddStaircaseToLevel();
+                  }
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded shadow-2xs text-xs"
               >
                 <PlusCircle className="w-3.5 h-3.5" />

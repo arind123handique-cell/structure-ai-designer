@@ -211,6 +211,66 @@ describe('StaircasePlacementEngine', () => {
     expect(meshes.length).toBeGreaterThan(10); // 9 flight 1 steps + 9 flight 2 steps + landings + rails
     layer.dispose();
   });
+
+  it('should support floorwise staircase deletion and skip deleted storeys in 3D', () => {
+    const layer = new Architectural3DLayer();
+    // Create staircase disabled on floor_1 and floor_3
+    const stair = StaircasePlacementEngine.createDefaultStaircase('floor_0', { x: 4.0, y: 5.0 }, {
+      disabledFloorIds: ['floor_1', 'floor_3'],
+    });
+
+    layer.update(
+      {},
+      {},
+      {},
+      {},
+      {},
+      { [stair.id]: stair },
+      null,
+      {
+        showWalls: true,
+        showDoors: true,
+        showWindows: true,
+        showOpenings: true,
+        showRoomLabels: true,
+        showStaircases: true,
+      }
+    );
+
+    const group = layer.getGroup();
+    // 5 total storeys minus 2 disabled floors = 3 storeys rendered (Storey 1: EL 0, Storey 3: EL 6.4, Storey 5: EL 12.8)
+    expect(group.children.length).toBe(3);
+    expect(group.children[0].position.y).toBeCloseTo(0.0, 1);
+    expect(group.children[1].position.y).toBeCloseTo(6.4, 1);
+    expect(group.children[2].position.y).toBeCloseTo(12.8, 1);
+
+    layer.dispose();
+  });
+
+  it('should render 0 staircases in 3D when all staircases are deleted', () => {
+    const layer = new Architectural3DLayer();
+    layer.update(
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      null,
+      {
+        showWalls: true,
+        showDoors: true,
+        showWindows: true,
+        showOpenings: true,
+        showRoomLabels: true,
+        showStaircases: true,
+      }
+    );
+
+    const group = layer.getGroup();
+    expect(group.children.length).toBe(0);
+    layer.dispose();
+  });
 });
 
 

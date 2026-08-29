@@ -131,6 +131,8 @@ export interface ArchitecturalStaircase {
   direction: 'UP' | 'DOWN';
   startElevation: number; // Base floor elevation Y in meters
   endElevation: number; // Next diaphragm floor elevation Y in meters
+  disabledFloorIds?: string[]; // Floor IDs where staircase is deleted/disabled (e.g. ['floor_2'])
+  allFloors?: boolean; // Whether staircase continuous shaft spans across all storeys
   locked?: boolean;
   color?: string;
 }

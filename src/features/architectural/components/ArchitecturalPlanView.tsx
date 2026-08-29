@@ -62,6 +62,7 @@ export const ArchitecturalPlanView: React.FC = () => {
     addStaircase,
     updateStaircase,
     deleteStaircase,
+    deleteStaircaseFromFloor,
     setRoomsForFloor,
     addDimension,
     deleteDimension,
@@ -418,6 +419,8 @@ export const ArchitecturalPlanView: React.FC = () => {
             onDeleteRoom={deleteRoom}
             onUpdateStaircase={updateStaircase}
             onDeleteStaircase={deleteStaircase}
+            onDeleteStaircaseFromFloor={deleteStaircaseFromFloor}
+            activeFloorId={`floor_${activeFloorIndex}`}
             onDeleteDimension={deleteDimension}
             onOpenStaircaseDesigner={() => setActiveView('staircase-design')}
             onDeselect={() => selectArchitecturalElement(null)}

@@ -541,24 +541,8 @@ export class Architectural3DLayer {
     }
 
     // 2. Build 3D Parametric RCC Staircases Across All Building Storeys & Diaphragms
-    if (visibility.showStaircases) {
-      let stairsToRender = stairList;
-      if (stairsToRender.length === 0) {
-        // Auto-provide standard building staircase at core location so it renders immediately
-        stairsToRender = [
-          StaircasePlacementEngine.createDefaultStaircase(
-            'floor_0',
-            { x: 5.4, y: -4.3 },
-            {
-              roomWidth: 2.7,
-              roomLength: 4.3,
-              flightWidth: 1.2,
-              landingDepth: 1.2,
-              rotation: 0,
-            }
-          ),
-        ];
-      }
+    if (visibility.showStaircases && stairList.length > 0) {
+      const stairsToRender = stairList;
 
       const storeys: DiaphragmLevelInfo[] =
         visibility.diaphragmLevels && visibility.diaphragmLevels.length > 0
@@ -623,9 +607,21 @@ export class Architectural3DLayer {
         const numRisers = stair.riserCount || 10;
         const rotRad = -((stair.rotation || 0) * Math.PI) / 180;
 
-        // Render staircase continuously storey by storey across ALL floors
+        // Render staircase continuously storey by storey across ALL active floors
         for (let sIdx = 0; sIdx < storeys.length; sIdx++) {
           const storey = storeys[sIdx];
+
+          // Check if user deleted/disabled this staircase for this floor level
+          const floorId = `floor_${sIdx}`;
+          if (stair.disabledFloorIds && stair.disabledFloorIds.includes(floorId)) {
+            continue; // Skip rendering deleted floor
+          }
+
+          // If staircase is explicitly restricted to a single floor
+          if (stair.allFloors === false && stair.floorId !== floorId) {
+            continue;
+          }
+
           const stairGroup = new THREE.Group();
           const baseElevation = storey.bottomElevationY;
           stairGroup.position.set(stair.position.x, baseElevation, stair.position.y);

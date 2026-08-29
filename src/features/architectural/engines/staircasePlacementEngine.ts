@@ -124,6 +124,8 @@ export class StaircasePlacementEngine {
       direction: options?.direction || 'UP',
       startElevation: options?.startElevation || 0.0,
       endElevation: options?.endElevation || 3.2,
+      disabledFloorIds: options?.disabledFloorIds || [],
+      allFloors: options?.allFloors !== undefined ? options.allFloors : true,
       locked: false,
     };
   }

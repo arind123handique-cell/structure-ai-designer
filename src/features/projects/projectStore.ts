@@ -186,6 +186,8 @@ export interface ProjectState {
   addStaircase: (staircase: ArchitecturalStaircase) => Promise<void>;
   updateStaircase: (id: string, updates: Partial<ArchitecturalStaircase>) => Promise<void>;
   deleteStaircase: (id: string) => Promise<void>;
+  deleteStaircaseFromFloor: (stairId: string, floorId: string) => Promise<void>;
+  restoreStaircaseForFloor: (stairId: string, floorId: string) => Promise<void>;
   setRoomsForFloor: (floorId: string, rooms: ArchitecturalRoom[]) => Promise<void>;
   addDimension: (dim: ArchitecturalDimension) => Promise<void>;
   deleteDimension: (id: string) => Promise<void>;
@@ -1937,6 +1939,67 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({
       architecturalStaircases: currentStairs,
       selectedArchitecturalId: get().selectedArchitecturalId === id ? null : get().selectedArchitecturalId,
+    });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalStaircases: currentStairs,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  deleteStaircaseFromFloor: async (stairId: string, floorId: string) => {
+    const currentStairs = { ...(get().architecturalStaircases || {}) };
+    const stair = currentStairs[stairId];
+    if (!stair) return;
+
+    if (stair.floorId === floorId && stair.allFloors === false) {
+      delete currentStairs[stairId];
+    } else {
+      const disabled = new Set(stair.disabledFloorIds || []);
+      disabled.add(floorId);
+      currentStairs[stairId] = {
+        ...stair,
+        disabledFloorIds: Array.from(disabled),
+      };
+    }
+
+    pushArchUndo({ type: 'DELETE_STAIRCASE', staircase: stair });
+
+    const currentProj = get().activeProject;
+    set({
+      architecturalStaircases: currentStairs,
+    });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalStaircases: currentStairs,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  restoreStaircaseForFloor: async (stairId: string, floorId: string) => {
+    const currentStairs = { ...(get().architecturalStaircases || {}) };
+    const stair = currentStairs[stairId];
+    if (!stair) return;
+
+    const disabled = (stair.disabledFloorIds || []).filter((f) => f !== floorId);
+    currentStairs[stairId] = {
+      ...stair,
+      disabledFloorIds: disabled,
+    };
+
+    const currentProj = get().activeProject;
+    set({
+      architecturalStaircases: currentStairs,
     });
 
     if (currentProj) {

@@ -96,13 +96,19 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
   const activeFloorId = `floor_${floorPlan.levelIndex}`;
   const levelStaircases = useMemo(() => {
     const allStairs = Object.values(staircases || {});
-    const filtered = allStairs.filter((s) => s.floorId === activeFloorId);
-    if (filtered.length > 0) return filtered;
-    // Fallback: if no specific stair for this floor, show stairs defined on floor 0 / 1 on superstructures
-    if (!isFoundation && allStairs.length > 0) {
-      return allStairs;
-    }
-    return [];
+    return allStairs.filter((s) => {
+      // If staircase is explicitly disabled/deleted for this floor level, omit it
+      if (s.disabledFloorIds && s.disabledFloorIds.includes(activeFloorId)) {
+        return false;
+      }
+      // If stair specifically belongs to this floor
+      if (s.floorId === activeFloorId) return true;
+      // If building-wide staircase, show on all non-foundation floors
+      if (!isFoundation && s.allFloors !== false) {
+        return true;
+      }
+      return false;
+    });
   }, [staircases, activeFloorId, isFoundation]);
 
   // Viewport for Layout Plan

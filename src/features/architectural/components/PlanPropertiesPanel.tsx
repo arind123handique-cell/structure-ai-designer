@@ -52,6 +52,8 @@ interface PlanPropertiesPanelProps {
   onDeleteRoom: (id: string) => void;
   onUpdateStaircase?: (id: string, updates: Partial<ArchitecturalStaircase>) => void;
   onDeleteStaircase?: (id: string) => void;
+  onDeleteStaircaseFromFloor?: (stairId: string, floorId: string) => void;
+  activeFloorId?: string;
   onDeleteDimension: (id: string) => void;
   onOpenStaircaseDesigner?: () => void;
   onDeselect: () => void;
@@ -79,6 +81,8 @@ export const PlanPropertiesPanel: React.FC<PlanPropertiesPanelProps> = ({
   onDeleteRoom,
   onUpdateStaircase,
   onDeleteStaircase,
+  onDeleteStaircaseFromFloor,
+  activeFloorId,
   onDeleteDimension,
   onOpenStaircaseDesigner,
   onDeselect,
@@ -525,10 +529,20 @@ export const PlanPropertiesPanel: React.FC<PlanPropertiesPanelProps> = ({
                 >
                   <RotateCw className="w-3.5 h-3.5" />
                 </button>
+                {activeFloorId && onDeleteStaircaseFromFloor && (
+                  <button
+                    onClick={() => onDeleteStaircaseFromFloor(staircase.id, activeFloorId)}
+                    className="flex items-center gap-1 px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-[10px] font-bold shadow-2xs transition-colors"
+                    title="Delete Staircase from this floor only"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Delete on Floor</span>
+                  </button>
+                )}
                 <button
                   onClick={() => onDeleteStaircase && onDeleteStaircase(staircase.id)}
                   className="p-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded border border-rose-500/40 transition-colors"
-                  title="Delete Staircase"
+                  title="Delete Staircase from ALL floors"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
