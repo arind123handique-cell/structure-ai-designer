@@ -26,10 +26,14 @@ import {
   Zap,
   DoorOpen,
   AppWindow,
+  Footprints,
 } from 'lucide-react';
 
+// Global texture cache for 3D sprites to avoid allocating hundreds of canvases on every state update
+const spriteTextureCache = new Map<string, THREE.CanvasTexture>();
+
 /**
- * Traverses and deeply disposes Three.js geometries, materials, and textures
+ * Traverses and deeply disposes Three.js geometries, materials, and non-cached textures
  * to prevent GPU/RAM memory leaks.
  */
 function disposeThreeObject(obj: THREE.Object3D) {
@@ -40,11 +44,9 @@ function disposeThreeObject(obj: THREE.Object3D) {
     if (child.material) {
       if (Array.isArray(child.material)) {
         child.material.forEach((m: any) => {
-          if (m.map) m.map.dispose();
           m.dispose();
         });
       } else {
-        if (child.material.map) child.material.map.dispose();
         child.material.dispose();
       }
     }
@@ -53,6 +55,7 @@ function disposeThreeObject(obj: THREE.Object3D) {
 
 /**
  * Creates lightweight, high-visibility 2D canvas texture sprite for 3D viewport labels.
+ * Utilizes memoized canvas texture cache to eliminate memory fragmentation and GC freezing.
  */
 function createTextBadgeSprite(
   primaryText: string,
@@ -61,56 +64,67 @@ function createTextBadgeSprite(
   borderColor: string = '#10b981',
   textColor: string = '#ffffff'
 ): THREE.Sprite {
-  const canvas = document.createElement('canvas');
-  canvas.width = 160;
-  canvas.height = 80;
-  const ctx = canvas.getContext('2d');
+  const cacheKey = `${primaryText}__${secondaryText || ''}__${bgColor}__${borderColor}__${textColor}`;
+  let texture = spriteTextureCache.get(cacheKey);
 
-  if (ctx) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const radius = 16;
-    const x = 8;
-    const y = 8;
-    const w = canvas.width - 16;
-    const h = canvas.height - 16;
-
-    ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.lineTo(x + w - radius, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-    ctx.lineTo(x + w, y + h - radius);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-    ctx.lineTo(x + radius, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-    ctx.lineTo(x, y + radius);
-    ctx.quadraticCurveTo(x, y, x + radius, y);
-    ctx.closePath();
-
-    ctx.fillStyle = bgColor;
-    ctx.fill();
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = borderColor;
-    ctx.stroke();
-
-    ctx.fillStyle = textColor;
-    ctx.font = 'bold 34px "JetBrains Mono", monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    if (secondaryText) {
-      ctx.fillText(primaryText, canvas.width / 2, 34);
-      ctx.fillStyle = '#a7f3d0';
-      ctx.font = 'bold 18px "JetBrains Mono", monospace';
-      ctx.fillText(secondaryText, canvas.width / 2, 58);
-    } else {
-      ctx.fillText(primaryText, canvas.width / 2, canvas.height / 2);
+  if (!texture) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 160;
+    canvas.height = 80;
+    let ctx: CanvasRenderingContext2D | null = null;
+    try {
+      ctx = canvas.getContext ? canvas.getContext('2d') : null;
+    } catch (e) {
+      ctx = null;
     }
-  }
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const radius = 16;
+      const x = 8;
+      const y = 8;
+      const w = canvas.width - 16;
+      const h = canvas.height - 16;
+
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + w - radius, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+      ctx.lineTo(x + w, y + h - radius);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+      ctx.lineTo(x + radius, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+
+      ctx.fillStyle = bgColor;
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = borderColor;
+      ctx.stroke();
+
+      ctx.fillStyle = textColor;
+      ctx.font = 'bold 34px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      if (secondaryText) {
+        ctx.fillText(primaryText, canvas.width / 2, 34);
+        ctx.fillStyle = '#a7f3d0';
+        ctx.font = 'bold 18px "JetBrains Mono", monospace';
+        ctx.fillText(secondaryText, canvas.width / 2, 58);
+      } else {
+        ctx.fillText(primaryText, canvas.width / 2, canvas.height / 2);
+      }
+    }
+
+    texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    spriteTextureCache.set(cacheKey, texture);
+  }
 
   const spriteMaterial = new THREE.SpriteMaterial({
     map: texture,
@@ -142,6 +156,7 @@ export const Structural3DViewer: React.FC = () => {
 
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
+  const needsSceneRenderRef = useRef(true);
   const arch3DLayerRef = useRef<Architectural3DLayer | null>(null);
   if (!arch3DLayerRef.current) {
     arch3DLayerRef.current = new Architectural3DLayer();
@@ -173,6 +188,7 @@ export const Structural3DViewer: React.FC = () => {
     architecturalWindows,
     architecturalOpenings,
     architecturalRooms,
+    architecturalStaircases,
     selectedArchitecturalId,
     selectArchitecturalElement,
   } = useProjectStore() as any;
@@ -188,6 +204,7 @@ export const Structural3DViewer: React.FC = () => {
   const [showArchDoors, setShowArchDoors] = useState(true);
   const [showArchWindows, setShowArchWindows] = useState(true);
   const [showArchRooms, setShowArchRooms] = useState(true);
+  const [showArchStaircases, setShowArchStaircases] = useState(true);
   const [selectedGradeBeamId, setSelectedGradeBeamId] = useState<string | null>(null);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
 
@@ -332,6 +349,10 @@ export const Structural3DViewer: React.FC = () => {
     controls.minDistance = 2;
     controlsRef.current = controls;
 
+    controls.addEventListener('change', () => {
+      needsSceneRenderRef.current = true;
+    });
+
     // Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.95);
     scene.add(ambientLight);
@@ -357,12 +378,13 @@ export const Structural3DViewer: React.FC = () => {
           cameraRef.current.aspect = w / h;
           cameraRef.current.updateProjectionMatrix();
           rendererRef.current.setSize(w, h);
+          needsSceneRenderRef.current = true;
         }
       }
     });
     resizeObserver.observe(containerRef.current);
 
-    // Continuous RAF Render Loop
+    // High-Performance Damped & On-Demand RAF Render Loop (0% idle CPU/GPU)
     let isMounted = true;
     let animationFrameId: number;
 
@@ -370,8 +392,11 @@ export const Structural3DViewer: React.FC = () => {
       if (!isMounted) return;
       animationFrameId = requestAnimationFrame(animate);
       if (controlsRef.current && rendererRef.current && sceneRef.current && cameraRef.current) {
-        controlsRef.current.update();
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
+        const controlsDamping = controlsRef.current.update();
+        if (controlsDamping || needsSceneRenderRef.current) {
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+          needsSceneRenderRef.current = false;
+        }
       }
     };
     animate();
@@ -944,7 +969,7 @@ export const Structural3DViewer: React.FC = () => {
       });
     }
 
-    // 5. Update Live 3D Architectural BIM Layer
+    // 5. Update Live 3D Architectural BIM & RCC Staircase Layer
     if (arch3DLayerRef.current) {
       arch3DLayerRef.current.update(
         architecturalWalls || {},
@@ -952,6 +977,7 @@ export const Structural3DViewer: React.FC = () => {
         architecturalWindows || {},
         architecturalOpenings || {},
         architecturalRooms || {},
+        architecturalStaircases || {},
         selectedArchitecturalId,
         {
           showWalls: showArchWalls,
@@ -959,9 +985,12 @@ export const Structural3DViewer: React.FC = () => {
           showWindows: showArchWindows,
           showOpenings: true,
           showRoomLabels: showArchRooms,
+          showStaircases: showArchStaircases,
         }
       );
     }
+
+    needsSceneRenderRef.current = true;
   }, [
     activeModel,
     selectedMemberId,
@@ -980,11 +1009,13 @@ export const Structural3DViewer: React.FC = () => {
     showArchDoors,
     showArchWindows,
     showArchRooms,
+    showArchStaircases,
     architecturalWalls,
     architecturalDoors,
     architecturalWindows,
     architecturalOpenings,
     architecturalRooms,
+    architecturalStaircases,
     selectedArchitecturalId,
     columnSupportMapping,
     columnMemberMapping,
@@ -1055,6 +1086,12 @@ export const Structural3DViewer: React.FC = () => {
         if (!isMulti) clearSelectedSupportNodes();
       } else if (hit.userData.type === 'arch_room') {
         selectArchitecturalElement(hit.userData.id, 'ROOM');
+        selectMember(null);
+        setSelectedGradeBeamId(null);
+        (selectPlate as any)(null);
+        if (!isMulti) clearSelectedSupportNodes();
+      } else if (hit.userData.type === 'arch_staircase') {
+        selectArchitecturalElement(hit.userData.id, 'STAIRCASE');
         selectMember(null);
         setSelectedGradeBeamId(null);
         (selectPlate as any)(null);
@@ -1384,6 +1421,19 @@ export const Structural3DViewer: React.FC = () => {
         >
           <Tag className="w-3.5 h-3.5 text-emerald-400" />
           <span>Rooms</span>
+        </button>
+
+        <button
+          onClick={() => setShowArchStaircases(!showArchStaircases)}
+          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
+            showArchStaircases
+              ? 'bg-amber-500/25 text-amber-200 border border-amber-500/50 font-bold shadow-xs'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+          title="Toggle 3D RCC Staircases (Steps, Landing Slabs, Handrails, Walls & Doors)"
+        >
+          <Footprints className="w-3.5 h-3.5 text-amber-400" />
+          <span>Staircases {architecturalStaircases && Object.keys(architecturalStaircases).length > 0 ? `(${Object.keys(architecturalStaircases).length})` : ''}</span>
         </button>
       </div>
 

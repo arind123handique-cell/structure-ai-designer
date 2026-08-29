@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { StaircasePlacementEngine } from '@/features/architectural/engines/staircasePlacementEngine';
 import { ArchitecturalStaircase } from '@/features/architectural/types/architecturalTypes';
+import { Architectural3DLayer } from '@/features/architectural/3d/Architectural3DLayer';
 
 describe('StaircasePlacementEngine', () => {
   it('should create default architectural staircase with IS 456 / NBC dimensions', () => {
@@ -164,5 +165,45 @@ describe('StaircasePlacementEngine', () => {
     expect(comp.bounds.minX).toBeDefined();
     expect(comp.bounds.maxX).toBeDefined();
   });
+
+  it('should generate 3D RCC staircase geometry, landing slabs, and handrails in Architectural3DLayer', () => {
+    const layer = new Architectural3DLayer();
+    const stair = StaircasePlacementEngine.createDefaultStaircase('floor_0', { x: 4.0, y: 5.0 });
+
+    layer.update(
+      {},
+      {},
+      {},
+      {},
+      {},
+      { [stair.id]: stair },
+      null,
+      {
+        showWalls: true,
+        showDoors: true,
+        showWindows: true,
+        showOpenings: true,
+        showRoomLabels: true,
+        showStaircases: true,
+      }
+    );
+
+    const group = layer.getGroup();
+    expect(group.children.length).toBeGreaterThan(0);
+
+    const stair3DGroup = group.children[0];
+    expect(stair3DGroup.position.x).toBe(4.0);
+    expect(stair3DGroup.position.z).toBe(5.0);
+
+    // Verify presence of step meshes and landing slabs
+    const meshes: any[] = [];
+    stair3DGroup.traverse((child: any) => {
+      if (child.isMesh) meshes.push(child);
+    });
+
+    expect(meshes.length).toBeGreaterThan(10); // 9 flight 1 steps + 9 flight 2 steps + landings + rails
+    layer.dispose();
+  });
 });
+
 

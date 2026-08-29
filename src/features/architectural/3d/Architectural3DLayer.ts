@@ -1,6 +1,6 @@
 /**
- * High-Performance Three.js 3D Layer for Architectural BIM Elements
- * Real-time 3D Walls, Segmented Openings, 3D Doors & Windows with Material Disposal
+ * High-Performance Three.js 3D Layer for Architectural & Structural BIM Elements
+ * Real-time 3D Walls, Segmented Openings, 3D Doors & Windows, 3D RCC Staircases, and Cached Sprites
  */
 
 import * as THREE from 'three';
@@ -10,36 +10,33 @@ import {
   ArchitecturalWindow,
   ArchitecturalOpening,
   ArchitecturalRoom,
+  ArchitecturalStaircase,
 } from '../types/architecturalTypes';
 import { ArchitecturalGeometryEngine } from '../engines/architecturalGeometryEngine';
 
-function disposeHierarchy(obj: THREE.Object3D) {
-  obj.traverse((child: any) => {
-    if (child.geometry) child.geometry.dispose();
-    if (child.material) {
-      if (Array.isArray(child.material)) {
-        child.material.forEach((m: any) => {
-          if (m.map) m.map.dispose();
-          m.dispose();
-        });
-      } else {
-        if (child.material.map) child.material.map.dispose();
-        child.material.dispose();
-      }
-    }
-  });
-}
+// Global texture cache to prevent creating duplicate textures / canvases across renders
+const badgeTextureCache = new Map<string, THREE.CanvasTexture>();
 
-function createTextBadge(
+function getOrCreateBadgeTexture(
   title: string,
   subtitle?: string,
   bgColor = '#1e293b',
   borderColor = '#64748b'
-): THREE.Sprite {
+): THREE.CanvasTexture {
+  const cacheKey = `${title}__${subtitle || ''}__${bgColor}__${borderColor}`;
+  if (badgeTextureCache.has(cacheKey)) {
+    return badgeTextureCache.get(cacheKey)!;
+  }
+
   const canvas = document.createElement('canvas');
   canvas.width = 160;
   canvas.height = 70;
-  const ctx = canvas.getContext('2d');
+  let ctx: CanvasRenderingContext2D | null = null;
+  try {
+    ctx = canvas.getContext ? canvas.getContext('2d') : null;
+  } catch (e) {
+    ctx = null;
+  }
 
   if (ctx) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -84,6 +81,17 @@ function createTextBadge(
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
+  badgeTextureCache.set(cacheKey, texture);
+  return texture;
+}
+
+function createTextBadge(
+  title: string,
+  subtitle?: string,
+  bgColor = '#1e293b',
+  borderColor = '#64748b'
+): THREE.Sprite {
+  const texture = getOrCreateBadgeTexture(title, subtitle, bgColor, borderColor);
   const mat = new THREE.SpriteMaterial({
     map: texture,
     depthTest: false,
@@ -95,12 +103,31 @@ function createTextBadge(
   return sprite;
 }
 
+function disposeHierarchy(obj: THREE.Object3D) {
+  obj.traverse((child: any) => {
+    if (child.geometry) child.geometry.dispose();
+    if (child.material) {
+      if (Array.isArray(child.material)) {
+        child.material.forEach((m: any) => {
+          if (m.map && !badgeTextureCache.has(m.map.name)) {
+            // Keep cached canvas textures
+          }
+          m.dispose();
+        });
+      } else {
+        child.material.dispose();
+      }
+    }
+  });
+}
+
 export interface Architectural3DVisibility {
   showWalls: boolean;
   showDoors: boolean;
   showWindows: boolean;
   showOpenings: boolean;
   showRoomLabels: boolean;
+  showStaircases: boolean;
 }
 
 export class Architectural3DLayer {
@@ -121,24 +148,48 @@ export class Architectural3DLayer {
     windows: Record<string, ArchitecturalWindow>,
     openings: Record<string, ArchitecturalOpening>,
     rooms: Record<string, ArchitecturalRoom>,
-    selectedId: string | null,
-    visibility: Architectural3DVisibility = {
+    staircasesOrSelectedId?: Record<string, ArchitecturalStaircase> | string | null,
+    selectedIdOrVisibility?: string | Architectural3DVisibility | null,
+    visibilityParam?: Architectural3DVisibility
+  ) {
+    // Clear previous objects
+    disposeHierarchy(this.group);
+    this.group.clear();
+
+    let staircases: Record<string, ArchitecturalStaircase> = {};
+    let selectedId: string | null = null;
+    let visibility: Architectural3DVisibility = {
       showWalls: true,
       showDoors: true,
       showWindows: true,
       showOpenings: true,
       showRoomLabels: true,
-    }
-  ) {
-    // Clear & dispose previous objects
-    disposeHierarchy(this.group);
-    this.group.clear();
+      showStaircases: true,
+    };
 
-    const wallList = Object.values(walls);
-    const doorList = Object.values(doors);
-    const windowList = Object.values(windows);
-    const openingList = Object.values(openings);
-    const roomList = Object.values(rooms);
+    if (staircasesOrSelectedId && typeof staircasesOrSelectedId === 'object') {
+      staircases = staircasesOrSelectedId as Record<string, ArchitecturalStaircase>;
+      if (typeof selectedIdOrVisibility === 'string' || selectedIdOrVisibility === null) {
+        selectedId = selectedIdOrVisibility as string | null;
+      }
+      if (visibilityParam) {
+        visibility = { ...visibility, ...visibilityParam };
+      }
+    } else {
+      if (typeof staircasesOrSelectedId === 'string' || staircasesOrSelectedId === null) {
+        selectedId = staircasesOrSelectedId;
+      }
+      if (selectedIdOrVisibility && typeof selectedIdOrVisibility === 'object') {
+        visibility = { ...visibility, ...(selectedIdOrVisibility as any) };
+      }
+    }
+
+    const wallList = Object.values(walls || {});
+    const doorList = Object.values(doors || {});
+    const windowList = Object.values(windows || {});
+    const openingList = Object.values(openings || {});
+    const roomList = Object.values(rooms || {});
+    const stairList = Object.values(staircases || {});
 
     // Shared Base Materials
     const externalWallMat = new THREE.MeshStandardMaterial({
@@ -158,7 +209,7 @@ export class Architectural3DLayer {
       roughness: 0.3,
     });
     const doorFrameMat = new THREE.MeshStandardMaterial({
-      color: 0x78350f, // Warm wood / timber
+      color: 0x78350f, // Warm timber
       roughness: 0.4,
     });
     const doorLeafMat = new THREE.MeshStandardMaterial({
@@ -166,7 +217,7 @@ export class Architectural3DLayer {
       roughness: 0.45,
     });
     const windowFrameMat = new THREE.MeshStandardMaterial({
-      color: 0x334155, // Dark aluminum frame
+      color: 0x334155, // Dark aluminum
       roughness: 0.3,
       metalness: 0.5,
     });
@@ -178,8 +229,35 @@ export class Architectural3DLayer {
       metalness: 0.8,
     });
 
+    // Staircase Materials
+    const stairConcreteMat = new THREE.MeshStandardMaterial({
+      color: 0xe2e8f0, // RCC Concrete Steps
+      roughness: 0.55,
+      metalness: 0.08,
+    });
+    const stairLandingMat = new THREE.MeshStandardMaterial({
+      color: 0x4f46e5, // Floor Landing Slab (Indigo)
+      roughness: 0.45,
+      metalness: 0.15,
+    });
+    const stairMidLandingMat = new THREE.MeshStandardMaterial({
+      color: 0x059669, // Mid-Landing Slab (Emerald)
+      roughness: 0.45,
+      metalness: 0.15,
+    });
+    const stairRailingMat = new THREE.MeshStandardMaterial({
+      color: 0x0284c7, // Stainless steel / anodized aluminum handrail
+      roughness: 0.25,
+      metalness: 0.85,
+    });
+    const stairEnclosureWallMat = new THREE.MeshStandardMaterial({
+      color: 0x475569, // 230mm Enclosure Wall
+      roughness: 0.7,
+      metalness: 0.05,
+    });
+
+    // 1. Build 3D Walls with Segmented Openings
     if (visibility.showWalls) {
-      // Build 3D Walls with clean segmented openings
       for (const wall of wallList) {
         const wallLen = ArchitecturalGeometryEngine.distance(wall.start, wall.end);
         if (wallLen < 0.05) continue;
@@ -191,7 +269,6 @@ export class Architectural3DLayer {
           ? internalWallMat
           : externalWallMat;
 
-        // Collect hosted openings for this wall
         interface WallOpeningDef {
           id: string;
           type: 'DOOR' | 'WINDOW' | 'OPENING';
@@ -252,14 +329,10 @@ export class Architectural3DLayer {
             });
         }
 
-        // Sort hosted openings along wall length
         hostedList.sort((a, b) => a.pos - b.pos);
 
-        // Compute wall orientation
         const dx = wall.end.x - wall.start.x;
-        const dy = wall.end.y - wall.start.y; // World Z
-        const dir = new THREE.Vector3(dx, 0, dy).normalize();
-        const wallNormal = new THREE.Vector3(-dir.z, 0, dir.x);
+        const dy = wall.end.y - wall.start.y;
         const wallElevation = wall.baseElevation;
         const wallH = wall.height;
         const wallThick = wall.thickness;
@@ -267,12 +340,10 @@ export class Architectural3DLayer {
         const wallGroup = new THREE.Group();
         wallGroup.position.set(wall.start.x, wallElevation, wall.start.y);
 
-        // Rotate wallGroup so X-axis aligns with wall direction
         const angle = Math.atan2(dy, dx);
         wallGroup.rotation.y = -angle;
 
         if (hostedList.length === 0) {
-          // Solid Wall without openings
           const geom = new THREE.BoxGeometry(wallLen, wallH, wallThick);
           const mesh = new THREE.Mesh(geom, baseMat);
           mesh.position.set(wallLen / 2, wallH / 2, 0);
@@ -284,20 +355,17 @@ export class Architectural3DLayer {
             edges,
             new THREE.LineBasicMaterial({
               color: isWallSelected ? 0xfde047 : 0x475569,
-              linewidth: 1,
             })
           );
           line.position.copy(mesh.position);
           wallGroup.add(line);
         } else {
-          // Segmented Wall with exact cutouts
           let currentU = 0;
 
           for (const op of hostedList) {
             const opStartU = Math.max(0, op.pos - op.width / 2);
             const opEndU = Math.min(wallLen, op.pos + op.width / 2);
 
-            // 1. Solid Segment before opening
             if (opStartU > currentU + 0.01) {
               const segLen = opStartU - currentU;
               const geom = new THREE.BoxGeometry(segLen, wallH, wallThick);
@@ -317,7 +385,6 @@ export class Architectural3DLayer {
 
             const opActualW = opEndU - opStartU;
 
-            // 2. Parapet / Wall section below opening (for Windows)
             if (op.sill > 0.05) {
               const sillH = op.sill;
               const geom = new THREE.BoxGeometry(opActualW, sillH, wallThick);
@@ -335,7 +402,6 @@ export class Architectural3DLayer {
               wallGroup.add(line);
             }
 
-            // 3. Wall section (Transom / Lintel) above opening
             const opTop = op.sill + op.height;
             if (wallH > opTop + 0.05) {
               const lintelH = wallH - opTop;
@@ -354,13 +420,11 @@ export class Architectural3DLayer {
               wallGroup.add(line);
             }
 
-            // 4. Render 3D Door Geometry inside opening
             if (op.type === 'DOOR') {
               const isDoorSelected = selectedId === op.id;
               const doorGroup = new THREE.Group();
               doorGroup.position.set(opStartU + opActualW / 2, op.sill, 0);
 
-              // Timber Door Frame
               const frameThick = 0.06;
               const frameDepth = wallThick + 0.02;
               const leftPost = new THREE.Mesh(
@@ -384,7 +448,6 @@ export class Architectural3DLayer {
               topPost.position.set(0, op.height - frameThick / 2, 0);
               doorGroup.add(topPost);
 
-              // 3D Door Leaf
               const leafW = opActualW - frameThick * 2;
               const leafH = op.height - frameThick;
               const leafThick = 0.04;
@@ -400,13 +463,11 @@ export class Architectural3DLayer {
               wallGroup.add(doorGroup);
             }
 
-            // 5. Render 3D Window Geometry inside opening
             if (op.type === 'WINDOW') {
               const isWinSelected = selectedId === op.id;
               const winGroup = new THREE.Group();
               winGroup.position.set(opStartU + opActualW / 2, op.sill, 0);
 
-              // Aluminum Window Frame
               const frameThick = 0.05;
               const frameDepth = wallThick + 0.01;
 
@@ -438,7 +499,6 @@ export class Architectural3DLayer {
               rightF.position.set(opActualW / 2 - frameThick / 2, op.height / 2, 0);
               winGroup.add(rightF);
 
-              // Glass Pane
               const glassW = opActualW - frameThick * 2;
               const glassH = op.height - frameThick * 2;
               const glassMesh = new THREE.Mesh(
@@ -455,7 +515,6 @@ export class Architectural3DLayer {
             currentU = opEndU;
           }
 
-          // Final Solid Segment after last opening
           if (currentU < wallLen - 0.01) {
             const segLen = wallLen - currentU;
             const geom = new THREE.BoxGeometry(segLen, wallH, wallThick);
@@ -478,7 +537,176 @@ export class Architectural3DLayer {
       }
     }
 
-    // 6. 3D Room Floor Footprints & 3D Badges
+    // 2. Build 3D Parametric RCC Staircases
+    if (visibility.showStaircases) {
+      for (const stair of stairList) {
+        const isStairSelected = selectedId === stair.id;
+        const stairGroup = new THREE.Group();
+        const baseElevation = stair.startElevation || 0;
+        stairGroup.position.set(stair.position.x, baseElevation, stair.position.y);
+
+        const rotRad = -((stair.rotation || 0) * Math.PI) / 180;
+        stairGroup.rotation.y = rotRad;
+
+        const L = stair.roomLength || 4.8;
+        const B = stair.roomWidth || 2.4;
+        const Wf = stair.flightWidth || 1.1;
+        const DL = stair.landingDepth || 1.2;
+        const tw = (stair.waistThicknessMm || 160) / 1000;
+        const treadM = (stair.treadMm || 275) / 1000;
+        const riserM = (stair.riserMm || 160) / 1000;
+        const numRisers = stair.riserCount || 10;
+        const numTreads = stair.treadCount || 9;
+        const H1 = numRisers * riserM; // Mid-landing height (e.g. 1.6m)
+        const H2 = numRisers * riserM; // Flight 2 rise (e.g. 1.6m)
+        const totalHeight = H1 + H2;
+
+        // A. 3D Floor Landing Slab (Y = 0)
+        const floorLandingGeom = new THREE.BoxGeometry(B, tw, DL);
+        const floorLandingMesh = new THREE.Mesh(floorLandingGeom, stairLandingMat);
+        floorLandingMesh.position.set(B / 2, -tw / 2, DL / 2);
+        floorLandingMesh.userData = { type: 'arch_staircase', id: stair.id };
+        stairGroup.add(floorLandingMesh);
+
+        // B. 3D Mid-Landing Slab (Y = H1)
+        const midLandingGeom = new THREE.BoxGeometry(B, tw, DL);
+        const midLandingMesh = new THREE.Mesh(midLandingGeom, stairMidLandingMat);
+        midLandingMesh.position.set(B / 2, H1 - tw / 2, L - DL / 2);
+        midLandingMesh.userData = { type: 'arch_staircase', id: stair.id };
+        stairGroup.add(midLandingMesh);
+
+        // C. 3D Flight 1 (Stepped RCC Solid rising 0 -> H1)
+        for (let i = 0; i < numTreads; i++) {
+          const stepH = (i + 1) * riserM;
+          const stepGeom = new THREE.BoxGeometry(Wf, stepH, treadM);
+          const stepMesh = new THREE.Mesh(
+            stepGeom,
+            isStairSelected ? selectedWallMat : stairConcreteMat
+          );
+          stepMesh.position.set(Wf / 2, stepH / 2, DL + i * treadM + treadM / 2);
+          stepMesh.userData = { type: 'arch_staircase', id: stair.id };
+          stairGroup.add(stepMesh);
+        }
+
+        // Flight 1 Handrail
+        const f1RailGeom = new THREE.CylinderGeometry(0.025, 0.025, Math.hypot(numTreads * treadM, H1));
+        const f1RailMesh = new THREE.Mesh(f1RailGeom, stairRailingMat);
+        const f1Angle = Math.atan2(H1, numTreads * treadM);
+        f1RailMesh.rotation.x = Math.PI / 2 - f1Angle;
+        f1RailMesh.position.set(
+          Wf - 0.05,
+          H1 / 2 + 0.9,
+          DL + (numTreads * treadM) / 2
+        );
+        stairGroup.add(f1RailMesh);
+
+        // D. 3D Flight 2 (Stepped RCC Solid rising H1 -> H1+H2 returning back towards DL)
+        for (let i = 0; i < numTreads; i++) {
+          const stepH = (i + 1) * riserM;
+          const stepGeom = new THREE.BoxGeometry(Wf, stepH, treadM);
+          const stepMesh = new THREE.Mesh(
+            stepGeom,
+            isStairSelected ? selectedWallMat : stairConcreteMat
+          );
+          // Positioned on the right half of width (B - Wf to B)
+          stepMesh.position.set(
+            B - Wf / 2,
+            H1 + stepH / 2,
+            L - DL - (i * treadM + treadM / 2)
+          );
+          stepMesh.userData = { type: 'arch_staircase', id: stair.id };
+          stairGroup.add(stepMesh);
+        }
+
+        // Flight 2 Handrail
+        const f2RailGeom = new THREE.CylinderGeometry(0.025, 0.025, Math.hypot(numTreads * treadM, H2));
+        const f2RailMesh = new THREE.Mesh(f2RailGeom, stairRailingMat);
+        f2RailMesh.rotation.x = -(Math.PI / 2 - f1Angle);
+        f2RailMesh.position.set(
+          B - Wf + 0.05,
+          H1 + H2 / 2 + 0.9,
+          DL + (numTreads * treadM) / 2
+        );
+        stairGroup.add(f2RailMesh);
+
+        // E. 3D Enclosure Walls with Dual Landing Doors
+        if (stair.hasEnclosureWalls) {
+          const wallThick = (stair.wallThicknessMm || 230) / 1000;
+          const wallH = totalHeight;
+
+          // Back Wall (at Mid-Landing Z = L)
+          const backWallGeom = new THREE.BoxGeometry(B + wallThick * 2, wallH, wallThick);
+          const backWall = new THREE.Mesh(backWallGeom, stairEnclosureWallMat);
+          backWall.position.set(B / 2, wallH / 2, L + wallThick / 2);
+          stairGroup.add(backWall);
+
+          // Left Wall (at X = 0) with Mid-Landing Left Door Cutout
+          if (stair.hasLeftDoor) {
+            const doorW = stair.leftDoorWidth || 1.0;
+            const doorH = 2.1;
+            const seg1Len = L - DL;
+            const seg1Geom = new THREE.BoxGeometry(wallThick, wallH, seg1Len);
+            const seg1 = new THREE.Mesh(seg1Geom, stairEnclosureWallMat);
+            seg1.position.set(-wallThick / 2, wallH / 2, seg1Len / 2);
+            stairGroup.add(seg1);
+
+            // Lintel above left door
+            if (wallH > H1 + doorH) {
+              const lintelH = wallH - (H1 + doorH);
+              const lintelGeom = new THREE.BoxGeometry(wallThick, lintelH, DL);
+              const lintel = new THREE.Mesh(lintelGeom, stairEnclosureWallMat);
+              lintel.position.set(-wallThick / 2, H1 + doorH + lintelH / 2, L - DL / 2);
+              stairGroup.add(lintel);
+            }
+          } else {
+            const leftWallGeom = new THREE.BoxGeometry(wallThick, wallH, L);
+            const leftWall = new THREE.Mesh(leftWallGeom, stairEnclosureWallMat);
+            leftWall.position.set(-wallThick / 2, wallH / 2, L / 2);
+            stairGroup.add(leftWall);
+          }
+
+          // Right Wall (at X = B) with Mid-Landing Right Door Cutout
+          if (stair.hasRightDoor) {
+            const doorW = stair.rightDoorWidth || 1.0;
+            const doorH = 2.1;
+            const seg1Len = L - DL;
+            const seg1Geom = new THREE.BoxGeometry(wallThick, wallH, seg1Len);
+            const seg1 = new THREE.Mesh(seg1Geom, stairEnclosureWallMat);
+            seg1.position.set(B + wallThick / 2, wallH / 2, seg1Len / 2);
+            stairGroup.add(seg1);
+
+            // Lintel above right door
+            if (wallH > H1 + doorH) {
+              const lintelH = wallH - (H1 + doorH);
+              const lintelGeom = new THREE.BoxGeometry(wallThick, lintelH, DL);
+              const lintel = new THREE.Mesh(lintelGeom, stairEnclosureWallMat);
+              lintel.position.set(B + wallThick / 2, H1 + doorH + lintelH / 2, L - DL / 2);
+              stairGroup.add(lintel);
+            }
+          } else {
+            const rightWallGeom = new THREE.BoxGeometry(wallThick, wallH, L);
+            const rightWall = new THREE.Mesh(rightWallGeom, stairEnclosureWallMat);
+            rightWall.position.set(B + wallThick / 2, wallH / 2, L / 2);
+            stairGroup.add(rightWall);
+          }
+        }
+
+        // F. 3D Floating Staircase Tag Badge
+        const stairBadge = createTextBadge(
+          stair.name || 'RCC STAIRCASE',
+          `${L.toFixed(1)}m × ${B.toFixed(1)}m (${stair.treadMm}T/${stair.riserMm}R)`,
+          isStairSelected ? '#78350f' : '#1e1b4b',
+          isStairSelected ? '#f59e0b' : '#6366f1'
+        );
+        stairBadge.position.set(B / 2, H1 + 1.2, L / 2);
+        stairBadge.userData = { type: 'arch_staircase', id: stair.id };
+        stairGroup.add(stairBadge);
+
+        this.group.add(stairGroup);
+      }
+    }
+
+    // 3. 3D Room Floor Footprints & 3D Badges
     if (visibility.showRoomLabels) {
       for (const room of roomList) {
         if (room.boundary.length >= 3) {
@@ -492,7 +720,6 @@ export class Architectural3DLayer {
             isSelected ? '#f59e0b' : '#0284c7'
           );
 
-          // Get elevation of the room from floorId or default
           const floorIdx = parseInt(room.floorId.replace('floor_', ''), 10) || 0;
           const roomElev = floorIdx * 3.2;
 
