@@ -81,6 +81,7 @@ export interface StoredProject {
   architecturalWindows?: Record<string, any>;
   architecturalOpenings?: Record<string, any>;
   architecturalRooms?: Record<string, any>;
+  architecturalStaircases?: Record<string, any>;
   architecturalDimensions?: Record<string, any>;
   architecturalSettings?: any;
   savedStaircaseDesigns?: any;

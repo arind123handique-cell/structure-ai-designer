@@ -10,6 +10,7 @@ import {
   ArchitecturalWindow,
   ArchitecturalOpening,
   ArchitecturalRoom,
+  ArchitecturalStaircase,
   ArchitecturalDimension,
   ActivePlanTool,
   ArchitecturalSettings,
@@ -24,6 +25,7 @@ import { DoorEngine } from '../engines/doorEngine';
 import { WindowEngine } from '../engines/windowEngine';
 import { OpeningEngine } from '../engines/openingEngine';
 import { RoomEngine } from '../engines/roomEngine';
+import { StaircasePlacementEngine } from '../engines/staircasePlacementEngine';
 import { ArchitecturalIdGenerator } from '../utils/idGenerator';
 import { FloorPlanLevel } from '@/features/drawings/floorPlanEngine';
 import { NormalizedStructuralModel } from '@/features/model/types';
@@ -34,12 +36,13 @@ interface FloorPlanCanvasProps {
   structuralModel: NormalizedStructuralModel | null;
   activeTool: ActivePlanTool;
   selectedId: string | null;
-  selectedType: 'WALL' | 'DOOR' | 'WINDOW' | 'OPENING' | 'ROOM' | 'DIMENSION' | null;
+  selectedType: 'WALL' | 'DOOR' | 'WINDOW' | 'OPENING' | 'ROOM' | 'STAIRCASE' | 'DIMENSION' | null;
   walls: Record<string, ArchitecturalWall>;
   doors: Record<string, ArchitecturalDoor>;
   windows: Record<string, ArchitecturalWindow>;
   openings: Record<string, ArchitecturalOpening>;
   rooms: Record<string, ArchitecturalRoom>;
+  staircases?: Record<string, ArchitecturalStaircase>;
   dimensions: Record<string, ArchitecturalDimension>;
   settings: ArchitecturalSettings;
   wallThickness: number;
@@ -51,6 +54,8 @@ interface FloorPlanCanvasProps {
   onAddDoor: (door: ArchitecturalDoor) => void;
   onAddWindow: (win: ArchitecturalWindow) => void;
   onAddOpening: (op: ArchitecturalOpening) => void;
+  onAddStaircase?: (staircase: ArchitecturalStaircase) => void;
+  onUpdateStaircase?: (id: string, updates: Partial<ArchitecturalStaircase>) => void;
   onAddDimension: (dim: ArchitecturalDimension) => void;
   onAutoDetectRooms: () => void;
   onDeleteSelected: () => void;
@@ -70,6 +75,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   windows,
   openings,
   rooms,
+  staircases = {},
   dimensions,
   settings,
   wallThickness,
@@ -81,6 +87,8 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   onAddDoor,
   onAddWindow,
   onAddOpening,
+  onAddStaircase,
+  onUpdateStaircase,
   onAddDimension,
   onAutoDetectRooms,
   onDeleteSelected,
@@ -99,6 +107,8 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
   const isPanningRef = useRef(false);
   const lastMousePosRef = useRef({ x: 0, y: 0 });
+  const isDraggingStaircaseRef = useRef(false);
+  const dragStaircaseOffsetRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
 
   // Drawing Interaction State
   const [drawStartPoint, setDrawStartPoint] = useState<Point2D | null>(null);
@@ -115,6 +125,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   const floorWindows = Object.values(windows).filter((w) => w.floorId === activeFloorId);
   const floorOpenings = Object.values(openings).filter((o) => o.floorId === activeFloorId);
   const floorRooms = Object.values(rooms).filter((r) => r.floorId === activeFloorId);
+  const floorStairs = Object.values(staircases || {}).filter((s) => s.floorId === activeFloorId);
   const floorDimensions = Object.values(dimensions).filter((d) => d.floorId === activeFloorId);
 
   // Previous floor ghost elements
@@ -550,6 +561,256 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       ctx.restore();
     });
 
+    // 7.5. Architectural RCC Staircases (Parametric Plan Detail)
+    floorStairs.forEach((stair) => {
+      const isSelected = selectedId === stair.id;
+      const comp = StaircasePlacementEngine.getStaircase2DComponents(stair);
+
+      // A. Outer Enclosure Walls
+      if (stair.hasEnclosureWalls && comp.enclosurePolygon.length > 0) {
+        ctx.fillStyle = '#0f172a';
+        ctx.strokeStyle = isSelected ? '#f59e0b' : '#475569';
+        ctx.lineWidth = isSelected ? 2 : 1.5;
+
+        ctx.beginPath();
+        const startP = CoordinateTransform.world2DToScreen(comp.enclosurePolygon[0], panX, panY, zoom);
+        ctx.moveTo(startP.x, startP.y);
+        for (let i = 1; i < comp.enclosurePolygon.length; i++) {
+          const pt = CoordinateTransform.world2DToScreen(comp.enclosurePolygon[i], panX, panY, zoom);
+          ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // B. Landings (Floor Landing + Mid-Landing)
+      const drawPoly = (poly: Point2D[], fill: string, stroke: string) => {
+        if (poly.length === 0) return;
+        ctx.fillStyle = fill;
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        const p0 = CoordinateTransform.world2DToScreen(poly[0], panX, panY, zoom);
+        ctx.moveTo(p0.x, p0.y);
+        for (let i = 1; i < poly.length; i++) {
+          const pt = CoordinateTransform.world2DToScreen(poly[i], panX, panY, zoom);
+          ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      };
+
+      drawPoly(comp.floorLandingPolygon, 'rgba(30, 27, 75, 0.45)', '#6366f1');
+      drawPoly(comp.midLandingPolygon, 'rgba(6, 78, 59, 0.45)', '#10b981');
+      drawPoly(comp.flight1Polygon, 'rgba(12, 74, 110, 0.35)', '#0284c7');
+      drawPoly(comp.flight2Polygon, 'rgba(12, 74, 110, 0.35)', '#0284c7');
+
+      // Central Well Gap
+      if (comp.wellGapPolygon.length > 0) {
+        ctx.strokeStyle = '#64748b';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        drawPoly(comp.wellGapPolygon, 'rgba(15, 23, 42, 0.7)', '#64748b');
+        ctx.setLineDash([]);
+      }
+
+      // C. Flight 1 & Flight 2 Tread Lines & Numbering
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 1.2;
+      comp.flight1TreadLines.forEach((t) => {
+        const p1 = CoordinateTransform.world2DToScreen(t.start, panX, panY, zoom);
+        const p2 = CoordinateTransform.world2DToScreen(t.end, panX, panY, zoom);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+
+        if (zoom >= 25 && t.index % 2 === 1) {
+          ctx.fillStyle = '#7dd3fc';
+          ctx.font = 'bold 8px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const midX = (p1.x + p2.x) / 2;
+          const midY = (p1.y + p2.y) / 2;
+          ctx.fillText(`${t.index}`, midX, midY);
+        }
+      });
+
+      comp.flight2TreadLines.forEach((t) => {
+        const p1 = CoordinateTransform.world2DToScreen(t.start, panX, panY, zoom);
+        const p2 = CoordinateTransform.world2DToScreen(t.end, panX, panY, zoom);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+
+        if (zoom >= 25 && t.index % 2 === 1) {
+          ctx.fillStyle = '#7dd3fc';
+          ctx.font = 'bold 8px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const midX = (p1.x + p2.x) / 2;
+          const midY = (p1.y + p2.y) / 2;
+          ctx.fillText(`${t.index}`, midX, midY);
+        }
+      });
+
+      // D. Direction Arrows ("UP")
+      const drawDirectionArrow = (start: Point2D, end: Point2D, label: string) => {
+        const s = CoordinateTransform.world2DToScreen(start, panX, panY, zoom);
+        const e = CoordinateTransform.world2DToScreen(end, panX, panY, zoom);
+
+        ctx.strokeStyle = '#34d399';
+        ctx.fillStyle = '#34d399';
+        ctx.lineWidth = 1.8;
+
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 3, 0, 2 * Math.PI);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(e.x, e.y);
+        ctx.stroke();
+
+        // Arrow head
+        const angle = Math.atan2(e.y - s.y, e.x - s.x);
+        const headLen = 7;
+        ctx.beginPath();
+        ctx.moveTo(e.x, e.y);
+        ctx.lineTo(
+          e.x - headLen * Math.cos(angle - Math.PI / 6),
+          e.y - headLen * Math.sin(angle - Math.PI / 6)
+        );
+        ctx.lineTo(
+          e.x - headLen * Math.cos(angle + Math.PI / 6),
+          e.y - headLen * Math.sin(angle + Math.PI / 6)
+        );
+        ctx.closePath();
+        ctx.fill();
+
+        if (zoom >= 22) {
+          ctx.font = 'bold 9px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(label, (s.x + e.x) / 2, (s.y + e.y) / 2 - 4);
+        }
+      };
+
+      drawDirectionArrow(comp.flight1Arrow.start, comp.flight1Arrow.end, 'UP');
+      drawDirectionArrow(comp.flight2Arrow.start, comp.flight2Arrow.end, 'UP');
+
+      // E. Landing Elevation Labels
+      if (zoom >= 25 && comp.floorLandingPolygon.length > 0 && comp.midLandingPolygon.length > 0) {
+        const f0 = CoordinateTransform.world2DToScreen(comp.floorLandingPolygon[0], panX, panY, zoom);
+        const f2 = CoordinateTransform.world2DToScreen(comp.floorLandingPolygon[2], panX, panY, zoom);
+        const m0 = CoordinateTransform.world2DToScreen(comp.midLandingPolygon[0], panX, panY, zoom);
+        const m2 = CoordinateTransform.world2DToScreen(comp.midLandingPolygon[2], panX, panY, zoom);
+
+        ctx.fillStyle = '#a5b4fc';
+        ctx.font = 'bold 8px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(`EL. +${stair.startElevation.toFixed(2)}m`, (f0.x + f2.x) / 2, (f0.y + f2.y) / 2);
+
+        const midEl = stair.startElevation + (stair.endElevation - stair.startElevation) / 2;
+        ctx.fillStyle = '#6ee7b7';
+        ctx.fillText(`MID +${midEl.toFixed(2)}m`, (m0.x + m2.x) / 2, (m0.y + m2.y) / 2);
+      }
+
+      // F. Dual-Side Landing Doors
+      const drawStairDoor = (door: any, color: string) => {
+        if (!door) return;
+        const opStart = CoordinateTransform.world2DToScreen(door.opening.start, panX, panY, zoom);
+        const opEnd = CoordinateTransform.world2DToScreen(door.opening.end, panX, panY, zoom);
+        const leafEnd = CoordinateTransform.world2DToScreen(door.leaf.end, panX, panY, zoom);
+
+        // Opening Line
+        ctx.strokeStyle = '#020617';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(opStart.x, opStart.y);
+        ctx.lineTo(opEnd.x, opEnd.y);
+        ctx.stroke();
+
+        // Door Leaf
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(opStart.x, opStart.y);
+        ctx.lineTo(leafEnd.x, leafEnd.y);
+        ctx.stroke();
+
+        // Swing Arc
+        const rScreen = door.radius * zoom;
+        ctx.strokeStyle = isSelected ? '#fde047' : color;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 2]);
+        ctx.beginPath();
+        ctx.arc(opStart.x, opStart.y, rScreen, 0, Math.PI / 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      };
+
+      if (comp.leftDoor) drawStairDoor(comp.leftDoor, '#f59e0b');
+      if (comp.rightDoor) drawStairDoor(comp.rightDoor, '#f59e0b');
+      if (comp.frontDoor) drawStairDoor(comp.frontDoor, '#38bdf8');
+
+      // G. Selection Box & Title Tag
+      if (isSelected) {
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+
+        const bMin = CoordinateTransform.world2DToScreen(
+          { x: comp.bounds.minX - 0.1, y: comp.bounds.maxY + 0.1 },
+          panX,
+          panY,
+          zoom
+        );
+        const bMax = CoordinateTransform.world2DToScreen(
+          { x: comp.bounds.maxX + 0.1, y: comp.bounds.minY - 0.1 },
+          panX,
+          panY,
+          zoom
+        );
+
+        ctx.strokeRect(bMin.x, bMin.y, bMax.x - bMin.x, bMax.y - bMin.y);
+        ctx.setLineDash([]);
+
+        // Handle Grips
+        [
+          { x: bMin.x, y: bMin.y },
+          { x: bMax.x, y: bMin.y },
+          { x: bMax.x, y: bMax.y },
+          { x: bMin.x, y: bMax.y },
+        ].forEach((h) => {
+          ctx.fillStyle = '#fbbf24';
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 1.5;
+          ctx.fillRect(h.x - 4, h.y - 4, 8, 8);
+          ctx.strokeRect(h.x - 4, h.y - 4, 8, 8);
+        });
+
+        // Tag
+        const tagText = `${stair.name} (${stair.roomLength}m × ${stair.roomWidth}m, rot: ${stair.rotation || 0}°)`;
+        ctx.fillStyle = '#b45309';
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(bMin.x, bMin.y - 20, tagText.length * 6.5 + 14, 18, 4);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 9px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(tagText, bMin.x + 7, bMin.y - 11);
+      }
+    });
+
     // 8. Dimensions
     if (settings.showDimensions) {
       floorDimensions.forEach((dim) => {
@@ -899,6 +1160,16 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       } else {
         setMeasureStart(null);
       }
+    } else if (activeTool === 'STAIRCASE') {
+      const newStair = StaircasePlacementEngine.createDefaultStaircase(
+        activeFloorId,
+        clickPoint,
+        {
+          name: `RCC Staircase ${floorStairs.length + 1}`,
+        }
+      );
+      if (onAddStaircase) onAddStaircase(newStair);
+      onSelectElement(newStair.id, 'STAIRCASE');
     } else if (activeTool === 'SPLIT' || activeTool === 'SPLIT_WALL') {
       const hostWall = floorWalls.find((w) => {
         const proj = ArchitecturalGeometryEngine.projectPointOnSegment(clickPoint, w.start, w.end);
@@ -913,19 +1184,35 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         }
       }
     } else if (activeTool === 'SELECT') {
-      // Hit testing: Doors -> Windows -> Rooms -> Walls
+      // Hit testing: Staircases -> Doors -> Windows -> Rooms -> Walls
       let clickedElementId: string | null = null;
       let clickedElementType: any = null;
 
+      // Staircases (first priority for direct click & drag)
+      for (const st of floorStairs) {
+        if (StaircasePlacementEngine.isPointInStaircase(clickPoint, st)) {
+          clickedElementId = st.id;
+          clickedElementType = 'STAIRCASE';
+          isDraggingStaircaseRef.current = true;
+          dragStaircaseOffsetRef.current = {
+            offsetX: clickPoint.x - st.position.x,
+            offsetY: clickPoint.y - st.position.y,
+          };
+          break;
+        }
+      }
+
       // Doors
-      for (const d of floorDoors) {
-        const host = walls[d.hostWallId];
-        if (host) {
-          const c = DoorEngine.getDoorCenter(host, d);
-          if (ArchitecturalGeometryEngine.distance(clickPoint, c) < d.width / 2 + 0.1) {
-            clickedElementId = d.id;
-            clickedElementType = 'DOOR';
-            break;
+      if (!clickedElementId) {
+        for (const d of floorDoors) {
+          const host = walls[d.hostWallId];
+          if (host) {
+            const c = DoorEngine.getDoorCenter(host, d);
+            if (ArchitecturalGeometryEngine.distance(clickPoint, c) < d.width / 2 + 0.1) {
+              clickedElementId = d.id;
+              clickedElementType = 'DOOR';
+              break;
+            }
           }
         }
       }
@@ -998,6 +1285,26 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     );
     setCurrentMouseWorld(mouseWorld);
 
+    // Dragging Staircase Position
+    if (
+      isDraggingStaircaseRef.current &&
+      selectedId &&
+      staircases[selectedId] &&
+      onUpdateStaircase
+    ) {
+      const st = staircases[selectedId];
+      const offset = dragStaircaseOffsetRef.current || { offsetX: 0, offsetY: 0 };
+      const targetPoint = activeSnap ? activeSnap.point : mouseWorld;
+      const newX = Math.round((targetPoint.x - offset.offsetX) * 100) / 100;
+      const newY = Math.round((targetPoint.y - offset.offsetY) * 100) / 100;
+      if (newX !== st.position.x || newY !== st.position.y) {
+        onUpdateStaircase(selectedId, {
+          position: { x: newX, y: newY },
+        });
+      }
+      return;
+    }
+
     // Calculate Snapping
     const snap = SnapEngine.findBestSnapPoint(
       mouseWorld,
@@ -1011,6 +1318,8 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
   const handleMouseUp = () => {
     isPanningRef.current = false;
+    isDraggingStaircaseRef.current = false;
+    dragStaircaseOffsetRef.current = null;
   };
 
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {

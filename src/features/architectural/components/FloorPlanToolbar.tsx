@@ -25,6 +25,8 @@ import {
   CheckCircle2,
   HelpCircle,
   Settings2,
+  Footprints,
+  Sparkles,
 } from 'lucide-react';
 
 interface FloorPlanToolbarProps {
@@ -42,6 +44,7 @@ interface FloorPlanToolbarProps {
   onChangeDoorWidth: (w: number) => void;
   windowWidth: number;
   onChangeWindowWidth: (w: number) => void;
+  onPlaceDesignedStaircase?: () => void;
 }
 
 export const FloorPlanToolbar: React.FC<FloorPlanToolbarProps> = ({
@@ -59,12 +62,14 @@ export const FloorPlanToolbar: React.FC<FloorPlanToolbarProps> = ({
   onChangeDoorWidth,
   windowWidth,
   onChangeWindowWidth,
+  onPlaceDesignedStaircase,
 }) => {
   const [isSnapMenuOpen, setIsSnapMenuOpen] = useState(false);
 
   const tools: { id: ActivePlanTool; label: string; shortcut: string; icon: React.ReactNode }[] = [
     { id: 'SELECT', label: 'Select / Inspect', shortcut: 'V', icon: <MousePointer className="w-4 h-4" /> },
     { id: 'WALL', label: 'Wall (BIM)', shortcut: 'W', icon: <Square className="w-4 h-4" /> },
+    { id: 'STAIRCASE', label: 'Staircase (RCC)', shortcut: 'ST', icon: <Footprints className="w-4 h-4" /> },
     { id: 'DOOR', label: 'Door (Hosted)', shortcut: 'D', icon: <DoorOpen className="w-4 h-4" /> },
     { id: 'WINDOW', label: 'Window (Hosted)', shortcut: 'WIN', icon: <AppWindow className="w-4 h-4" /> },
     { id: 'OPENING', label: 'Wall Opening', shortcut: 'O', icon: <Minimize2 className="w-4 h-4" /> },
@@ -171,6 +176,27 @@ export const FloorPlanToolbar: React.FC<FloorPlanToolbarProps> = ({
             <p className="text-[10px] text-slate-400 leading-tight">
               Hover over any wall to host the door. Click to place.
             </p>
+          </div>
+        )}
+
+        {activeTool === 'STAIRCASE' && (
+          <div className="p-2.5 bg-slate-800/90 rounded-lg border border-slate-700 space-y-2 animate-in fade-in">
+            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block flex items-center gap-1.5">
+              <Footprints className="w-3.5 h-3.5 text-amber-400" />
+              Staircase (IS 456 / NBC)
+            </span>
+            <p className="text-[10px] text-slate-300 leading-tight">
+              Click anywhere on the plan canvas to place the designed dog-legged staircase.
+            </p>
+            {onPlaceDesignedStaircase && (
+              <button
+                onClick={onPlaceDesignedStaircase}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded shadow-xs transition-all text-[11px]"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Place at Plan Center</span>
+              </button>
+            )}
           </div>
         )}
 

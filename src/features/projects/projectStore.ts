@@ -12,6 +12,7 @@ import {
   ArchitecturalWindow,
   ArchitecturalOpening,
   ArchitecturalRoom,
+  ArchitecturalStaircase,
   ArchitecturalDimension,
   ArchitecturalSettings,
   ActivePlanTool,
@@ -146,6 +147,8 @@ export interface ProjectState {
   customBeamRebarOverrides: Record<number, any>;
   customShearWallOverrides: Record<number, any>;
   customSlabOverrides: Record<string, any>;
+  customStaircaseGeometry?: any;
+  customStaircaseLandingEntry?: any;
 
   // Architectural Floor Plan State
   architecturalWalls: Record<string, ArchitecturalWall>;
@@ -153,17 +156,18 @@ export interface ProjectState {
   architecturalWindows: Record<string, ArchitecturalWindow>;
   architecturalOpenings: Record<string, ArchitecturalOpening>;
   architecturalRooms: Record<string, ArchitecturalRoom>;
+  architecturalStaircases: Record<string, ArchitecturalStaircase>;
   architecturalDimensions: Record<string, ArchitecturalDimension>;
   architecturalSettings: ArchitecturalSettings;
   activeFloorIndex: number;
   activePlanTool: ActivePlanTool;
   selectedArchitecturalId: string | null;
-  selectedArchitecturalType: 'WALL' | 'DOOR' | 'WINDOW' | 'OPENING' | 'ROOM' | 'DIMENSION' | null;
+  selectedArchitecturalType: 'WALL' | 'DOOR' | 'WINDOW' | 'OPENING' | 'ROOM' | 'STAIRCASE' | 'DIMENSION' | null;
 
   // Architectural Actions
   setActiveFloorIndex: (idx: number) => void;
   setActivePlanTool: (tool: ActivePlanTool) => void;
-  selectArchitecturalElement: (id: string | null, type?: 'WALL' | 'DOOR' | 'WINDOW' | 'OPENING' | 'ROOM' | 'DIMENSION' | null) => void;
+  selectArchitecturalElement: (id: string | null, type?: 'WALL' | 'DOOR' | 'WINDOW' | 'OPENING' | 'ROOM' | 'STAIRCASE' | 'DIMENSION' | null) => void;
   addWall: (wall: ArchitecturalWall) => Promise<void>;
   updateWall: (id: string, updates: Partial<ArchitecturalWall>) => Promise<void>;
   deleteWall: (id: string, deleteHosted?: boolean) => Promise<void>;
@@ -179,6 +183,9 @@ export interface ProjectState {
   addRoom: (room: ArchitecturalRoom) => Promise<void>;
   updateRoom: (id: string, updates: Partial<ArchitecturalRoom>) => Promise<void>;
   deleteRoom: (id: string) => Promise<void>;
+  addStaircase: (staircase: ArchitecturalStaircase) => Promise<void>;
+  updateStaircase: (id: string, updates: Partial<ArchitecturalStaircase>) => Promise<void>;
+  deleteStaircase: (id: string) => Promise<void>;
   setRoomsForFloor: (floorId: string, rooms: ArchitecturalRoom[]) => Promise<void>;
   addDimension: (dim: ArchitecturalDimension) => Promise<void>;
   deleteDimension: (id: string) => Promise<void>;
@@ -286,8 +293,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   architecturalWindows: {},
   architecturalOpenings: {},
   architecturalRooms: {},
+  architecturalStaircases: {},
   architecturalDimensions: {},
   architecturalSettings: DEFAULT_ARCHITECTURAL_SETTINGS,
+  customStaircaseGeometry: null,
+  customStaircaseLandingEntry: null,
   activeFloorIndex: 1,
   activePlanTool: 'SELECT',
   selectedArchitecturalId: null,
@@ -367,6 +377,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           architecturalWindows: first.architecturalWindows || {},
           architecturalOpenings: first.architecturalOpenings || {},
           architecturalRooms: first.architecturalRooms || {},
+          architecturalStaircases: first.architecturalStaircases || {},
           architecturalDimensions: first.architecturalDimensions || {},
           architecturalSettings: first.architecturalSettings || DEFAULT_ARCHITECTURAL_SETTINGS,
           universalRebarSelection: uRebar,
@@ -494,6 +505,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           architecturalWindows: project.architecturalWindows || {},
           architecturalOpenings: project.architecturalOpenings || {},
           architecturalRooms: project.architecturalRooms || {},
+          architecturalStaircases: project.architecturalStaircases || {},
           architecturalDimensions: project.architecturalDimensions || {},
           architecturalSettings: project.architecturalSettings || DEFAULT_ARCHITECTURAL_SETTINGS,
           universalRebarSelection: uRebar,
@@ -1861,6 +1873,76 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const updatedProject: StoredProject = {
         ...currentProj,
         architecturalRooms: currentRooms,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  addStaircase: async (staircase: ArchitecturalStaircase) => {
+    const currentStairs = get().architecturalStaircases || {};
+    const updatedStairs = { ...currentStairs, [staircase.id]: staircase };
+    pushArchUndo({ type: 'ADD_STAIRCASE', staircase });
+
+    const currentProj = get().activeProject;
+    set({
+      architecturalStaircases: updatedStairs,
+      selectedArchitecturalId: staircase.id,
+      selectedArchitecturalType: 'STAIRCASE',
+    });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalStaircases: updatedStairs,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  updateStaircase: async (id: string, updates: Partial<ArchitecturalStaircase>) => {
+    const currentStairs = get().architecturalStaircases || {};
+    const oldStair = currentStairs[id];
+    if (!oldStair) return;
+
+    const updatedStair = { ...oldStair, ...updates };
+    const updatedStairs = { ...currentStairs, [id]: updatedStair };
+    pushArchUndo({ type: 'UPDATE_STAIRCASE', previous: oldStair, current: updatedStair });
+
+    const currentProj = get().activeProject;
+    set({ architecturalStaircases: updatedStairs });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalStaircases: updatedStairs,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  deleteStaircase: async (id: string) => {
+    const currentStairs = { ...(get().architecturalStaircases || {}) };
+    const stair = currentStairs[id];
+    if (!stair) return;
+    delete currentStairs[id];
+    pushArchUndo({ type: 'DELETE_STAIRCASE', staircase: stair });
+
+    const currentProj = get().activeProject;
+    set({
+      architecturalStaircases: currentStairs,
+      selectedArchitecturalId: get().selectedArchitecturalId === id ? null : get().selectedArchitecturalId,
+    });
+
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        architecturalStaircases: currentStairs,
         metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
       };
       await ProjectStorage.saveProject(updatedProject);

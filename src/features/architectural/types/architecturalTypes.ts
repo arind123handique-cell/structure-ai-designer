@@ -31,6 +31,7 @@ export type ActivePlanTool =
   | 'DOOR'
   | 'WINDOW'
   | 'OPENING'
+  | 'STAIRCASE'
   | 'ROOM'
   | 'DIMENSION'
   | 'MEASURE'
@@ -100,6 +101,38 @@ export interface ArchitecturalOpening {
   sillHeight: number; // in meters
   openingType: OpeningType;
   name?: string;
+}
+
+export interface ArchitecturalStaircase {
+  id: string; // e.g. "STAIR-001"
+  floorId: string; // e.g. "floor_0"
+  name: string; // e.g. "Main Dog-Legged Staircase"
+  position: Point2D; // in meters (insertion point World X, World Z)
+  rotation: number; // in degrees (0, 90, 180, 270)
+  staircaseType: 'DOG_LEGGED' | 'OPEN_WELL' | 'STRAIGHT';
+  roomLength: number; // Length L in meters (e.g. 4.80)
+  roomWidth: number; // Width B in meters (e.g. 2.40)
+  flightWidth: number; // Width of each flight in meters (e.g. 1.10)
+  wellGap: number; // Central well gap in meters (e.g. 0.20)
+  landingDepth: number; // Depth of landings in meters (e.g. 1.20)
+  treadMm: number; // Step tread in mm (e.g. 275)
+  riserMm: number; // Step riser in mm (e.g. 160)
+  riserCount: number; // Number of risers per flight (e.g. 10)
+  treadCount: number; // Number of treads per flight (e.g. 9)
+  waistThicknessMm: number; // Waist slab thickness in mm (e.g. 160)
+  wallThicknessMm: number; // Outer enclosure wall thickness in mm (e.g. 230)
+  hasEnclosureWalls: boolean; // Whether to render full enclosure walls around staircase
+  hasLeftDoor: boolean; // Left-side landing entry door
+  leftDoorWidth: number; // Left door width in meters (e.g. 1.0)
+  hasRightDoor: boolean; // Right-side landing entry door
+  rightDoorWidth: number; // Right door width in meters (e.g. 1.0)
+  hasFrontDoor: boolean; // Front main corridor entry door
+  frontDoorWidth: number; // Front door width in meters (e.g. 1.2)
+  direction: 'UP' | 'DOWN';
+  startElevation: number; // Base floor elevation Y in meters
+  endElevation: number; // Next diaphragm floor elevation Y in meters
+  locked?: boolean;
+  color?: string;
 }
 
 export interface ArchitecturalRoom {
