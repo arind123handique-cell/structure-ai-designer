@@ -122,48 +122,75 @@ export class FloorPlanEngine {
     const columnSupportMapping = ColumnNumberingService.getColumnSupportMapping(model);
     const columnMemberMapping = ColumnNumberingService.getColumnMemberMapping(model);
 
-    // 1. Identify main floor framing Y elevations in the model (e.g. 0.0m, 3.2m, 6.4m, 9.6m, 12.8m, Roof)
-    const beamElevations = new Set<number>();
+    // 1. Identify main primary floor framing & diaphragm Y elevations in the model (0.0m, 3.2m, 6.4m, 9.6m, 12.8m, Roof)
+    // Robust detection: Look for elevations where vertical columns terminate or major horizontal beam grids meet
+    const columnElevations = new Map<number, number>();
+    for (const m of members.values()) {
+      const n1 = nodes.get(m.startNodeId);
+      const n2 = nodes.get(m.endNodeId);
+      if (n1 && n2 && Math.abs(n1.y - n2.y) >= 0.5) {
+        const y1 = Math.round(n1.y * 100) / 100;
+        const y2 = Math.round(n2.y * 100) / 100;
+        columnElevations.set(y1, (columnElevations.get(y1) || 0) + 1);
+        columnElevations.set(y2, (columnElevations.get(y2) || 0) + 1);
+      }
+    }
+
+    const beamElevations = new Map<number, number>();
     for (const m of members.values()) {
       if (m.classification === 'BEAM') {
         const n1 = nodes.get(m.startNodeId);
         const n2 = nodes.get(m.endNodeId);
         if (n1 && n2 && Math.abs(n1.y - n2.y) < 0.15) {
-          beamElevations.add(parseFloat(n1.y.toFixed(2)));
+          const y = Math.round(n1.y * 100) / 100;
+          beamElevations.set(y, (beamElevations.get(y) || 0) + 1);
         }
       }
     }
 
-    if (model.plates) {
-      for (const p of model.plates.values()) {
-        const pNodes = p.nodeIds.map((id) => nodes.get(id)).filter(Boolean);
-        if (pNodes.length > 0) {
-          const avgY = pNodes.reduce((sum, n) => sum + (n?.y || 0), 0) / pNodes.length;
-          beamElevations.add(parseFloat(avgY.toFixed(2)));
-        }
+    // Include support base elevations
+    const supportElevations = new Set<number>();
+    if (supports) {
+      for (const sup of supports.values()) {
+        const node = nodes.get(sup.nodeId);
+        if (node) supportElevations.add(Math.round(node.y * 100) / 100);
       }
     }
 
-    // Always include base / foundation elevation
-    const allNodeY = Array.from(nodes.values()).map((n) => parseFloat(n.y.toFixed(2)));
-    const minY = allNodeY.length > 0 ? Math.min(...allNodeY) : 0;
-    beamElevations.add(minY);
+    // Candidate elevations: levels with columns starting/terminating (>= 1 column),
+    // framing beams (>= 1 beam), or ground supports
+    const candidateY = new Set<number>();
+    for (const [y, colCount] of columnElevations.entries()) {
+      if (colCount >= 1) candidateY.add(y);
+    }
+    for (const [y, beamCount] of beamElevations.entries()) {
+      if (beamCount >= 1) candidateY.add(y);
+    }
+    // Always include minimum base node elevation (e.g. 0.00m Ground / Foundation level)
+    const allNodeY = Array.from(nodes.values()).map((n) => Math.round(n.y * 100) / 100);
+    if (allNodeY.length > 0) {
+      candidateY.add(Math.min(...allNodeY));
+    }
 
-    const sortedBeamY = Array.from(beamElevations).sort((a, b) => a - b);
+    // Fallback if no columns or beams found
+    if (candidateY.size === 0) {
+      for (const n of nodes.values()) candidateY.add(Math.round(n.y * 100) / 100);
+    }
 
-    // Cluster Y elevations within 2.2m tolerance so minor intermediate nodes (landings, drops) merge into main 3.2m story levels
+    const sortedCandidates = Array.from(candidateY).sort((a, b) => a - b);
+
+    // Cluster close candidate elevations within 0.35m tolerance (e.g. beam centerline vs slab top)
     const yCoordinates: number[] = [];
-    for (const y of sortedBeamY) {
+    for (const y of sortedCandidates) {
       if (yCoordinates.length === 0) {
         yCoordinates.push(y);
       } else {
-        const lastY = yCoordinates[yCoordinates.length - 1];
-        if (y - lastY >= 2.2) {
+        const last = yCoordinates[yCoordinates.length - 1];
+        if (Math.abs(y - last) > 0.35) {
           yCoordinates.push(y);
         }
       }
     }
-    yCoordinates.sort((a, b) => a - b);
 
     if (yCoordinates.length === 0) yCoordinates.push(0);
 

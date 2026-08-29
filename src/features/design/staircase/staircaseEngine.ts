@@ -171,45 +171,76 @@ export class StaircaseDesignEngine {
 
     const nodes = model.nodes;
     const members = model.members;
-    const beamElevations = new Set<number>();
+    const supports = model.supports;
 
-    // 1. Check beam elevations
+    // Robust Diaphragm Level Detection: Look for elevations where vertical columns terminate or major horizontal beam grids meet
+    const columnElevations = new Map<number, number>();
+    for (const m of members.values()) {
+      const n1 = nodes.get(m.startNodeId);
+      const n2 = nodes.get(m.endNodeId);
+      if (n1 && n2 && Math.abs(n1.y - n2.y) >= 0.5) {
+        const y1 = Math.round(n1.y * 100) / 100;
+        const y2 = Math.round(n2.y * 100) / 100;
+        columnElevations.set(y1, (columnElevations.get(y1) || 0) + 1);
+        columnElevations.set(y2, (columnElevations.get(y2) || 0) + 1);
+      }
+    }
+
+    const beamElevations = new Map<number, number>();
     for (const m of members.values()) {
       if (m.classification === 'BEAM') {
         const n1 = nodes.get(m.startNodeId);
         const n2 = nodes.get(m.endNodeId);
         if (n1 && n2 && Math.abs(n1.y - n2.y) < 0.15) {
-          beamElevations.add(parseFloat(n1.y.toFixed(2)));
+          const y = Math.round(n1.y * 100) / 100;
+          beamElevations.set(y, (beamElevations.get(y) || 0) + 1);
         }
       }
     }
 
-    // 2. Check plates
-    if (model.plates) {
-      for (const p of model.plates.values()) {
-        const pNodes = p.nodeIds.map((id) => nodes.get(id)).filter(Boolean);
-        if (pNodes.length > 0) {
-          const avgY = pNodes.reduce((sum, n) => sum + (n?.y || 0), 0) / pNodes.length;
-          beamElevations.add(parseFloat(avgY.toFixed(2)));
-        }
+    // Include support base elevations
+    const supportElevations = new Set<number>();
+    if (supports) {
+      for (const sup of supports.values()) {
+        const node = nodes.get(sup.nodeId);
+        if (node) supportElevations.add(Math.round(node.y * 100) / 100);
       }
     }
 
-    // 3. Collect all Y elevations
-    const allNodeY = Array.from(nodes.values()).map((n) => parseFloat(n.y.toFixed(2)));
-    const minY = allNodeY.length > 0 ? Math.min(...allNodeY) : 0;
-    beamElevations.add(minY);
+    // Candidate elevations: levels with columns starting/terminating (>= 1 column),
+    // framing beams (>= 1 beam), or ground supports
+    const candidateY = new Set<number>();
+    for (const [y, colCount] of columnElevations.entries()) {
+      if (colCount >= 1) candidateY.add(y);
+    }
+    for (const [y, beamCount] of beamElevations.entries()) {
+      if (beamCount >= 1) candidateY.add(y);
+    }
+    for (const y of supportElevations) {
+      candidateY.add(y);
+    }
 
-    const sortedY = Array.from(beamElevations).sort((a, b) => a - b);
+    // Always include minimum base node elevation (e.g. 0.00m Ground / Foundation level)
+    const allNodeY = Array.from(nodes.values()).map((n) => Math.round(n.y * 100) / 100);
+    if (allNodeY.length > 0) {
+      candidateY.add(Math.min(...allNodeY));
+    }
 
-    // Cluster Y elevations within 2.0m tolerance so intermediate landing nodes merge into main diaphragm storeys
+    // Fallback if no columns or beams found
+    if (candidateY.size === 0) {
+      for (const n of nodes.values()) candidateY.add(Math.round(n.y * 100) / 100);
+    }
+
+    const sortedCandidates = Array.from(candidateY).sort((a, b) => a - b);
+
+    // Cluster close candidate elevations within 0.35m tolerance (e.g. beam centerline vs slab top)
     const clusteredY: number[] = [];
-    for (const y of sortedY) {
+    for (const y of sortedCandidates) {
       if (clusteredY.length === 0) {
         clusteredY.push(y);
       } else {
         const lastY = clusteredY[clusteredY.length - 1];
-        if (y - lastY >= 2.0) {
+        if (Math.abs(y - lastY) > 0.35) {
           clusteredY.push(y);
         }
       }
