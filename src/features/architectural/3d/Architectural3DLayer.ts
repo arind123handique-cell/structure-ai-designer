@@ -13,6 +13,8 @@ import {
   ArchitecturalStaircase,
 } from '../types/architecturalTypes';
 import { ArchitecturalGeometryEngine } from '../engines/architecturalGeometryEngine';
+import { StaircasePlacementEngine } from '../engines/staircasePlacementEngine';
+import { DiaphragmLevelInfo } from '@/features/design/staircase/staircaseEngine';
 
 // Global texture cache to prevent creating duplicate textures / canvases across renders
 const badgeTextureCache = new Map<string, THREE.CanvasTexture>();
@@ -128,6 +130,7 @@ export interface Architectural3DVisibility {
   showOpenings: boolean;
   showRoomLabels: boolean;
   showStaircases: boolean;
+  diaphragmLevels?: DiaphragmLevelInfo[];
 }
 
 export class Architectural3DLayer {
@@ -537,172 +540,241 @@ export class Architectural3DLayer {
       }
     }
 
-    // 2. Build 3D Parametric RCC Staircases
+    // 2. Build 3D Parametric RCC Staircases Across All Building Storeys & Diaphragms
     if (visibility.showStaircases) {
-      for (const stair of stairList) {
+      let stairsToRender = stairList;
+      if (stairsToRender.length === 0) {
+        // Auto-provide standard building staircase at core location so it renders immediately
+        stairsToRender = [
+          StaircasePlacementEngine.createDefaultStaircase('floor_0', { x: 4.5, y: -8.95 }),
+        ];
+      }
+
+      const storeys: DiaphragmLevelInfo[] =
+        visibility.diaphragmLevels && visibility.diaphragmLevels.length > 0
+          ? visibility.diaphragmLevels
+          : [
+              {
+                levelIndex: 1,
+                levelName: 'Ground to 1st Floor Diaphragm',
+                bottomElevationY: 0.0,
+                topElevationY: 3.2,
+                storeyHeightM: 3.2,
+                midLandingElevationY: 1.6,
+                isRoofLevel: false,
+              },
+              {
+                levelIndex: 2,
+                levelName: '1st to 2nd Floor Diaphragm',
+                bottomElevationY: 3.2,
+                topElevationY: 6.4,
+                storeyHeightM: 3.2,
+                midLandingElevationY: 4.8,
+                isRoofLevel: false,
+              },
+              {
+                levelIndex: 3,
+                levelName: '2nd to 3rd Floor Diaphragm',
+                bottomElevationY: 6.4,
+                topElevationY: 9.6,
+                storeyHeightM: 3.2,
+                midLandingElevationY: 8.0,
+                isRoofLevel: false,
+              },
+              {
+                levelIndex: 4,
+                levelName: '3rd to 4th Floor Diaphragm',
+                bottomElevationY: 9.6,
+                topElevationY: 12.8,
+                storeyHeightM: 3.2,
+                midLandingElevationY: 11.2,
+                isRoofLevel: false,
+              },
+              {
+                levelIndex: 5,
+                levelName: '4th Floor to Roof Diaphragm',
+                bottomElevationY: 12.8,
+                topElevationY: 15.65,
+                storeyHeightM: 2.85,
+                midLandingElevationY: 14.23,
+                isRoofLevel: true,
+              },
+            ];
+
+      for (const stair of stairsToRender) {
         const isStairSelected = selectedId === stair.id;
-        const stairGroup = new THREE.Group();
-        const baseElevation = stair.startElevation || 0;
-        stairGroup.position.set(stair.position.x, baseElevation, stair.position.y);
-
-        const rotRad = -((stair.rotation || 0) * Math.PI) / 180;
-        stairGroup.rotation.y = rotRad;
-
         const L = stair.roomLength || 4.8;
         const B = stair.roomWidth || 2.4;
         const Wf = stair.flightWidth || 1.1;
         const DL = stair.landingDepth || 1.2;
         const tw = (stair.waistThicknessMm || 160) / 1000;
         const treadM = (stair.treadMm || 275) / 1000;
-        const riserM = (stair.riserMm || 160) / 1000;
-        const numRisers = stair.riserCount || 10;
         const numTreads = stair.treadCount || 9;
-        const H1 = numRisers * riserM; // Mid-landing height (e.g. 1.6m)
-        const H2 = numRisers * riserM; // Flight 2 rise (e.g. 1.6m)
-        const totalHeight = H1 + H2;
+        const numRisers = stair.riserCount || 10;
+        const rotRad = -((stair.rotation || 0) * Math.PI) / 180;
 
-        // A. 3D Floor Landing Slab (Y = 0)
-        const floorLandingGeom = new THREE.BoxGeometry(B, tw, DL);
-        const floorLandingMesh = new THREE.Mesh(floorLandingGeom, stairLandingMat);
-        floorLandingMesh.position.set(B / 2, -tw / 2, DL / 2);
-        floorLandingMesh.userData = { type: 'arch_staircase', id: stair.id };
-        stairGroup.add(floorLandingMesh);
+        // Render staircase continuously storey by storey across ALL floors
+        for (let sIdx = 0; sIdx < storeys.length; sIdx++) {
+          const storey = storeys[sIdx];
+          const stairGroup = new THREE.Group();
+          const baseElevation = storey.bottomElevationY;
+          stairGroup.position.set(stair.position.x, baseElevation, stair.position.y);
+          stairGroup.rotation.y = rotRad;
 
-        // B. 3D Mid-Landing Slab (Y = H1)
-        const midLandingGeom = new THREE.BoxGeometry(B, tw, DL);
-        const midLandingMesh = new THREE.Mesh(midLandingGeom, stairMidLandingMat);
-        midLandingMesh.position.set(B / 2, H1 - tw / 2, L - DL / 2);
-        midLandingMesh.userData = { type: 'arch_staircase', id: stair.id };
-        stairGroup.add(midLandingMesh);
+          const storeyH = storey.storeyHeightM || 3.2;
+          const H1 = storeyH / 2; // Mid-landing height
+          const H2 = storeyH - H1; // Flight 2 height
+          const riserM = H1 / numRisers; // Exact riser height for this storey
 
-        // C. 3D Flight 1 (Stepped RCC Solid rising 0 -> H1)
-        for (let i = 0; i < numTreads; i++) {
-          const stepH = (i + 1) * riserM;
-          const stepGeom = new THREE.BoxGeometry(Wf, stepH, treadM);
-          const stepMesh = new THREE.Mesh(
-            stepGeom,
-            isStairSelected ? selectedWallMat : stairConcreteMat
-          );
-          stepMesh.position.set(Wf / 2, stepH / 2, DL + i * treadM + treadM / 2);
-          stepMesh.userData = { type: 'arch_staircase', id: stair.id };
-          stairGroup.add(stepMesh);
-        }
+          // A. 3D Floor Landing Slab (Y = 0)
+          const floorLandingGeom = new THREE.BoxGeometry(B, tw, DL);
+          const floorLandingMesh = new THREE.Mesh(floorLandingGeom, stairLandingMat);
+          floorLandingMesh.position.set(B / 2, -tw / 2, DL / 2);
+          floorLandingMesh.userData = { type: 'arch_staircase', id: stair.id, storey: storey.levelIndex };
+          stairGroup.add(floorLandingMesh);
 
-        // Flight 1 Handrail
-        const f1RailGeom = new THREE.CylinderGeometry(0.025, 0.025, Math.hypot(numTreads * treadM, H1));
-        const f1RailMesh = new THREE.Mesh(f1RailGeom, stairRailingMat);
-        const f1Angle = Math.atan2(H1, numTreads * treadM);
-        f1RailMesh.rotation.x = Math.PI / 2 - f1Angle;
-        f1RailMesh.position.set(
-          Wf - 0.05,
-          H1 / 2 + 0.9,
-          DL + (numTreads * treadM) / 2
-        );
-        stairGroup.add(f1RailMesh);
+          // B. 3D Mid-Landing Slab (Y = H1)
+          const midLandingGeom = new THREE.BoxGeometry(B, tw, DL);
+          const midLandingMesh = new THREE.Mesh(midLandingGeom, stairMidLandingMat);
+          midLandingMesh.position.set(B / 2, H1 - tw / 2, L - DL / 2);
+          midLandingMesh.userData = { type: 'arch_staircase', id: stair.id, storey: storey.levelIndex };
+          stairGroup.add(midLandingMesh);
 
-        // D. 3D Flight 2 (Stepped RCC Solid rising H1 -> H1+H2 returning back towards DL)
-        for (let i = 0; i < numTreads; i++) {
-          const stepH = (i + 1) * riserM;
-          const stepGeom = new THREE.BoxGeometry(Wf, stepH, treadM);
-          const stepMesh = new THREE.Mesh(
-            stepGeom,
-            isStairSelected ? selectedWallMat : stairConcreteMat
-          );
-          // Positioned on the right half of width (B - Wf to B)
-          stepMesh.position.set(
-            B - Wf / 2,
-            H1 + stepH / 2,
-            L - DL - (i * treadM + treadM / 2)
-          );
-          stepMesh.userData = { type: 'arch_staircase', id: stair.id };
-          stairGroup.add(stepMesh);
-        }
-
-        // Flight 2 Handrail
-        const f2RailGeom = new THREE.CylinderGeometry(0.025, 0.025, Math.hypot(numTreads * treadM, H2));
-        const f2RailMesh = new THREE.Mesh(f2RailGeom, stairRailingMat);
-        f2RailMesh.rotation.x = -(Math.PI / 2 - f1Angle);
-        f2RailMesh.position.set(
-          B - Wf + 0.05,
-          H1 + H2 / 2 + 0.9,
-          DL + (numTreads * treadM) / 2
-        );
-        stairGroup.add(f2RailMesh);
-
-        // E. 3D Enclosure Walls with Dual Landing Doors
-        if (stair.hasEnclosureWalls) {
-          const wallThick = (stair.wallThicknessMm || 230) / 1000;
-          const wallH = totalHeight;
-
-          // Back Wall (at Mid-Landing Z = L)
-          const backWallGeom = new THREE.BoxGeometry(B + wallThick * 2, wallH, wallThick);
-          const backWall = new THREE.Mesh(backWallGeom, stairEnclosureWallMat);
-          backWall.position.set(B / 2, wallH / 2, L + wallThick / 2);
-          stairGroup.add(backWall);
-
-          // Left Wall (at X = 0) with Mid-Landing Left Door Cutout
-          if (stair.hasLeftDoor) {
-            const doorW = stair.leftDoorWidth || 1.0;
-            const doorH = 2.1;
-            const seg1Len = L - DL;
-            const seg1Geom = new THREE.BoxGeometry(wallThick, wallH, seg1Len);
-            const seg1 = new THREE.Mesh(seg1Geom, stairEnclosureWallMat);
-            seg1.position.set(-wallThick / 2, wallH / 2, seg1Len / 2);
-            stairGroup.add(seg1);
-
-            // Lintel above left door
-            if (wallH > H1 + doorH) {
-              const lintelH = wallH - (H1 + doorH);
-              const lintelGeom = new THREE.BoxGeometry(wallThick, lintelH, DL);
-              const lintel = new THREE.Mesh(lintelGeom, stairEnclosureWallMat);
-              lintel.position.set(-wallThick / 2, H1 + doorH + lintelH / 2, L - DL / 2);
-              stairGroup.add(lintel);
-            }
-          } else {
-            const leftWallGeom = new THREE.BoxGeometry(wallThick, wallH, L);
-            const leftWall = new THREE.Mesh(leftWallGeom, stairEnclosureWallMat);
-            leftWall.position.set(-wallThick / 2, wallH / 2, L / 2);
-            stairGroup.add(leftWall);
+          // C. 3D Flight 1 (Stepped RCC Solid rising 0 -> H1)
+          for (let i = 0; i < numTreads; i++) {
+            const stepH = (i + 1) * riserM;
+            const stepGeom = new THREE.BoxGeometry(Wf, stepH, treadM);
+            const stepMesh = new THREE.Mesh(
+              stepGeom,
+              isStairSelected ? selectedWallMat : stairConcreteMat
+            );
+            stepMesh.position.set(Wf / 2, stepH / 2, DL + i * treadM + treadM / 2);
+            stepMesh.userData = { type: 'arch_staircase', id: stair.id, storey: storey.levelIndex };
+            stairGroup.add(stepMesh);
           }
 
-          // Right Wall (at X = B) with Mid-Landing Right Door Cutout
-          if (stair.hasRightDoor) {
-            const doorW = stair.rightDoorWidth || 1.0;
-            const doorH = 2.1;
-            const seg1Len = L - DL;
-            const seg1Geom = new THREE.BoxGeometry(wallThick, wallH, seg1Len);
-            const seg1 = new THREE.Mesh(seg1Geom, stairEnclosureWallMat);
-            seg1.position.set(B + wallThick / 2, wallH / 2, seg1Len / 2);
-            stairGroup.add(seg1);
+          // Flight 1 Handrail
+          const f1RailGeom = new THREE.CylinderGeometry(0.025, 0.025, Math.hypot(numTreads * treadM, H1));
+          const f1RailMesh = new THREE.Mesh(f1RailGeom, stairRailingMat);
+          const f1Angle = Math.atan2(H1, numTreads * treadM);
+          f1RailMesh.rotation.x = Math.PI / 2 - f1Angle;
+          f1RailMesh.position.set(
+            Wf - 0.05,
+            H1 / 2 + 0.9,
+            DL + (numTreads * treadM) / 2
+          );
+          stairGroup.add(f1RailMesh);
 
-            // Lintel above right door
-            if (wallH > H1 + doorH) {
-              const lintelH = wallH - (H1 + doorH);
-              const lintelGeom = new THREE.BoxGeometry(wallThick, lintelH, DL);
-              const lintel = new THREE.Mesh(lintelGeom, stairEnclosureWallMat);
-              lintel.position.set(B + wallThick / 2, H1 + doorH + lintelH / 2, L - DL / 2);
-              stairGroup.add(lintel);
-            }
-          } else {
-            const rightWallGeom = new THREE.BoxGeometry(wallThick, wallH, L);
-            const rightWall = new THREE.Mesh(rightWallGeom, stairEnclosureWallMat);
-            rightWall.position.set(B + wallThick / 2, wallH / 2, L / 2);
-            stairGroup.add(rightWall);
+          // D. 3D Flight 2 (Stepped RCC Solid rising H1 -> H1+H2 returning back towards DL)
+          for (let i = 0; i < numTreads; i++) {
+            const stepH = (i + 1) * riserM;
+            const stepGeom = new THREE.BoxGeometry(Wf, stepH, treadM);
+            const stepMesh = new THREE.Mesh(
+              stepGeom,
+              isStairSelected ? selectedWallMat : stairConcreteMat
+            );
+            stepMesh.position.set(
+              B - Wf / 2,
+              H1 + stepH / 2,
+              L - DL - (i * treadM + treadM / 2)
+            );
+            stepMesh.userData = { type: 'arch_staircase', id: stair.id, storey: storey.levelIndex };
+            stairGroup.add(stepMesh);
           }
+
+          // Flight 2 Handrail
+          const f2RailGeom = new THREE.CylinderGeometry(0.025, 0.025, Math.hypot(numTreads * treadM, H2));
+          const f2RailMesh = new THREE.Mesh(f2RailGeom, stairRailingMat);
+          f2RailMesh.rotation.x = -(Math.PI / 2 - f1Angle);
+          f2RailMesh.position.set(
+            B - Wf + 0.05,
+            H1 + H2 / 2 + 0.9,
+            DL + (numTreads * treadM) / 2
+          );
+          stairGroup.add(f2RailMesh);
+
+          // E. 3D Enclosure Walls with Dual Landing Doors
+          if (stair.hasEnclosureWalls) {
+            const wallThick = (stair.wallThicknessMm || 230) / 1000;
+            const wallH = storeyH;
+
+            // Back Wall (at Mid-Landing Z = L)
+            const backWallGeom = new THREE.BoxGeometry(B + wallThick * 2, wallH, wallThick);
+            const backWall = new THREE.Mesh(backWallGeom, stairEnclosureWallMat);
+            backWall.position.set(B / 2, wallH / 2, L + wallThick / 2);
+            stairGroup.add(backWall);
+
+            // Left Wall (at X = 0) with Mid-Landing Left Door Cutout
+            if (stair.hasLeftDoor) {
+              const doorW = stair.leftDoorWidth || 1.0;
+              const doorH = 2.1;
+              const seg1Len = L - DL;
+              const seg1Geom = new THREE.BoxGeometry(wallThick, wallH, seg1Len);
+              const seg1 = new THREE.Mesh(seg1Geom, stairEnclosureWallMat);
+              seg1.position.set(-wallThick / 2, wallH / 2, seg1Len / 2);
+              stairGroup.add(seg1);
+
+              if (wallH > H1 + doorH) {
+                const lintelH = wallH - (H1 + doorH);
+                const lintelGeom = new THREE.BoxGeometry(wallThick, lintelH, DL);
+                const lintel = new THREE.Mesh(lintelGeom, stairEnclosureWallMat);
+                lintel.position.set(-wallThick / 2, H1 + doorH + lintelH / 2, L - DL / 2);
+                stairGroup.add(lintel);
+              }
+            } else {
+              const leftWallGeom = new THREE.BoxGeometry(wallThick, wallH, L);
+              const leftWall = new THREE.Mesh(leftWallGeom, stairEnclosureWallMat);
+              leftWall.position.set(-wallThick / 2, wallH / 2, L / 2);
+              stairGroup.add(leftWall);
+            }
+
+            // Right Wall (at X = B) with Mid-Landing Right Door Cutout
+            if (stair.hasRightDoor) {
+              const doorW = stair.rightDoorWidth || 1.0;
+              const doorH = 2.1;
+              const seg1Len = L - DL;
+              const seg1Geom = new THREE.BoxGeometry(wallThick, wallH, seg1Len);
+              const seg1 = new THREE.Mesh(seg1Geom, stairEnclosureWallMat);
+              seg1.position.set(B + wallThick / 2, wallH / 2, seg1Len / 2);
+              stairGroup.add(seg1);
+
+              if (wallH > H1 + doorH) {
+                const lintelH = wallH - (H1 + doorH);
+                const lintelGeom = new THREE.BoxGeometry(wallThick, lintelH, DL);
+                const lintel = new THREE.Mesh(lintelGeom, stairEnclosureWallMat);
+                lintel.position.set(B + wallThick / 2, H1 + doorH + lintelH / 2, L - DL / 2);
+                stairGroup.add(lintel);
+              }
+            } else {
+              const rightWallGeom = new THREE.BoxGeometry(wallThick, wallH, L);
+              const rightWall = new THREE.Mesh(rightWallGeom, stairEnclosureWallMat);
+              rightWall.position.set(B + wallThick / 2, wallH / 2, L / 2);
+              stairGroup.add(rightWall);
+            }
+          }
+
+          // F. 3D Floating Staircase Tag Badge
+          const stairBadge = createTextBadge(
+            `${stair.name || 'RCC STAIR'} [Storey ${storey.levelIndex}]`,
+            `EL. +${storey.bottomElevationY.toFixed(2)}m → +${storey.topElevationY.toFixed(2)}m`,
+            isStairSelected ? '#78350f' : '#1e1b4b',
+            isStairSelected ? '#f59e0b' : '#6366f1'
+          );
+          stairBadge.position.set(B / 2, H1 + 1.2, L / 2);
+          stairBadge.userData = { type: 'arch_staircase', id: stair.id, storey: storey.levelIndex };
+          stairGroup.add(stairBadge);
+
+          // G. If top / roof storey, cap with roof landing slab
+          if (sIdx === storeys.length - 1) {
+            const roofLandingGeom = new THREE.BoxGeometry(B, tw, DL);
+            const roofLandingMesh = new THREE.Mesh(roofLandingGeom, stairLandingMat);
+            roofLandingMesh.position.set(B / 2, storeyH - tw / 2, DL / 2);
+            roofLandingMesh.userData = { type: 'arch_staircase', id: stair.id, storey: storey.levelIndex };
+            stairGroup.add(roofLandingMesh);
+          }
+
+          this.group.add(stairGroup);
         }
-
-        // F. 3D Floating Staircase Tag Badge
-        const stairBadge = createTextBadge(
-          stair.name || 'RCC STAIRCASE',
-          `${L.toFixed(1)}m × ${B.toFixed(1)}m (${stair.treadMm}T/${stair.riserMm}R)`,
-          isStairSelected ? '#78350f' : '#1e1b4b',
-          isStairSelected ? '#f59e0b' : '#6366f1'
-        );
-        stairBadge.position.set(B / 2, H1 + 1.2, L / 2);
-        stairBadge.userData = { type: 'arch_staircase', id: stair.id };
-        stairGroup.add(stairBadge);
-
-        this.group.add(stairGroup);
       }
     }
 

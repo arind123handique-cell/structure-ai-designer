@@ -189,7 +189,14 @@ describe('StaircasePlacementEngine', () => {
     );
 
     const group = layer.getGroup();
-    expect(group.children.length).toBeGreaterThan(0);
+    expect(group.children.length).toBe(5); // 5 storeys generated
+
+    // Verify all 5 storeys have correct Y elevations matching building diaphragms
+    expect(group.children[0].position.y).toBeCloseTo(0.0, 1);
+    expect(group.children[1].position.y).toBeCloseTo(3.2, 1);
+    expect(group.children[2].position.y).toBeCloseTo(6.4, 1);
+    expect(group.children[3].position.y).toBeCloseTo(9.6, 1);
+    expect(group.children[4].position.y).toBeCloseTo(12.8, 1);
 
     const stair3DGroup = group.children[0];
     expect(stair3DGroup.position.x).toBe(4.0);

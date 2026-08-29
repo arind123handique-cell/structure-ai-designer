@@ -9,6 +9,7 @@ import { GradeBeamDesignEngine } from '@/features/design/gradebeam/gradeBeamEngi
 import { PileCapDesignEngine } from '@/features/design/pilecap/pileCapDesignEngine';
 import { PileDesignEngine } from '@/features/design/pile/pileDesignEngine';
 import { CombinedPileCapEngine, CombinedPileCapGroup } from '@/features/design/pilecap/combinedPileCapEngine';
+import { StaircaseDesignEngine } from '@/features/design/staircase/staircaseEngine';
 import { Architectural3DLayer } from '@/features/architectural/3d/Architectural3DLayer';
 import {
   RotateCcw,
@@ -221,6 +222,11 @@ export const Structural3DViewer: React.FC = () => {
   const gradeBeamsList = useMemo(() => {
     if (!activeModel) return [];
     return GradeBeamDesignEngine.discoverAndDesignAll(activeModel);
+  }, [activeModel]);
+
+  // Diaphragm Levels from STAAD model
+  const diaphragmLevels = useMemo(() => {
+    return StaircaseDesignEngine.extractDiaphragmLevels(activeModel);
   }, [activeModel]);
 
   // Compute Combined & Shear Wall Pile Caps
@@ -986,6 +992,7 @@ export const Structural3DViewer: React.FC = () => {
           showOpenings: true,
           showRoomLabels: showArchRooms,
           showStaircases: showArchStaircases,
+          diaphragmLevels,
         }
       );
     }
@@ -1016,6 +1023,7 @@ export const Structural3DViewer: React.FC = () => {
     architecturalOpenings,
     architecturalRooms,
     architecturalStaircases,
+    diaphragmLevels,
     selectedArchitecturalId,
     columnSupportMapping,
     columnMemberMapping,
