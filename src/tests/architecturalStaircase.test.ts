@@ -48,19 +48,19 @@ describe('StaircasePlacementEngine', () => {
 
     const comp = StaircasePlacementEngine.getStaircase2DComponents(stair);
 
-    // Bounding Box
+    // Bounding Box (Width W=2.4 along X, Length L=4.8 along Y)
     expect(comp.bounds.minX).toBeCloseTo(-0.23, 2);
-    expect(comp.bounds.maxX).toBeCloseTo(5.03, 2);
+    expect(comp.bounds.maxX).toBeCloseTo(2.63, 2);
     expect(comp.bounds.minY).toBeCloseTo(-0.23, 2);
-    expect(comp.bounds.maxY).toBeCloseTo(2.63, 2);
+    expect(comp.bounds.maxY).toBeCloseTo(5.03, 2);
 
     // Tread lines count (0 to 9 = 10 lines per flight)
     expect(comp.flight1TreadLines.length).toBe(10);
     expect(comp.flight2TreadLines.length).toBe(10);
 
-    // Direction arrows
-    expect(comp.flight1Arrow.start.x).toBeLessThan(comp.flight1Arrow.end.x);
-    expect(comp.flight2Arrow.start.x).toBeGreaterThan(comp.flight2Arrow.end.x);
+    // Direction arrows (Flight 1 goes up +y, Flight 2 returns down -y)
+    expect(comp.flight1Arrow.start.y).toBeLessThan(comp.flight1Arrow.end.y);
+    expect(comp.flight2Arrow.start.y).toBeGreaterThan(comp.flight2Arrow.end.y);
 
     // Dual-side doors
     expect(comp.leftDoor).toBeDefined();
@@ -82,8 +82,8 @@ describe('StaircasePlacementEngine', () => {
     const comp = StaircasePlacementEngine.getStaircase2DComponents(stair);
 
     expect(comp.bounds).toBeDefined();
-    expect(comp.center.x).toBeCloseTo(10.0 - 1.2, 1);
-    expect(comp.center.y).toBeCloseTo(10.0 + 2.4, 1);
+    expect(comp.center.x).toBeCloseTo(10.0 - 2.4, 1);
+    expect(comp.center.y).toBeCloseTo(10.0 + 1.2, 1);
   });
 
   it('should accurately hit-test points inside and outside the staircase enclosure', () => {
@@ -97,16 +97,16 @@ describe('StaircasePlacementEngine', () => {
       }
     );
 
-    // Inside point (center of flight 1)
-    expect(StaircasePlacementEngine.isPointInStaircase({ x: 5.5, y: 6.5 }, stair)).toBe(true);
+    // Inside point (Flight 1: x in [4.0, 5.1], y in [7.2, 9.7])
+    expect(StaircasePlacementEngine.isPointInStaircase({ x: 4.5, y: 7.5 }, stair)).toBe(true);
 
-    // Inside point (mid-landing)
-    expect(StaircasePlacementEngine.isPointInStaircase({ x: 8.0, y: 7.0 }, stair)).toBe(true);
+    // Inside point (Mid-landing: x in [4.0, 6.4], y in [9.6, 10.8])
+    expect(StaircasePlacementEngine.isPointInStaircase({ x: 5.0, y: 10.0 }, stair)).toBe(true);
 
     // Outside points
     expect(StaircasePlacementEngine.isPointInStaircase({ x: 1.0, y: 1.0 }, stair)).toBe(false);
     expect(StaircasePlacementEngine.isPointInStaircase({ x: 10.5, y: 7.0 }, stair)).toBe(false);
-    expect(StaircasePlacementEngine.isPointInStaircase({ x: 5.0, y: 10.0 }, stair)).toBe(false);
+    expect(StaircasePlacementEngine.isPointInStaircase({ x: 5.0, y: 1.0 }, stair)).toBe(false);
   });
 
   it('should support dynamic modification of tread, riser, doors, and rotation', () => {

@@ -146,84 +146,84 @@ export class StaircasePlacementEngine {
     // 1. Enclosure Outer & Inner Local Rectangles
     const outerLocal: Point2D[] = [
       { x: -wallT, y: -wallT },
-      { x: L + wallT, y: -wallT },
-      { x: L + wallT, y: W + wallT },
-      { x: -wallT, y: W + wallT },
+      { x: W + wallT, y: -wallT },
+      { x: W + wallT, y: L + wallT },
+      { x: -wallT, y: L + wallT },
     ];
 
     const innerLocal: Point2D[] = [
       { x: 0, y: 0 },
-      { x: L, y: 0 },
-      { x: L, y: W },
-      { x: 0, y: W },
+      { x: W, y: 0 },
+      { x: W, y: L },
+      { x: 0, y: L },
     ];
 
-    // 2. Floor Landing & Mid-Landing Local Rectangles
+    // 2. Floor Landing (at y = 0..landingD) & Mid-Landing (at y = L-landingD..L)
     const floorLandingLocal: Point2D[] = [
       { x: 0, y: 0 },
-      { x: landingD, y: 0 },
-      { x: landingD, y: W },
-      { x: 0, y: W },
+      { x: W, y: 0 },
+      { x: W, y: landingD },
+      { x: 0, y: landingD },
     ];
 
     const midLandingLocal: Point2D[] = [
-      { x: L - landingD, y: 0 },
-      { x: L, y: 0 },
-      { x: L, y: W },
-      { x: L - landingD, y: W },
+      { x: 0, y: L - landingD },
+      { x: W, y: L - landingD },
+      { x: W, y: L },
+      { x: 0, y: L },
     ];
 
-    // 3. Flight 1 & Flight 2 Local Rectangles
+    // 3. Flight 1 (Left: x = 0..flightW) & Flight 2 (Right: x = W-flightW..W)
     const goingLength = treadCount * treadM;
     const flight1Local: Point2D[] = [
-      { x: landingD, y: 0 },
-      { x: landingD + goingLength, y: 0 },
-      { x: landingD + goingLength, y: flightW },
-      { x: landingD, y: flightW },
+      { x: 0, y: landingD },
+      { x: flightW, y: landingD },
+      { x: flightW, y: landingD + goingLength },
+      { x: 0, y: landingD + goingLength },
     ];
 
     const flight2Local: Point2D[] = [
-      { x: landingD, y: flightW + wellG },
-      { x: landingD + goingLength, y: flightW + wellG },
-      { x: landingD + goingLength, y: W },
-      { x: landingD, y: W },
+      { x: W - flightW, y: landingD },
+      { x: W, y: landingD },
+      { x: W, y: landingD + goingLength },
+      { x: W - flightW, y: landingD + goingLength },
     ];
 
     // 4. Central Well Gap Local Rectangle
     const wellGapLocal: Point2D[] = [
-      { x: landingD, y: flightW },
-      { x: landingD + goingLength, y: flightW },
-      { x: landingD + goingLength, y: flightW + wellG },
-      { x: landingD, y: flightW + wellG },
+      { x: flightW, y: landingD },
+      { x: W - flightW, y: landingD },
+      { x: W - flightW, y: landingD + goingLength },
+      { x: flightW, y: landingD + goingLength },
     ];
 
-    // 5. Flight 1 & 2 Tread Lines
+    // 5. Flight 1 & 2 Horizontal Tread Lines
     const flight1TreadsLocal: { start: Point2D; end: Point2D; index: number }[] = [];
     for (let i = 0; i <= treadCount; i++) {
-      const stepX = landingD + i * treadM;
+      const stepY = landingD + i * treadM;
       flight1TreadsLocal.push({
-        start: { x: stepX, y: 0 },
-        end: { x: stepX, y: flightW },
+        start: { x: 0, y: stepY },
+        end: { x: flightW, y: stepY },
         index: i + 1,
       });
     }
 
     const flight2TreadsLocal: { start: Point2D; end: Point2D; index: number }[] = [];
     for (let i = 0; i <= treadCount; i++) {
-      const stepX = L - landingD - i * treadM;
+      const stepY = L - landingD - i * treadM;
       flight2TreadsLocal.push({
-        start: { x: stepX, y: flightW + wellG },
-        end: { x: stepX, y: W },
+        start: { x: W - flightW, y: stepY },
+        end: { x: W, y: stepY },
         index: (stair.riserCount || 10) + i,
       });
     }
 
-    // 6. Direction Arrows
-    const arrow1StartLocal = { x: landingD + 0.3, y: flightW / 2 };
-    const arrow1EndLocal = { x: landingD + goingLength - 0.3, y: flightW / 2 };
+    // 6. Direction Arrows (Flight 1 goes UP towards +y, Flight 2 returns DOWN towards -y)
+    const arrow1StartLocal = { x: flightW / 2, y: landingD + 0.3 };
+    const arrow1EndLocal = { x: flightW / 2, y: landingD + goingLength - 0.3 };
 
-    const arrow2StartLocal = { x: L - landingD - 0.3, y: flightW + wellG + flightW / 2 };
-    const arrow2EndLocal = { x: landingD + 0.3, y: flightW + wellG + flightW / 2 };
+    const arrow2StartLocal = { x: W - flightW / 2, y: L - landingD - 0.3 };
+    const arrow2EndLocal = { x: W - flightW / 2, y: landingD + 0.3 };
 
     // Convert all to World Space
     const enclosurePolygon = this.polygonLocalToWorld(outerLocal, pos, rot);
@@ -275,10 +275,10 @@ export class StaircasePlacementEngine {
     let leftDoor: any = undefined;
     if (stair.hasLeftDoor) {
       const doorW = stair.leftDoorWidth || 1.0;
-      const startX = landingD / 2 - doorW / 2;
-      const dStartLocal = { x: startX, y: -wallT };
-      const dEndLocal = { x: startX + doorW, y: -wallT };
-      const leafEndLocal = { x: startX, y: -wallT - doorW };
+      const startY = L - landingD / 2 - doorW / 2;
+      const dStartLocal = { x: -wallT, y: startY };
+      const dEndLocal = { x: -wallT, y: startY + doorW };
+      const leafEndLocal = { x: -wallT - doorW, y: startY };
 
       leftDoor = {
         opening: {
@@ -299,10 +299,10 @@ export class StaircasePlacementEngine {
     let rightDoor: any = undefined;
     if (stair.hasRightDoor) {
       const doorW = stair.rightDoorWidth || 1.0;
-      const startX = landingD / 2 - doorW / 2;
-      const dStartLocal = { x: startX, y: W + wallT };
-      const dEndLocal = { x: startX + doorW, y: W + wallT };
-      const leafEndLocal = { x: startX, y: W + wallT + doorW };
+      const startY = L - landingD / 2 - doorW / 2;
+      const dStartLocal = { x: W + wallT, y: startY };
+      const dEndLocal = { x: W + wallT, y: startY + doorW };
+      const leafEndLocal = { x: W + wallT + doorW, y: startY };
 
       rightDoor = {
         opening: {
@@ -323,10 +323,10 @@ export class StaircasePlacementEngine {
     let frontDoor: any = undefined;
     if (stair.hasFrontDoor) {
       const doorW = stair.frontDoorWidth || 1.2;
-      const startY = W / 2 - doorW / 2;
-      const dStartLocal = { x: -wallT, y: startY };
-      const dEndLocal = { x: -wallT, y: startY + doorW };
-      const leafEndLocal = { x: -wallT - doorW, y: startY };
+      const startX = W / 2 - doorW / 2;
+      const dStartLocal = { x: startX, y: -wallT };
+      const dEndLocal = { x: startX + doorW, y: -wallT };
+      const leafEndLocal = { x: startX, y: -wallT - doorW };
 
       frontDoor = {
         opening: {
@@ -387,5 +387,65 @@ export class StaircasePlacementEngine {
     }
 
     return inside;
+  }
+
+  /**
+   * Detects staircase tower core bay from structural model (headroom framing or top column spans)
+   */
+  public static detectBuildingStaircaseCore(model: any): {
+    position: Point2D;
+    roomWidth: number;
+    roomLength: number;
+    rotation: number;
+  } | null {
+    if (!model || !model.nodes) return null;
+
+    // 1. Look for headroom / top-level columns (columns ending at top max elevation)
+    const allNodes = Array.from(model.nodes.values() as Iterable<any>);
+    if (allNodes.length === 0) return null;
+
+    const allNodeY = allNodes.map((n: any) => n.y);
+    const maxY = Math.max(...allNodeY);
+
+    const topNodes: any[] = [];
+    for (const n of allNodes) {
+      if (Math.abs(n.y - maxY) < 0.2) topNodes.push(n);
+    }
+
+    if (topNodes.length >= 2 && topNodes.length <= 8) {
+      const xs = topNodes.map((n) => n.x);
+      const zs = topNodes.map((n) => n.z);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minZ = Math.min(...zs);
+      const maxZ = Math.max(...zs);
+
+      const spanX = Math.round((maxX - minX) * 100) / 100;
+      const spanZ = Math.round((maxZ - minZ) * 100) / 100;
+
+      if (spanX >= 1.5 && spanZ >= 1.5) {
+        return {
+          position: { x: minX, y: minZ },
+          roomWidth: spanX,
+          roomLength: spanZ,
+          rotation: 0,
+        };
+      }
+    }
+
+    // 2. Fallback: Center of model bounding box
+    if (model.boundingBox) {
+      const bb = model.boundingBox;
+      const cx = (bb.minX + bb.maxX) / 2;
+      const cz = (bb.minZ + bb.maxZ) / 2;
+      return {
+        position: { x: Math.round((cx - 1.2) * 10) / 10, y: Math.round((cz - 2.15) * 10) / 10 },
+        roomWidth: 2.4,
+        roomLength: 4.3,
+        rotation: 0,
+      };
+    }
+
+    return null;
   }
 }

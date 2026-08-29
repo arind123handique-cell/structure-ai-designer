@@ -123,26 +123,32 @@ export const ArchitecturalPlanView: React.FC = () => {
   const handlePlaceDesignedStaircase = () => {
     const activeFloorId = `floor_${activeFloorIndex}`;
     const currentFloor = floorPlans[activeFloorIndex];
+    const geom = customStaircaseGeometry || {};
+    const entry = customStaircaseLandingEntry || {};
+    const detectedCore = StaircasePlacementEngine.detectBuildingStaircaseCore(activeModel);
+    const roomW = geom.roomWidth || detectedCore?.roomWidth || 2.4;
+    const roomL = geom.roomLength || detectedCore?.roomLength || 4.3;
 
     // Compute center insertion point
     let centerX = 5.0;
     let centerY = 5.0;
-    if (currentFloor && currentFloor.bounds) {
-      centerX = (currentFloor.bounds.minX + currentFloor.bounds.maxX) / 2 - 2.4;
-      centerY = (currentFloor.bounds.minZ + currentFloor.bounds.maxZ) / 2 - 1.2;
+    if (detectedCore) {
+      centerX = detectedCore.position.x;
+      centerY = detectedCore.position.y;
+    } else if (currentFloor && currentFloor.bounds) {
+      centerX = (currentFloor.bounds.minX + currentFloor.bounds.maxX) / 2 - roomW / 2;
+      centerY = (currentFloor.bounds.minZ + currentFloor.bounds.maxZ) / 2 - roomL / 2;
     } else {
       const activeWalls = Object.values(architecturalWalls).filter((w) => w.floorId === activeFloorId);
       if (activeWalls.length > 0) {
         const xs = activeWalls.flatMap((w) => [w.start.x, w.end.x]);
         const ys = activeWalls.flatMap((w) => [w.start.y, w.end.y]);
-        centerX = (Math.min(...xs) + Math.max(...xs)) / 2 - 2.4;
-        centerY = (Math.min(...ys) + Math.max(...ys)) / 2 - 1.2;
+        centerX = (Math.min(...xs) + Math.max(...xs)) / 2 - roomW / 2;
+        centerY = (Math.min(...ys) + Math.max(...ys)) / 2 - roomL / 2;
       }
     }
 
     const currentStairList = Object.values(architecturalStaircases || {});
-    const geom = customStaircaseGeometry || {};
-    const entry = customStaircaseLandingEntry || {};
 
     const newStaircase = StaircasePlacementEngine.createDefaultStaircase(
       activeFloorId,
@@ -150,8 +156,8 @@ export const ArchitecturalPlanView: React.FC = () => {
       {
         id: `STAIR-${(currentStairList.length + 1).toString().padStart(3, '0')}`,
         name: `Staircase FL-${activeFloorIndex + 1}`,
-        roomLength: geom.roomLength || 4.8,
-        roomWidth: geom.roomWidth || 2.4,
+        roomLength: roomL,
+        roomWidth: roomW,
         flightWidth: geom.flightWidth || 1.1,
         wellGap: geom.wellGap || 0.2,
         landingDepth: geom.landingDepth || 1.2,

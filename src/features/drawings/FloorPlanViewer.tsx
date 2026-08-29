@@ -4,6 +4,7 @@ import { FloorPlanEngine, FloorPlanLevel } from './floorPlanEngine';
 import { FloorPlanSvg } from './FloorPlanSvg';
 import { PdfExportService } from './pdfExportService';
 import { exportToCsv } from '@/utils/exportUtils';
+import { StaircasePlacementEngine } from '@/features/architectural/engines/staircasePlacementEngine';
 import {
   Layers,
   FileText,
@@ -96,18 +97,21 @@ export const FloorPlanViewer: React.FC = () => {
     if (!activePlan) return;
     const geom = customStaircaseGeometry || {};
     const entry = customStaircaseLandingEntry || {};
-    const centerX = (activePlan.bounds.minX + activePlan.bounds.maxX) / 2 - 2.4;
-    const centerZ = (activePlan.bounds.minZ + activePlan.bounds.maxZ) / 2 - 1.2;
+    const detectedCore = StaircasePlacementEngine.detectBuildingStaircaseCore(activeModel);
+    const roomW = geom.roomWidth || detectedCore?.roomWidth || 2.4;
+    const roomL = geom.roomLength || detectedCore?.roomLength || 4.3;
+    const defaultX = detectedCore ? detectedCore.position.x : (activePlan.bounds.minX + activePlan.bounds.maxX) / 2 - roomW / 2;
+    const defaultZ = detectedCore ? detectedCore.position.y : (activePlan.bounds.minZ + activePlan.bounds.maxZ) / 2 - roomL / 2;
 
     const newStair: any = {
       id: `STAIR-${Date.now().toString(36).substr(-4).toUpperCase()}`,
       floorId: activeFloorId,
       name: `Staircase FL-${(activePlan.levelIndex || 0) + 1}`,
-      position: { x: Math.round(centerX * 10) / 10, y: Math.round(centerZ * 10) / 10 },
+      position: { x: Math.round(defaultX * 10) / 10, y: Math.round(defaultZ * 10) / 10 },
       rotation: 0,
       staircaseType: 'DOG_LEGGED',
-      roomLength: geom.roomLength || 4.8,
-      roomWidth: geom.roomWidth || 2.4,
+      roomLength: roomL,
+      roomWidth: roomW,
       flightWidth: geom.flightWidth || 1.1,
       wellGap: geom.wellGap || 0.2,
       landingDepth: geom.landingDepth || 1.2,
@@ -635,8 +639,10 @@ export const FloorPlanViewer: React.FC = () => {
                 {/* Center Staircase on Floor */}
                 <button
                   onClick={() => {
-                    const cx = (activePlan.bounds.minX + activePlan.bounds.maxX) / 2 - 2.4;
-                    const cz = (activePlan.bounds.minZ + activePlan.bounds.maxZ) / 2 - 1.2;
+                    const roomW = selectedStair.roomWidth || 2.4;
+                    const roomL = selectedStair.roomLength || 4.3;
+                    const cx = (activePlan.bounds.minX + activePlan.bounds.maxX) / 2 - roomW / 2;
+                    const cz = (activePlan.bounds.minZ + activePlan.bounds.maxZ) / 2 - roomL / 2;
                     updateStaircase(selectedStair.id, {
                       position: { x: Math.round(cx * 10) / 10, y: Math.round(cz * 10) / 10 },
                     });

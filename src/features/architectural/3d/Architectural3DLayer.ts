@@ -546,7 +546,17 @@ export class Architectural3DLayer {
       if (stairsToRender.length === 0) {
         // Auto-provide standard building staircase at core location so it renders immediately
         stairsToRender = [
-          StaircasePlacementEngine.createDefaultStaircase('floor_0', { x: 4.5, y: -8.95 }),
+          StaircasePlacementEngine.createDefaultStaircase(
+            'floor_0',
+            { x: 5.4, y: -4.3 },
+            {
+              roomWidth: 2.7,
+              roomLength: 4.3,
+              flightWidth: 1.2,
+              landingDepth: 1.2,
+              rotation: 0,
+            }
+          ),
         ];
       }
 

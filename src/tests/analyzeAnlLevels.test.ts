@@ -44,6 +44,17 @@ describe('Analyze ANL Levels', () => {
       console.log(`  Y = ${y.toFixed(3)}m : ${count} horizontal members`);
     }
 
+    console.log('\n--- HEADROOM / STAIR TOWER (Y >= 12.8m) MEMBERS ---');
+    for (const m of model.members.values()) {
+      const n1 = model.nodes.get(m.startNodeId);
+      const n2 = model.nodes.get(m.endNodeId);
+      if (n1 && n2 && (n1.y >= 12.0 || n2.y >= 12.0)) {
+        if (n1.y > 13.0 || n2.y > 13.0) {
+          console.log(`Member ${m.id}: (${n1.x.toFixed(2)}, ${n1.y.toFixed(2)}, ${n1.z.toFixed(2)}) -> (${n2.x.toFixed(2)}, ${n2.y.toFixed(2)}, ${n2.z.toFixed(2)})`);
+        }
+      }
+    }
+
     // Test updated extraction algorithm
     function extractRobustLevels(model: any): number[] {
       const columnElevations = new Map<number, number>();
