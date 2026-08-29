@@ -83,4 +83,7 @@ export interface StoredProject {
   architecturalRooms?: Record<string, any>;
   architecturalDimensions?: Record<string, any>;
   architecturalSettings?: any;
+  savedStaircaseDesigns?: any;
+  customStaircaseGeometry?: any;
+  customStaircaseLandingEntry?: any;
 }

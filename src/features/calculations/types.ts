@@ -16,11 +16,11 @@ export interface CalculationSection {
 }
 
 export interface DetailedCalculationReport {
-  elementId: number;
-  elementType: 'BEAM' | 'COLUMN' | 'PILE' | 'PILECAP' | 'FOOTING' | 'GRADEBEAM' | 'SHEARWALL';
+  elementId: number | string;
+  elementType: 'BEAM' | 'COLUMN' | 'PILE' | 'PILECAP' | 'FOOTING' | 'GRADEBEAM' | 'SHEARWALL' | 'SLAB' | 'STAIRCASE';
   title: string;
   designCode: string; // e.g. "IS 456:2000 & IS 13920:2016"
-  governingLoadCase: number;
+  governingLoadCase?: number | string;
   timestamp: string;
   sections: CalculationSection[];
   overallStatus: 'PASS' | 'WARNING' | 'FAIL';

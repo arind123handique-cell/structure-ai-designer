@@ -3,6 +3,7 @@ import { ProjectMetadata } from '@/types';
 import { EngineeringWarning } from '@/features/warnings/types';
 import { BbsEngine } from '@/features/calculations/bbsEngine';
 import { ConcreteVolumeEngine } from '@/features/calculations/concreteVolumeEngine';
+import { StaircaseDesignEngine } from '@/features/design/staircase/staircaseEngine';
 
 export interface ProjectReportDataset {
   metadata: ProjectMetadata;
@@ -222,6 +223,63 @@ export class ExcelWorkbookExporter {
       slabRows.length > 0 ? slabRows : [['S1', '1ST FLOOR SLAB (+2.8m)', '3.5m × 4.5m', '130 mm', '2.048 m³', 'T10 @ 150 mm c/c', 'T10 @ 150 mm c/c', 'T8 @ 150 mm c/c (Crank @ 0.25L)', '14.2 ≤ 24.0', 'PASS']]
     );
 
+    // Sheet 6.5: RCC Staircase Schedule (IS 456 / SP:34)
+    const stairSumm = StaircaseDesignEngine.calculateBuildingStaircaseSummary(model, metadata);
+    const stairRows: (string | number)[][] = stairSumm.storeyDesigns.flatMap((s) => [
+      [
+        s.levelName,
+        'Flight 1 (Ground to Mid)',
+        s.flight1.flightRiseM.toFixed(2),
+        `${s.flight1.riserCount} R @ ${s.flight1.riserMm}mm`,
+        `${s.flight1.treadCount} T @ ${s.flight1.treadMm}mm`,
+        `${s.flight1.waistSlabThicknessMm} mm`,
+        `${s.flight1.effectiveSpanLeffM.toFixed(2)} m`,
+        `${s.flight1.designMomentMu.toFixed(2)} kNm`,
+        s.flight1.mainRebarCallout,
+        s.flight1.distributionRebarCallout,
+        s.flight1.kinkAnchorageDetail.split('(')[0],
+        `${s.flight1.concreteM3.toFixed(3)} m³`,
+        `${s.flight1.steelKg.toFixed(1)} kg`,
+        s.flight1.status,
+      ],
+      [
+        s.levelName,
+        'Flight 2 (Mid to Floor Diaphragm)',
+        s.flight2.flightRiseM.toFixed(2),
+        `${s.flight2.riserCount} R @ ${s.flight2.riserMm}mm`,
+        `${s.flight2.treadCount} T @ ${s.flight2.treadMm}mm`,
+        `${s.flight2.waistSlabThicknessMm} mm`,
+        `${s.flight2.effectiveSpanLeffM.toFixed(2)} m`,
+        `${s.flight2.designMomentMu.toFixed(2)} kNm`,
+        s.flight2.mainRebarCallout,
+        s.flight2.distributionRebarCallout,
+        s.flight2.kinkAnchorageDetail.split('(')[0],
+        `${s.flight2.concreteM3.toFixed(3)} m³`,
+        `${s.flight2.steelKg.toFixed(1)} kg`,
+        s.flight2.status,
+      ],
+    ]);
+
+    const sheetStairs = makeXmlTable(
+      [
+        'STOREY DIAPHRAGM',
+        'FLIGHT',
+        'RISE (m)',
+        'RISERS',
+        'TREADS',
+        'WAIST THK',
+        'LEFF (m)',
+        'Mu (kNm)',
+        'MAIN REBAR',
+        'DISTRIBUTION REBAR',
+        'KINK ANCHORAGE',
+        'CONCRETE VOL',
+        'STEEL (kg)',
+        'STATUS',
+      ],
+      stairRows
+    );
+
     // Sheet 7: Bar Bending Schedule (BBS) - All Slabs, Beams, Columns, Pile Caps
     const bbs = BbsEngine.generateBuildingBbs(model, dataset as any);
     const bbsRows: (string | number)[][] = bbs.items.map((item) => [
@@ -297,6 +355,7 @@ export class ExcelWorkbookExporter {
               <x:ExcelWorksheet><x:Name>Columns Schedule</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>
               <x:ExcelWorksheet><x:Name>Foundation Schedule</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>
               <x:ExcelWorksheet><x:Name>Floor Slabs Schedule</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>
+              <x:ExcelWorksheet><x:Name>Staircase Schedule</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>
               <x:ExcelWorksheet><x:Name>Bar Bending Schedule (BBS)</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>
               <x:ExcelWorksheet><x:Name>Warnings Log</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>
             </x:ExcelWorksheets>
@@ -324,10 +383,13 @@ export class ExcelWorkbookExporter {
         <h2>6. FLOOR SLABS REINFORCEMENT SCHEDULE (IS 456 / RCDC)</h2>
         ${sheet6}
         <br/><hr/><br/>
-        <h2>7. BAR BENDING SCHEDULE (BBS) — IS 2502 / SP:34</h2>
+        <h2>7. RCC STAIRCASE DESIGN SCHEDULE (IS 456 / SP:34)</h2>
+        ${sheetStairs}
+        <br/><hr/><br/>
+        <h2>8. BAR BENDING SCHEDULE (BBS) — IS 2502 / SP:34</h2>
         ${sheet7}
         <br/><hr/><br/>
-        <h2>8. ANALYSIS & VALIDATION WARNINGS</h2>
+        <h2>9. ANALYSIS & VALIDATION WARNINGS</h2>
         ${sheet8}
       </body>
       </html>

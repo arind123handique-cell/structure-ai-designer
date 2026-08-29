@@ -7,6 +7,7 @@ import { CombinedPileCapEngine } from '@/features/design/pilecap/combinedPileCap
 import { FootingDesignEngine } from '@/features/design/footing/footingDesignEngine';
 import { ColumnDesignEngine } from '@/features/design/column/columnDesignEngine';
 import { BeamDesignEngine } from '@/features/design/beam/beamDesignEngine';
+import { StaircaseDesignEngine } from '@/features/design/staircase/staircaseEngine';
 import { ColumnNumberingService } from '@/features/model/columnNumbering';
 
 export interface ConcreteComponentVolume {
@@ -115,6 +116,8 @@ export class ConcreteVolumeEngine {
       detachedCombinedCapNodeIds?: number[];
       customCombinedCapOverrides?: Record<string, any>;
       projectPileTypes?: any[];
+      customStaircaseGeometry?: any;
+      customStaircaseLandingEntry?: any;
     }
   ): BuildingConcreteSummary {
     const settings = metadata?.designSettings || {
@@ -389,9 +392,26 @@ export class ConcreteVolumeEngine {
 
     targetWalls.forEach((entry, idx) => {
       const savedWall = entry.design;
-      const Lw = Number(savedWall?.length || savedWall?.Lw || savedWall?.input?.length || 3.2);
+      let defaultPlateLw = 3.2;
+      let defaultPlateHw = 3.5;
+      if (entry.plate?.nodeIds && model.nodes) {
+        const pNodes = entry.plate.nodeIds.map((nid: number) => model.nodes.get(nid)).filter(Boolean);
+        if (pNodes.length >= 2) {
+          const xs = pNodes.map((n: any) => n.x);
+          const ys = pNodes.map((n: any) => n.y);
+          const zs = pNodes.map((n: any) => n.z);
+          const dx = Math.max(...xs) - Math.min(...xs);
+          const dz = Math.max(...zs) - Math.min(...zs);
+          const dy = Math.max(...ys) - Math.min(...ys);
+          const span = Math.sqrt(dx * dx + dz * dz);
+          if (span > 0.5) defaultPlateLw = span;
+          if (dy > 0.5) defaultPlateHw = dy;
+        }
+      }
+
+      const Lw = Number(savedWall?.length || savedWall?.Lw || savedWall?.input?.length || defaultPlateLw);
       const tw_mm = Number(savedWall?.thickness || savedWall?.tw || savedWall?.input?.thickness || (entry.plate?.thickness ? Math.round(entry.plate.thickness * 1000) : 230));
-      const Hw = Number(savedWall?.height || savedWall?.Hw || savedWall?.input?.height || 3.5);
+      const Hw = Number(savedWall?.height || savedWall?.Hw || savedWall?.input?.height || defaultPlateHw);
 
       const tw_m = tw_mm / 1000;
       const vol = Lw * tw_m * Hw;
@@ -488,6 +508,38 @@ export class ConcreteVolumeEngine {
     }
 
     // -------------------------------------------------------------------------
+    // 8.5. RCC DOG-LEGGED STAIRCASE FLIGHTS & LANDINGS (IS 456 Cl. 33)
+    // -------------------------------------------------------------------------
+    const stairSummary = StaircaseDesignEngine.calculateBuildingStaircaseSummary(
+      model,
+      metadata,
+      {
+        customGeometry: overrides?.customStaircaseGeometry,
+        customLandingEntry: overrides?.customStaircaseLandingEntry,
+      }
+    );
+    const stairsConcreteM3 = stairSummary.totalConcreteM3;
+    const stairsFormworkM2 = stairSummary.totalFormworkM2;
+    const stairItems = stairSummary.storeyDesigns.flatMap((s) => [
+      {
+        id: `${s.storeyId}-F1`,
+        label: `${s.levelName} - Flight 1`,
+        dimensions: `Going: ${s.flight1.goingLengthM}m × W: ${s.flight1.flightWidthM}m × tw: ${s.flight1.waistSlabThicknessMm}mm`,
+        volumeM3: s.flight1.concreteM3,
+        formworkM2: s.flight1.formworkM2,
+        level: s.levelName,
+      },
+      {
+        id: `${s.storeyId}-F2`,
+        label: `${s.levelName} - Flight 2`,
+        dimensions: `Going: ${s.flight2.goingLengthM}m × W: ${s.flight2.flightWidthM}m × tw: ${s.flight2.waistSlabThicknessMm}mm`,
+        volumeM3: s.flight2.concreteM3,
+        formworkM2: s.flight2.formworkM2,
+        level: s.levelName,
+      },
+    ]);
+
+    // -------------------------------------------------------------------------
     // 9. GRAND TOTAL AND COMPONENT AGGREGATION
     // -------------------------------------------------------------------------
     const grandTotalConcreteM3 =
@@ -499,6 +551,7 @@ export class ConcreteVolumeEngine {
       footingsConcreteM3 +
       wallsConcreteM3 +
       slabsConcreteM3 +
+      stairsConcreteM3 +
       pccConcreteM3;
 
     const substructureConcreteM3 =
@@ -512,7 +565,8 @@ export class ConcreteVolumeEngine {
       colsConcreteM3 +
       beamsConcreteM3 +
       wallsConcreteM3 +
-      slabsConcreteM3;
+      slabsConcreteM3 +
+      stairsConcreteM3;
 
     const safeTotal = grandTotalConcreteM3 > 0 ? grandTotalConcreteM3 : 1;
 
@@ -619,6 +673,23 @@ export class ConcreteVolumeEngine {
           wallsConcreteM3,
           wallsFormworkM2,
           wallItems
+        )
+      );
+    }
+
+    if (stairSummary.totalFlights > 0) {
+      components.push(
+        createComponentEntry(
+          'staircases',
+          'RCC Staircase Flights & Landings',
+          'SUPERSTRUCTURE',
+          'IS 456:2000 Cl. 33',
+          stairSummary.totalFlights,
+          `Going: ${stairSummary.storeyDesigns[0]?.flight1.goingLengthM}m × W: ${stairSummary.storeyDesigns[0]?.flight1.flightWidthM}m`,
+          mainGrade,
+          stairsConcreteM3,
+          stairsFormworkM2,
+          stairItems
         )
       );
     }

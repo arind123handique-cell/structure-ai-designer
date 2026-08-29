@@ -362,6 +362,7 @@ export const ProjectDashboard: React.FC = () => {
                     if (comp.id === 'columns') setActiveView('columns-design');
                     else if (comp.id === 'beams') setActiveView('beams-design');
                     else if (comp.id === 'slabs') setActiveView('slabs-design');
+                    else if (comp.id === 'staircases') setActiveView('staircase-design');
                     else if (comp.id === 'shearwalls') setActiveView('shearwalls-design');
                     else if (comp.id === 'gradebeams') setActiveView('gradebeams-design');
                     else if (comp.id === 'pilecaps') setActiveView('pilecaps-design');

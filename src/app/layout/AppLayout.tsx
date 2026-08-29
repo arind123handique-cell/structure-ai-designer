@@ -24,6 +24,7 @@ const GradeBeamDesignView = lazy(() => import('@/features/design/gradebeam/Grade
 const FootingDesignView = lazy(() => import('@/features/design/footing/FootingDesignView').then(m => ({ default: m.FootingDesignView })));
 const ShearWallDesignView = lazy(() => import('@/features/design/shearwall/ShearWallDesignView').then(m => ({ default: m.ShearWallDesignView })));
 const SlabDesignView = lazy(() => import('@/features/design/slab/SlabDesignView').then(m => ({ default: m.SlabDesignView })));
+const StaircaseDesignView = lazy(() => import('@/features/design/staircase/StaircaseDesignView').then(m => ({ default: m.StaircaseDesignView })));
 const FloorPlanViewer = lazy(() => import('@/features/drawings/FloorPlanViewer').then(m => ({ default: m.FloorPlanViewer })));
 const ArchitecturalPlanView = lazy(() => import('@/features/architectural/components/ArchitecturalPlanView').then(m => ({ default: m.ArchitecturalPlanView })));
 const DrawingsView = lazy(() => import('@/features/drawings/DrawingsView').then(m => ({ default: m.DrawingsView })));
@@ -86,6 +87,8 @@ export const AppLayout: React.FC = () => {
         return <ShearWallDesignView />;
       case 'slabs-design':
         return <SlabDesignView />;
+      case 'staircase-design':
+        return <StaircaseDesignView />;
       case 'architectural-plan':
         return <ArchitecturalPlanView />;
       case 'floor-plans':

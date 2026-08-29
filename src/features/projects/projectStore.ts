@@ -35,6 +35,7 @@ export type ViewTab =
   | 'footings-design'
   | 'shearwalls-design'
   | 'slabs-design'
+  | 'staircase-design'
   | 'floor-plans'
   | 'architectural-plan'
   | 'drawings'
@@ -195,6 +196,7 @@ export interface ProjectState {
   savePileCapDesigns: (designedCaps?: Map<number, any> | Record<number, any>, combinedCaps?: any[]) => Promise<void>;
   savePileDesigns: (types: any[]) => Promise<void>;
   saveSlabDesigns: (designs: Map<string, any> | Record<string, any>, overrides?: Record<string, any>) => Promise<void>;
+  saveStaircaseDesigns: (designs: any, geometry?: any, landingEntry?: any) => Promise<void>;
 }
 
 const DEFAULT_DESIGN_SETTINGS: DesignParameters = {
@@ -1400,6 +1402,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       activeProject: updatedProject,
       savedSlabDesigns: slabObj,
       customSlabOverrides: ovObj,
+    });
+  },
+
+  saveStaircaseDesigns: async (designs: any, geometry?: any, landingEntry?: any) => {
+    const currentProj = get().activeProject;
+    if (!currentProj) return;
+
+    const updatedProject: StoredProject = {
+      ...currentProj,
+      savedStaircaseDesigns: designs,
+      customStaircaseGeometry: geometry,
+      customStaircaseLandingEntry: landingEntry,
+      metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+    };
+
+    await ProjectStorage.saveProject(updatedProject);
+    set({
+      activeProject: updatedProject,
     });
   },
 

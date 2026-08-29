@@ -19,6 +19,7 @@ import {
   PanelLeftClose,
   Grid,
   Layout,
+  Footprints,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -61,6 +62,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({ onHide }) => {
     { label: 'Grade Beam Design', view: 'gradebeams-design', icon: Compass },
     { label: 'Footing Design', view: 'footings-design', icon: Building },
     { label: 'Slab Design', view: 'slabs-design', icon: Grid },
+    { label: 'Staircase Design', view: 'staircase-design', icon: Footprints },
     { label: '2D Architectural Plan', view: 'architectural-plan', icon: Layout },
     { label: '2D Structural GA Plans', view: 'floor-plans', icon: Layers },
     { label: 'CAD Drawing Sheets', view: 'drawings', icon: FileText },
