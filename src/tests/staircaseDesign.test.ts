@@ -118,4 +118,49 @@ describe('StaircaseDesignEngine Unit & Integration Tests', () => {
     expect(summary.totalSteelKg).toBeGreaterThan(400);
     expect(summary.totalCementBags).toBeGreaterThan(40);
   });
+
+  it('should generate accurate Bar Bending Schedule (BBS) per IS 2502 / SP:34 for staircase storeys', () => {
+    const levels = StaircaseDesignEngine.extractDiaphragmLevels(null);
+    const geom = StaircaseDesignEngine.getDefaultGeometry();
+    const entry = StaircaseDesignEngine.getDefaultLandingEntryConfig();
+
+    const storey = StaircaseDesignEngine.designStorey(levels[0], geom, entry);
+
+    expect(storey.bbsSchedule).toBeDefined();
+    const bbs = storey.bbsSchedule!;
+
+    expect(bbs.items.length).toBe(8); // ST1-01, ST1-02, ST1-03, ST2-01, ST2-02, ST2-03, ST-KINK, ST-LAND
+    expect(bbs.clearCoverMm).toBe(20);
+    expect(bbs.concreteGrade).toBe('M25');
+    expect(bbs.steelGrade).toBe('Fe 500D');
+
+    // Check Flight 1 Main Cranked Bar (ST1-01)
+    const mainBar = bbs.items.find((i) => i.mark === 'ST1-01');
+    expect(mainBar).toBeDefined();
+    expect(mainBar!.shapeType).toBe('CRANKED');
+    expect(mainBar!.diameter).toBe(12);
+    expect(mainBar!.cuttingLengthM).toBeGreaterThan(4.0);
+    expect(mainBar!.totalCount).toBeGreaterThanOrEqual(6);
+    expect(mainBar!.totalWeightKg).toBeGreaterThan(20);
+
+    // Check Mid-Landing Kink Bar (ST-KINK)
+    const kinkBar = bbs.items.find((i) => i.mark === 'ST-KINK');
+    expect(kinkBar).toBeDefined();
+    expect(kinkBar!.shapeType).toBe('L_BAR');
+    expect(kinkBar!.remarks.toLowerCase()).toContain('kink');
+
+    // Check Quantities & Wastage Allowance
+    expect(bbs.totalLengthM).toBeGreaterThan(150);
+    expect(bbs.netWeightKg).toBeGreaterThan(100);
+    expect(bbs.wastageAllowancePercent).toBe(5.0);
+    expect(bbs.wastageWeightKg).toBeCloseTo(bbs.netWeightKg * 0.05, 1);
+    expect(bbs.grossWeightKg).toBeCloseTo(bbs.netWeightKg + bbs.wastageWeightKg, 1);
+    expect(bbs.grossWeightMT).toBeCloseTo(bbs.grossWeightKg / 1000, 3);
+
+    // Check Diameter Summaries
+    expect(bbs.diameterSummary.length).toBeGreaterThanOrEqual(2);
+    const dia12 = bbs.diameterSummary.find((d) => d.dia === 12);
+    expect(dia12).toBeDefined();
+    expect(dia12!.unitWeightKgM).toBeCloseTo(0.888, 2);
+  });
 });

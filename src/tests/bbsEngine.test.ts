@@ -98,6 +98,8 @@ describe('BbsEngine', () => {
     expect(hasBeams).toBe(true);
     expect(hasColumns).toBe(true);
     expect(hasPileCaps).toBe(true);
+    const hasStaircases = bbs.items.some((i) => i.elementCategory === 'STAIRCASE');
+    expect(hasStaircases).toBe(true);
 
     // Verify cutting lengths and bend deductions
     bbs.items.forEach((item) => {

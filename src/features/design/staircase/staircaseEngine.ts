@@ -138,6 +138,54 @@ export interface StoreyStaircaseDesignOutput {
   totalStoreySteelKg: number;
   totalStoreyCementBags: number;
   overallStatus: 'PASS' | 'WARNING' | 'FAIL';
+  bbsSchedule?: StaircaseBbsSchedule;
+}
+
+export type StaircaseBarShape = 'CRANKED' | 'L_BAR' | 'STRAIGHT' | 'U_BAR';
+
+export interface StaircaseBbsItem {
+  mark: string; // e.g. "ST1-01", "ST1-02", "ST1-03", "ST2-01", "ST-KINK", "ST-LAND"
+  flightName: string; // e.g. "Flight 1", "Flight 2", "Mid-Landing"
+  description: string; // e.g. "Bottom Main Tension Waist Rebar (Cranked)"
+  shapeType: StaircaseBarShape;
+  diameter: number; // mm
+  spacingMm?: number; // mm
+  a: number; // mm
+  b: number; // mm
+  c: number; // mm
+  d?: number; // mm
+  numBarsPerFlight: number;
+  numFlights: number;
+  totalCount: number;
+  cuttingLengthM: number;
+  totalLengthM: number;
+  unitWeightKgM: number;
+  totalWeightKg: number;
+  remarks: string;
+}
+
+export interface StaircaseBbsDiameterSummary {
+  dia: number;
+  totalLengthM: number;
+  totalWeightKg: number;
+  unitWeightKgM: number;
+}
+
+export interface StaircaseBbsSchedule {
+  storeyId: string;
+  levelName: string;
+  elevationRange: string;
+  concreteGrade: string; // e.g. "M25"
+  steelGrade: string; // e.g. "Fe 500D"
+  clearCoverMm: number; // 20 mm
+  items: StaircaseBbsItem[];
+  diameterSummary: StaircaseBbsDiameterSummary[];
+  totalLengthM: number;
+  netWeightKg: number;
+  wastageAllowancePercent: number; // 5%
+  wastageWeightKg: number;
+  grossWeightKg: number;
+  grossWeightMT: number;
 }
 
 export interface BuildingStaircaseSummary {
@@ -699,6 +747,8 @@ export class StaircaseDesignEngine {
         ? 'WARNING'
         : 'PASS';
 
+    const bbsSchedule = this.generateStaircaseBbsSchedule(diaphragm, geom, flight1, flight2);
+
     return {
       storeyId: `STAIR-STOREY-${diaphragm.levelIndex}`,
       levelIndex: diaphragm.levelIndex,
@@ -716,6 +766,241 @@ export class StaircaseDesignEngine {
       totalStoreySteelKg,
       totalStoreyCementBags,
       overallStatus,
+      bbsSchedule,
+    };
+  }
+
+  /**
+   * Generates a standard IS 2502 / SP:34 Bar Bending Schedule (BBS) for a staircase storey
+   */
+  public static generateStaircaseBbsSchedule(
+    diaphragm: DiaphragmLevelInfo,
+    geom: StaircaseRoomGeometry,
+    flight1: StaircaseFlightDesignOutput,
+    flight2: StaircaseFlightDesignOutput
+  ): StaircaseBbsSchedule {
+    const items: StaircaseBbsItem[] = [];
+    const coverMm = 20;
+    const fck = geom.fck || 25;
+    const fy = geom.fy || 500;
+    const concreteGrade = `M${fck}`;
+    const steelGrade = `Fe ${fy}D`;
+    const elevationRange = `EL. +${diaphragm.bottomElevationY.toFixed(2)}m → +${diaphragm.topElevationY.toFixed(2)}m`;
+
+    const addFlightBbs = (f: StaircaseFlightDesignOutput, flightIdx: 1 | 2) => {
+      const pfx = `ST${flightIdx}`;
+      const fName = `Flight ${flightIdx}`;
+      const WfMm = f.flightWidthM * 1000;
+      const effectiveGoingMm = f.goingLengthM * 1000;
+      const flightRiseMm = f.flightRiseM * 1000;
+      const slopeLengthMm = Math.round(Math.hypot(effectiveGoingMm, flightRiseMm));
+      const waistThicknessMm = f.waistSlabThicknessMm;
+      const dWaistMm = waistThicknessMm - 2 * coverMm;
+      const landingWidthMm = geom.landingWidthM * 1000;
+
+      // 1. Bottom Main Longitudinal Tension Bars (Cranked with SP:34 Kink Cross-Over)
+      const mainDia = f.mainRebarDia;
+      const mainSpacing = f.mainRebarSpacing;
+      const LdMainMm = Math.round(47 * mainDia); // IS 456 Cl. 26.2.1
+      const legA = Math.min(landingWidthMm - 50, LdMainMm + 150);
+      const legB = slopeLengthMm;
+      const legC = Math.min(landingWidthMm - 50, LdMainMm + 150);
+      const crankD = dWaistMm;
+      const numMainBars = Math.max(3, Math.floor((WfMm - 2 * coverMm) / mainSpacing) + 1);
+      const cutLenMainM = parseFloat(((legA + legB + legC - 2 * (2 * mainDia)) / 1000).toFixed(2));
+      const unitWtMain = parseFloat(((mainDia * mainDia) / 162.2).toFixed(3));
+      const totalLenMainM = parseFloat((numMainBars * cutLenMainM).toFixed(2));
+      const totalWtMainKg = parseFloat((totalLenMainM * unitWtMain).toFixed(2));
+
+      items.push({
+        mark: `${pfx}-01`,
+        flightName: fName,
+        description: `${fName} Main Bottom Tension Waist Rebar (T${mainDia}@${mainSpacing}mm c/c)`,
+        shapeType: 'CRANKED',
+        diameter: mainDia,
+        spacingMm: mainSpacing,
+        a: legA,
+        b: legB,
+        c: legC,
+        d: crankD,
+        numBarsPerFlight: numMainBars,
+        numFlights: 1,
+        totalCount: numMainBars,
+        cuttingLengthM: cutLenMainM,
+        totalLengthM: totalLenMainM,
+        unitWeightKgM: unitWtMain,
+        totalWeightKg: totalWtMainKg,
+        remarks: `Cranked waist bar with Ld = ${LdMainMm}mm anchorage into landing slabs (SP:34)`,
+      });
+
+      // 2. Top Support Negative Hogging Rebar (L-Bar at landing supports)
+      const topDia = Math.max(10, Math.min(12, mainDia));
+      const topSpacing = 150;
+      const topLdMm = Math.round(47 * topDia);
+      const topSpanExtMm = Math.round(0.30 * f.effectiveSpanLeffM * 1000);
+      const legTopA = dWaistMm;
+      const legTopB = topSpanExtMm + topLdMm;
+      const numTopBarsEachEnd = Math.max(3, Math.floor((WfMm - 2 * coverMm) / topSpacing) + 1);
+      const totalTopBars = numTopBarsEachEnd * 2;
+      const cutLenTopM = parseFloat(((legTopA + legTopB - 2 * topDia) / 1000).toFixed(2));
+      const unitWtTop = parseFloat(((topDia * topDia) / 162.2).toFixed(3));
+      const totalLenTopM = parseFloat((totalTopBars * cutLenTopM).toFixed(2));
+      const totalWtTopKg = parseFloat((totalLenTopM * unitWtTop).toFixed(2));
+
+      items.push({
+        mark: `${pfx}-02`,
+        flightName: fName,
+        description: `${fName} Top Negative Support Steel (T${topDia}@${topSpacing}mm c/c @ 0.3L + Ld)`,
+        shapeType: 'L_BAR',
+        diameter: topDia,
+        spacingMm: topSpacing,
+        a: legTopA,
+        b: legTopB,
+        c: 0,
+        numBarsPerFlight: totalTopBars,
+        numFlights: 1,
+        totalCount: totalTopBars,
+        cuttingLengthM: cutLenTopM,
+        totalLengthM: totalLenTopM,
+        unitWeightKgM: unitWtTop,
+        totalWeightKg: totalWtTopKg,
+        remarks: `Support negative rebar (0.3Leff + Ld) at landing junctions`,
+      });
+
+      // 3. Transverse Distribution Bars (Tied across flight width)
+      const distDia = f.distributionRebarDia;
+      const distSpacing = f.distributionRebarSpacing;
+      const numDistBarsAlongWaist = Math.max(4, Math.floor(slopeLengthMm / distSpacing) + 1);
+      const numDistBarsLanding = Math.max(4, Math.floor((2 * landingWidthMm) / distSpacing) + 1);
+      const totalDistBars = numDistBarsAlongWaist + numDistBarsLanding;
+      const distCutLenM = parseFloat(((WfMm - 2 * coverMm + 2 * 100) / 1000).toFixed(2));
+      const unitWtDist = parseFloat(((distDia * distDia) / 162.2).toFixed(3));
+      const totalLenDistM = parseFloat((totalDistBars * distCutLenM).toFixed(2));
+      const totalWtDistKg = parseFloat((totalLenDistM * unitWtDist).toFixed(2));
+
+      items.push({
+        mark: `${pfx}-03`,
+        flightName: fName,
+        description: `${fName} Transverse Distribution Rebar (T${distDia}@${distSpacing}mm c/c)`,
+        shapeType: 'STRAIGHT',
+        diameter: distDia,
+        spacingMm: distSpacing,
+        a: 100,
+        b: Math.round(WfMm - 2 * coverMm),
+        c: 100,
+        numBarsPerFlight: totalDistBars,
+        numFlights: 1,
+        totalCount: totalDistBars,
+        cuttingLengthM: distCutLenM,
+        totalLengthM: totalLenDistM,
+        unitWeightKgM: unitWtDist,
+        totalWeightKg: totalWtDistKg,
+        remarks: `Transverse shrinkage & distribution bars across waist and landing zones`,
+      });
+    };
+
+    // Process Flight 1 & Flight 2
+    addFlightBbs(flight1, 1);
+    addFlightBbs(flight2, 2);
+
+    // 4. Mid-Landing Kink Cross-Over Reinforcement (SP:34 Cl. 10.4 & IS 13920)
+    const kinkDia = Math.max(10, flight1.mainRebarDia);
+    const kinkLdMm = Math.round(47 * kinkDia);
+    const numKinkBars = Math.max(4, Math.floor((flight1.flightWidthM * 1000 - 40) / 150) + 1);
+    const kinkCutLenM = parseFloat(((200 + kinkLdMm + 200) / 1000).toFixed(2));
+    const unitWtKink = parseFloat(((kinkDia * kinkDia) / 162.2).toFixed(3));
+    const totalLenKinkM = parseFloat((numKinkBars * kinkCutLenM).toFixed(2));
+    const totalWtKinkKg = parseFloat((totalLenKinkM * unitWtKink).toFixed(2));
+
+    items.push({
+      mark: 'ST-KINK',
+      flightName: 'Mid-Landing',
+      description: `Mid-Landing Kink Cross-Over Rebar (T${kinkDia}@150mm c/c — SP:34 / IS 13920)`,
+      shapeType: 'L_BAR',
+      diameter: kinkDia,
+      spacingMm: 150,
+      a: 200,
+      b: kinkLdMm + 200,
+      c: 0,
+      numBarsPerFlight: numKinkBars,
+      numFlights: 1,
+      totalCount: numKinkBars,
+      cuttingLengthM: kinkCutLenM,
+      totalLengthM: totalLenKinkM,
+      unitWeightKgM: unitWtKink,
+      totalWeightKg: totalWtKinkKg,
+      remarks: `Kink cross-over bars to prevent concrete spalling at re-entrant corner (IS 13920)`,
+    });
+
+    // 5. Landing Slab Edge U-Binder Mesh (U-Bars)
+    const landTieDia = 8;
+    const landWidthMm = geom.roomWidth * 1000;
+    const numLandTies = Math.max(4, Math.floor((geom.landingWidthM * 1000) / 150) + 1);
+    const landCutLenM = parseFloat(((landWidthMm - 40 + 2 * 150) / 1000).toFixed(2));
+    const unitWtLand = parseFloat(((landTieDia * landTieDia) / 162.2).toFixed(3));
+    const totalLenLandM = parseFloat((numLandTies * landCutLenM).toFixed(2));
+    const totalWtLandKg = parseFloat((totalLenLandM * unitWtLand).toFixed(2));
+
+    items.push({
+      mark: 'ST-LAND',
+      flightName: 'Landing Slabs',
+      description: `Landing Slab Edge Reinforcement & Waist Chairs (T${landTieDia}@150mm c/c)`,
+      shapeType: 'U_BAR',
+      diameter: landTieDia,
+      spacingMm: 150,
+      a: 150,
+      b: Math.round(landWidthMm - 40),
+      c: 150,
+      numBarsPerFlight: numLandTies,
+      numFlights: 1,
+      totalCount: numLandTies,
+      cuttingLengthM: landCutLenM,
+      totalLengthM: totalLenLandM,
+      unitWeightKgM: unitWtLand,
+      totalWeightKg: totalWtLandKg,
+      remarks: `Edge U-caps & waist slab bar chairs for reinforcement cover maintenance`,
+    });
+
+    // Compute Diameter-Wise Summary
+    const diaMap = new Map<number, { totalLengthM: number; totalWeightKg: number }>();
+    items.forEach((item) => {
+      const cur = diaMap.get(item.diameter) || { totalLengthM: 0, totalWeightKg: 0 };
+      cur.totalLengthM += item.totalLengthM;
+      cur.totalWeightKg += item.totalWeightKg;
+      diaMap.set(item.diameter, cur);
+    });
+
+    const diameterSummary: StaircaseBbsDiameterSummary[] = Array.from(diaMap.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([dia, data]) => ({
+        dia,
+        totalLengthM: parseFloat(data.totalLengthM.toFixed(2)),
+        totalWeightKg: parseFloat(data.totalWeightKg.toFixed(2)),
+        unitWeightKgM: parseFloat(((dia * dia) / 162.2).toFixed(3)),
+      }));
+
+    const totalLengthM = parseFloat(items.reduce((s, i) => s + i.totalLengthM, 0).toFixed(2));
+    const netWeightKg = parseFloat(items.reduce((s, i) => s + i.totalWeightKg, 0).toFixed(2));
+    const wastageAllowancePercent = 5.0; // 5% wastage per CPWD / IS 2502
+    const wastageWeightKg = parseFloat((netWeightKg * 0.05).toFixed(2));
+    const grossWeightKg = parseFloat((netWeightKg + wastageWeightKg).toFixed(2));
+    const grossWeightMT = parseFloat((grossWeightKg / 1000).toFixed(3));
+
+    return {
+      storeyId: `STAIR-STOREY-${diaphragm.levelIndex}`,
+      levelName: diaphragm.levelName,
+      elevationRange,
+      concreteGrade,
+      steelGrade,
+      clearCoverMm: coverMm,
+      items,
+      diameterSummary,
+      totalLengthM,
+      netWeightKg,
+      wastageAllowancePercent,
+      wastageWeightKg,
+      grossWeightKg,
+      grossWeightMT,
     };
   }
 

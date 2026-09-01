@@ -91,6 +91,12 @@ export const BbsTableView: React.FC = () => {
             ? 'BEAMS & FRAMING'
             : item.elementCategory === 'GRADE_BEAM'
             ? 'GRADE TIE BEAMS'
+            : item.elementCategory === 'STAIRCASE'
+            ? 'STAIRCASES & WAIST FLIGHTS'
+            : item.elementCategory === 'SLAB'
+            ? 'FLOOR SLABS'
+            : item.elementCategory === 'SHEAR_WALL'
+            ? 'SHEAR WALLS'
             : item.elementCategory;
       }
 
@@ -525,6 +531,7 @@ export const BbsTableView: React.FC = () => {
           { id: 'PILE_CAP', label: 'PILE CAPS & FOUNDATIONS', icon: Box },
           { id: 'GRADE_BEAM', label: 'GRADE TIE BEAMS', icon: Compass },
           { id: 'SLAB', label: 'FLOOR SLABS', icon: Grid },
+          { id: 'STAIRCASE', label: 'STAIRCASES & WAIST FLIGHTS', icon: Layers },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = categoryFilter === tab.id;

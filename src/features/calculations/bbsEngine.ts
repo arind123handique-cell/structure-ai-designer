@@ -6,6 +6,7 @@ import { ColumnDesignEngine } from '@/features/design/column/columnDesignEngine'
 import { PileCapDesignEngine } from '@/features/design/pilecap/pileCapDesignEngine';
 import { GradeBeamDesignEngine } from '@/features/design/gradebeam/gradeBeamEngine';
 import { ShearWallEngine } from '@/features/design/shearwall/shearWallEngine';
+import { StaircaseDesignEngine } from '@/features/design/staircase/staircaseEngine';
 
 export type BarShapeType =
   | 'STRAIGHT'
@@ -23,7 +24,8 @@ export type BbsElementCategory =
   | 'GRADE_BEAM'
   | 'PILE'
   | 'SHEAR_WALL'
-  | 'SLAB';
+  | 'SLAB'
+  | 'STAIRCASE';
 
 export interface BbsItem {
   barNo: number;
@@ -1351,7 +1353,45 @@ export class BbsEngine {
       });
     }
 
-    // 6. CALCULATE DIAMETER TOTALS & CATEGORY MATRIX
+    // ── 6. STAIRCASES & FLIGHTS BBS ──
+    const staircaseSummary = StaircaseDesignEngine.calculateBuildingStaircaseSummary(
+      model,
+      project?.metadata,
+      {
+        customGeometry: (project as any)?.customStaircaseGeometry,
+        customLandingEntry: (project as any)?.customStaircaseLandingEntry,
+      }
+    );
+
+    if (staircaseSummary && staircaseSummary.storeyDesigns) {
+      staircaseSummary.storeyDesigns.forEach((storey) => {
+        if (storey.bbsSchedule && storey.bbsSchedule.items) {
+          storey.bbsSchedule.items.forEach((stairItem) => {
+            items.push({
+              barNo: barIndex++,
+              elementCategory: 'STAIRCASE',
+              elementTag: `${stairItem.mark} (${storey.levelName})`,
+              barDescription: stairItem.description,
+              shapeType: stairItem.shapeType as BarShapeType,
+              a: stairItem.a,
+              b: stairItem.b,
+              c: stairItem.c,
+              d: stairItem.d,
+              diameter: stairItem.diameter,
+              spacing: stairItem.spacingMm,
+              cuttingLengthM: stairItem.cuttingLengthM,
+              numElements: stairItem.numFlights,
+              barsPerElement: stairItem.numBarsPerFlight,
+              totalCount: stairItem.totalCount,
+              totalLengthM: stairItem.totalLengthM,
+              lengthByDia: { [stairItem.diameter]: stairItem.totalLengthM },
+            });
+          });
+        }
+      });
+    }
+
+    // 7. CALCULATE DIAMETER TOTALS & CATEGORY MATRIX
     const summaryMap = new Map<number, { totalLen: number }>();
     this.STANDARD_DIAMETERS.forEach((d) => summaryMap.set(d, { totalLen: 0 }));
 
@@ -1363,10 +1403,11 @@ export class BbsEngine {
       PILE: 0,
       SHEAR_WALL: 0,
       SLAB: 0,
+      STAIRCASE: 0,
     };
 
     const byCategoryDiameterMatrix: { [category in BbsElementCategory]?: { [dia: number]: number } } = {};
-    const allCategories: BbsElementCategory[] = ['PILE', 'PILE_CAP', 'GRADE_BEAM', 'COLUMN', 'BEAM', 'SHEAR_WALL', 'SLAB'];
+    const allCategories: BbsElementCategory[] = ['PILE', 'PILE_CAP', 'GRADE_BEAM', 'COLUMN', 'BEAM', 'SHEAR_WALL', 'SLAB', 'STAIRCASE'];
     allCategories.forEach((cat) => {
       byCategoryDiameterMatrix[cat] = {};
       this.STANDARD_DIAMETERS.forEach((d) => {

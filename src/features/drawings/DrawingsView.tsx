@@ -13,13 +13,16 @@ import { PileCapDesignEngine } from '@/features/design/pilecap/pileCapDesignEngi
 import { GradeBeamDesignEngine } from '@/features/design/gradebeam/gradeBeamEngine';
 import { FootingDesignEngine } from '@/features/design/footing/footingDesignEngine';
 import { ShearWallEngine } from '@/features/design/shearwall/shearWallEngine';
+import { StaircaseDrawingSvg } from '@/features/design/staircase/StaircaseDrawingSvg';
+import { StaircaseDesignEngine } from '@/features/design/staircase/staircaseEngine';
 import { FloorPlanViewer } from './FloorPlanViewer';
 import { BbsTableView } from './BbsTableView';
 import { FileText, Compass, Layers, Box, Building, Printer, Download, Sparkles, FileSpreadsheet } from 'lucide-react';
 
 export const DrawingsView: React.FC = React.memo(() => {
   const activeProject = useProjectStore(s => s.activeProject);
-  const [activeSheet, setActiveSheet] = useState<'FLOOR_PLANS' | 'BBS' | 'NOTES' | 'BEAMS' | 'COLUMNS' | 'FOUNDATIONS' | 'GRADEBEAMS' | 'WALLS'>('BBS');
+  const activeModel = useProjectStore(s => s.activeModel);
+  const [activeSheet, setActiveSheet] = useState<'FLOOR_PLANS' | 'BBS' | 'NOTES' | 'BEAMS' | 'COLUMNS' | 'FOUNDATIONS' | 'GRADEBEAMS' | 'WALLS' | 'STAIRCASE'>('BBS');
 
   const fck = activeProject?.metadata.designSettings.concreteGrade === 'M30' ? 30 : 25;
   const fy = activeProject?.metadata.designSettings.steelGrade === 'Fe500D' ? 500 : 500;
@@ -99,6 +102,21 @@ export const DrawingsView: React.FC = React.memo(() => {
     Mu: 450,
   }), [fck, fy]);
 
+  const sampleStaircase = useMemo(() => {
+    const levels = StaircaseDesignEngine.extractDiaphragmLevels(activeModel);
+    const geom = (activeProject as any)?.customStaircaseGeometry || StaircaseDesignEngine.getDefaultGeometry(activeProject?.metadata);
+    const entry = (activeProject as any)?.customStaircaseLandingEntry || StaircaseDesignEngine.getDefaultLandingEntryConfig();
+    return StaircaseDesignEngine.designStorey(levels[0] || {
+      levelIndex: 1,
+      levelName: 'Ground to 1st Floor Diaphragm',
+      bottomElevationY: 0.0,
+      topElevationY: 3.2,
+      storeyHeightM: 3.2,
+      midLandingElevationY: 1.6,
+      isRoofLevel: false,
+    }, geom, entry);
+  }, [activeModel, activeProject]);
+
   const handlePrint = () => {
     window.print();
   };
@@ -132,6 +150,7 @@ export const DrawingsView: React.FC = React.memo(() => {
       <div className="flex flex-wrap items-center gap-2 border-b border-ui-border pb-2">
         {[
           { id: 'BBS', label: 'STR-BBS: Bar Bending Schedule (All Members)', icon: FileSpreadsheet },
+          { id: 'STAIRCASE', label: 'STR-007: Staircase Plan, Section & BBS Detailing', icon: Layers },
           { id: 'FLOOR_PLANS', label: 'STR-100: 2D Floor Framing & Foundation Plans', icon: Layers },
           { id: 'NOTES', label: 'STR-001: General Structural Notes', icon: FileText },
           { id: 'BEAMS', label: 'STR-002: Beam Reinforcement Elevations', icon: Compass },
@@ -164,6 +183,12 @@ export const DrawingsView: React.FC = React.memo(() => {
         {activeSheet === 'BBS' && (
           <div className="w-full h-full">
             <BbsTableView />
+          </div>
+        )}
+
+        {activeSheet === 'STAIRCASE' && (
+          <div className="w-full h-[700px] rounded-lg overflow-hidden border border-ui-border shadow-md">
+            <StaircaseDrawingSvg storeyDesign={sampleStaircase} />
           </div>
         )}
 
