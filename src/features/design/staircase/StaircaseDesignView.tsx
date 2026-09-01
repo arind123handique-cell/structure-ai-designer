@@ -14,6 +14,7 @@ import { CalculationModal } from '@/features/calculations/CalculationModal';
 import { DetailedCalculationReport } from '@/features/calculations/types';
 import { DataTable, ColumnDef } from '@/components/tables/DataTable';
 import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
+import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
 import { exportToCsv } from '@/utils/exportUtils';
 import {
   Layers,
@@ -33,10 +34,11 @@ import {
   Maximize2,
   ShieldCheck,
   TrendingUp,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 export const StaircaseDesignView: React.FC = () => {
-  const { activeModel, activeProject, saveStaircaseDesigns } = useProjectStore();
+  const { activeModel, activeProject, saveStaircaseDesigns, universalRebarSelection } = useProjectStore();
 
   // Extract Diaphragm Levels from STAAD Model
   const diaphragmLevels: DiaphragmLevelInfo[] = useMemo(() => {
@@ -65,10 +67,19 @@ export const StaircaseDesignView: React.FC = () => {
 
   // UI Panels
   const [showParameters, setShowParameters] = useState(true);
+  const [showRebarSelection, setShowRebarSelection] = useState(true);
   const [showLandingEntries, setShowLandingEntries] = useState(true);
   const [showTable, setShowTable] = useState(true);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Effective geometry taking universal rebar into account
+  const effectiveGeometry: StaircaseRoomGeometry = useMemo(() => {
+    return {
+      ...customGeometry,
+      allowedUniversalDiameters: universalRebarSelection?.longitudinalDiameters,
+    };
+  }, [customGeometry, universalRebarSelection?.longitudinalDiameters]);
 
   // Calculate Building-wide Staircase Summary
   const buildingSummary: BuildingStaircaseSummary = useMemo(() => {
@@ -76,11 +87,11 @@ export const StaircaseDesignView: React.FC = () => {
       activeModel,
       activeProject?.metadata,
       {
-        customGeometry,
+        customGeometry: effectiveGeometry,
         customLandingEntry: landingEntryConfig,
       }
     );
-  }, [activeModel, activeProject, customGeometry, landingEntryConfig]);
+  }, [activeModel, activeProject, effectiveGeometry, landingEntryConfig]);
 
   // Active Storey Design
   const activeStoreyDesign: StoreyStaircaseDesignOutput = useMemo(() => {
@@ -122,21 +133,21 @@ export const StaircaseDesignView: React.FC = () => {
     }));
   };
 
-  // Reset to IS 456 Defaults
+  // Reset to default geometry
   const handleResetDefaults = () => {
     setCustomGeometry(defaultGeom);
     setLandingEntryConfig(defaultEntry);
   };
 
-  // Save designs to Project Store
-  const handleSaveDesigns = async () => {
+  // Save designs to project
+  const handleSaveDesigns = () => {
     setIsSaving(true);
     try {
       if (saveStaircaseDesigns) {
-        await saveStaircaseDesigns(buildingSummary, customGeometry, landingEntryConfig);
+        saveStaircaseDesigns(buildingSummary, customGeometry, landingEntryConfig);
       }
-      setSaveSuccessMsg('Staircase designs, room geometry, and dual-side landing entries saved successfully!');
-      setTimeout(() => setSaveSuccessMsg(null), 3000);
+      setSaveSuccessMsg(`Successfully saved ${buildingSummary.totalStoreys} storey staircase designs & BBS to project state!`);
+      setTimeout(() => setSaveSuccessMsg(null), 4000);
     } catch (e) {
       console.error(e);
     } finally {
@@ -146,97 +157,70 @@ export const StaircaseDesignView: React.FC = () => {
 
   // Export CSV Schedule
   const handleExportCsv = () => {
-    const csvData = tableRows.map((r) => ({
-      'Storey Diaphragm': r.storeyLevelName,
-      'Flight': r.name,
-      'Rise (m)': r.flightRiseM,
-      'Risers Count': r.riserCount,
+    const records = tableRows.map((r) => ({
+      'Storey Level': r.storeyLevelName,
+      'Flight Name': r.name,
       'Riser (mm)': r.riserMm,
-      'Treads Count': r.treadCount,
       'Tread (mm)': r.treadMm,
-      'Waist Thickness (mm)': r.waistSlabThicknessMm,
-      'Effective Span Leff (m)': r.effectiveSpanLeffM,
-      'Factored Load wu (kN/m²)': r.factoredLoadWuKnM2,
-      'Design Moment Mu (kNm)': r.designMomentMu,
-      'Main Tension Rebar': r.mainRebarCallout,
+      'Riser Count': r.riserCount,
+      'Tread Count': r.treadCount,
+      'Waist Slab (mm)': r.waistSlabThicknessMm,
+      'Slope Angle (deg)': r.slopeAngleDeg,
+      'Eff Span Leff (m)': r.effectiveSpanLeffM,
+      'Design Mu (kNm)': r.designMomentMu,
+      'Design Vu (kN)': r.designShearVu,
+      'Main Rebar (IS 456)': r.mainRebarCallout,
+      'Ast Provided (mm2/m)': r.mainAstProvided,
+      'Ast Req (mm2/m)': r.mainAstRequired,
+      'pt (%)': r.ptProvided,
       'Distribution Rebar': r.distributionRebarCallout,
-      'Kink Detailing': r.kinkAnchorageDetail,
-      'Landing Rebar': r.landingRebarCallout,
-      'Dual Entry Clearance': r.landingClearanceCheck,
-      'Concrete Vol (m³)': r.concreteM3,
-      'Formwork Area (m²)': r.formworkM2,
-      'Rebar Steel (kg)': r.steelKg,
+      'Top Support Rebar': r.topNegativeRebarCallout,
+      'Kink Detailing (IS 13920)': r.kinkAnchorageDetail,
+      'Concrete (m3)': r.concreteM3,
+      'Steel (kg)': r.steelKg,
+      'Formwork (m2)': r.formworkM2,
       'Status': r.status,
     }));
 
-    exportToCsv(csvData, 'Staircase_Design_IS456_Schedule.csv');
+    exportToCsv(records, `Staircase_Design_Schedule_${activeProject?.metadata.name || 'Project'}.csv`);
   };
 
-  // Table Columns Definition
-  const columns: ColumnDef<any>[] = [
+  // DataTable columns
+  const columns: ColumnDef<StaircaseFlightDesignOutput & { storeyLevelName: string; storeyIndex: number }>[] = [
     {
-      header: 'STOREY DIAPHRAGM & FLIGHT',
-      accessorKey: 'name',
+      header: 'STOREY & FLIGHT',
       sortable: true,
       cell: (r) => (
-        <div className="font-mono">
-          <div className="flex items-center gap-1.5">
-            <span className="font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-xs">
-              {r.flightIndex === 1 ? 'Flight 1 (Mid)' : 'Flight 2 (Floor)'}
-            </span>
-            <span className="text-[11px] text-slate-700 font-semibold truncate max-w-[200px]" title={r.storeyLevelName}>
-              {r.storeyLevelName.split(' (')[0]}
-            </span>
-          </div>
-          <span className="text-[10px] text-slate-500 block mt-0.5">
-            EL. +{r.bottomElevationY.toFixed(2)}m → +{r.topElevationY.toFixed(2)}m (Rise: {r.flightRiseM}m)
+        <div className="font-mono text-xs">
+          <span className="font-bold text-deep-navy block">{r.storeyLevelName}</span>
+          <span className="text-[10px] text-slate-500 block">{r.name}</span>
+        </div>
+      ),
+      width: '200px',
+    },
+    {
+      header: 'GEOMETRY (R × T)',
+      cell: (r) => (
+        <div className="font-mono text-xs">
+          <span className="font-bold text-indigo-700 block">
+            {r.riserCount}R ({r.riserMm}mm) × {r.treadCount}T ({r.treadMm}mm)
+          </span>
+          <span className="text-[10px] text-slate-500 block">
+            tw = {r.waistSlabThicknessMm}mm | θ = {r.slopeAngleDeg}° | Leff = {r.effectiveSpanLeffM}m
           </span>
         </div>
       ),
-      width: '260px',
+      width: '210px',
     },
     {
-      header: 'STEPS (R × T)',
+      header: 'DESIGN MOMENT & SHEAR',
       cell: (r) => (
         <div className="font-mono text-xs">
-          <span className="font-bold text-slate-900 block">
-            {r.riserCount}R @ {r.riserMm}mm × {r.treadCount}T @ {r.treadMm}mm
-          </span>
-          <span className="text-[10px] text-slate-500">
-            Going: {r.goingLengthM}m (Slope: {r.slopeAngleDeg}°)
-          </span>
+          <span className="font-bold text-slate-900 block">Mu = {r.designMomentMu} kNm</span>
+          <span className="text-[10px] text-slate-500 block">Vu = {r.designShearVu} kN</span>
         </div>
       ),
       width: '180px',
-    },
-    {
-      header: 'WAIST SLAB & SPAN',
-      cell: (r) => (
-        <div className="font-mono text-xs">
-          <span className="font-bold text-slate-800 block">
-            tw = {r.waistSlabThicknessMm} mm
-          </span>
-          <span className="text-[10px] text-slate-500">
-            Leff = {r.effectiveSpanLeffM} m
-          </span>
-        </div>
-      ),
-      width: '140px',
-    },
-    {
-      header: 'Mu / Vu DEMAND',
-      align: 'right',
-      cell: (r) => (
-        <div className="font-mono text-right text-xs">
-          <span className="font-bold text-orange-700 block">
-            Mu: {r.designMomentMu} kNm
-          </span>
-          <span className="text-[10px] text-slate-500">
-            wu: {r.factoredLoadWuKnM2} kN/m²
-          </span>
-        </div>
-      ),
-      width: '130px',
     },
     {
       header: 'MAIN REBAR (IS 456 / SP:34)',
@@ -300,33 +284,31 @@ export const StaircaseDesignView: React.FC = () => {
       cell: (r) => (
         <button
           onClick={() => setSelectedReport(r.calculationReport)}
-          className="px-2 py-1 bg-white hover:bg-slate-100 text-indigo-700 rounded border border-indigo-200 text-[11px] font-mono font-semibold shadow-2xs transition-colors"
-          title="View Step-by-Step IS 456 Calculation Sheet"
+          className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded text-xs font-mono font-bold border border-indigo-200 transition-colors"
+          title="View full step-by-step IS 456 calculation sheet"
         >
           Calc Sheet
         </button>
       ),
-      width: '95px',
+      width: '110px',
     },
   ];
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-ui-background overflow-y-auto p-6 space-y-6 font-sans">
-      {/* Top Header */}
+    <div className="flex flex-col h-full space-y-4 p-4 lg:p-6 bg-ui-background overflow-y-auto font-sans">
+      {/* Top Banner Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-surface-card p-4 rounded-md border border-ui-border shadow-xs">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-indigo-50 text-indigo-700 rounded">
-              <Layers className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="font-mono text-base font-bold text-deep-navy">
-                RCC STAIRCASE DESIGN &amp; DUAL-SIDE LANDING DETAILING
-              </h2>
-              <p className="text-xs text-slate-500 font-mono">
-                IS 456:2000 Cl. 33, IS 13920:2016, SP:34 detailing &amp; STAAD ANL Diaphragm Levels.
-              </p>
-            </div>
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-indigo-700 text-white rounded-lg shadow-sm">
+            <Layers className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="font-mono text-base font-bold text-deep-navy">
+              RCC STAIRCASE DESIGN &amp; REBAR DETAILING (IS 456 / SP:34)
+            </h2>
+            <p className="text-xs text-slate-500 font-mono">
+              IS 456:2000 Cl. 33, IS 13920:2016, SP:34 detailing, custom rebar selection &amp; STAAD ANL Diaphragm Levels.
+            </p>
           </div>
         </div>
 
@@ -430,6 +412,9 @@ export const StaircaseDesignView: React.FC = () => {
         </div>
       </div>
 
+      {/* Universal Rebar Selection Integration Bar */}
+      <UniversalRebarBar moduleName="RCC Staircase" />
+
       {/* Save Notification */}
       {saveSuccessMsg && (
         <div className="p-3 bg-emerald-50 border border-emerald-300 rounded text-emerald-900 text-xs font-mono flex items-center gap-2 animate-in fade-in">
@@ -465,216 +450,472 @@ export const StaircaseDesignView: React.FC = () => {
       </div>
 
       {/* Parameter Adjustment Panels Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 font-mono text-xs">
-        {/* Panel 1: Room Dimensions & Step Geometry */}
+      <div className="space-y-4 font-mono text-xs">
+        {/* Panel 1: Rebar Selection & Reinforcement Detailing (PRIMARY) */}
         <CollapsiblePanel
-          title="STAIRCASE ROOM SIZE & STEP GEOMETRY (IS 456 Cl. 33)"
-          icon={<Maximize2 className="w-4 h-4 text-indigo-600" />}
-          storageKey="staircase-geom"
-          open={showParameters}
-          onToggle={setShowParameters}
+          title="STAIRCASE REBAR SELECTION & REINFORCEMENT DETAILING (IS 456 / SP:34)"
+          icon={<Sliders className="w-4 h-4 text-orange-600" />}
+          storageKey="staircase-rebar"
+          open={showRebarSelection}
+          onToggle={setShowRebarSelection}
           variant="card"
-          contentClassName="p-4 space-y-3"
+          contentClassName="p-4 space-y-4"
         >
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {/* Quick Presets Bar */}
+          <div className="flex items-center gap-1.5 flex-wrap pb-3 border-b border-slate-200">
+            <span className="text-[10px] text-slate-500 font-bold uppercase mr-1">
+              REBAR PRESETS:
+            </span>
+            {[
+              {
+                label: 'Residential (T12 @ 150 / T8 @ 200)',
+                main: 12,
+                dist: 8,
+                top: 10,
+                maxMain: 175,
+                maxDist: 200,
+                cover: 20,
+              },
+              {
+                label: 'Light Footfall (T10 @ 125 / T8 @ 200)',
+                main: 10,
+                dist: 8,
+                top: 8,
+                maxMain: 150,
+                maxDist: 200,
+                cover: 20,
+              },
+              {
+                label: 'Commercial (T16 @ 150 / T10 @ 150)',
+                main: 16,
+                dist: 10,
+                top: 12,
+                maxMain: 175,
+                maxDist: 175,
+                cover: 25,
+              },
+              {
+                label: 'Public / High-Rise (T20 @ 150 / T10 @ 150)',
+                main: 20,
+                dist: 10,
+                top: 16,
+                maxMain: 175,
+                maxDist: 175,
+                cover: 25,
+              },
+            ].map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => {
+                  setCustomGeometry((prev) => ({
+                    ...prev,
+                    preferredMainBarDia: preset.main,
+                    preferredDistributionBarDia: preset.dist,
+                    preferredTopSupportBarDia: preset.top,
+                    maxMainSpacingMm: preset.maxMain,
+                    maxDistributionSpacingMm: preset.maxDist,
+                    clearCoverMm: preset.cover,
+                  }));
+                }}
+                className={`px-2.5 py-1 rounded text-[11px] font-bold border transition-colors ${
+                  customGeometry.preferredMainBarDia === preset.main &&
+                  customGeometry.preferredDistributionBarDia === preset.dist
+                    ? 'bg-orange-600 text-white border-orange-700 shadow-xs'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Rebar Diameter Selectors */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* 1. Main Tension Rebar Diameter */}
+            <div className="space-y-2 p-3 bg-orange-50/60 rounded-lg border border-orange-200">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] text-orange-950 font-bold uppercase">
+                  1. Main Waist Rebar (ϕ)
+                </label>
+                <span className="text-[10px] text-orange-700 font-bold bg-orange-100 px-2 py-0.5 rounded border border-orange-300">
+                  {activeStoreyDesign.flight1.mainRebarCallout.split('(')[0].trim()}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {[10, 12, 16, 20, 25].map((dia) => {
+                  const isAllowed =
+                    !universalRebarSelection?.longitudinalDiameters ||
+                    universalRebarSelection.longitudinalDiameters.length === 0 ||
+                    universalRebarSelection.longitudinalDiameters.includes(dia);
+                  const isSelected = (customGeometry.preferredMainBarDia ?? 12) === dia;
+
+                  return (
+                    <button
+                      key={dia}
+                      type="button"
+                      disabled={!isAllowed}
+                      onClick={() => handleUpdateGeom('preferredMainBarDia', dia)}
+                      className={`flex-1 py-1.5 px-2 rounded font-mono text-xs font-bold transition-all text-center ${
+                        isSelected
+                          ? 'bg-orange-600 text-white shadow-sm ring-2 ring-orange-400'
+                          : isAllowed
+                          ? 'bg-white text-slate-800 border border-slate-300 hover:border-orange-500'
+                          : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-50'
+                      }`}
+                      title={!isAllowed ? `T${dia} disabled in Universal Rebar Selection` : `Select T${dia} Main Rebar`}
+                    >
+                      T{dia}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="text-[10px] text-slate-600 space-y-0.5 pt-1">
+                <div>Ast Provided: <strong className="text-orange-900">{activeStoreyDesign.flight1.mainAstProvided} mm²/m</strong> (Req: {activeStoreyDesign.flight1.mainAstRequired} mm²/m)</div>
+                <div>pt Provided: <strong className="text-orange-900">{activeStoreyDesign.flight1.ptProvided}%</strong></div>
+              </div>
+            </div>
+
+            {/* 2. Transverse Distribution Rebar */}
+            <div className="space-y-2 p-3 bg-sky-50/60 rounded-lg border border-sky-200">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] text-sky-950 font-bold uppercase">
+                  2. Distribution Steel (ϕ)
+                </label>
+                <span className="text-[10px] text-sky-700 font-bold bg-sky-100 px-2 py-0.5 rounded border border-sky-300">
+                  {activeStoreyDesign.flight1.distributionRebarCallout.split('(')[0].trim()}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {[8, 10, 12, 16].map((dia) => {
+                  const isSelected = (customGeometry.preferredDistributionBarDia ?? 8) === dia;
+
+                  return (
+                    <button
+                      key={dia}
+                      type="button"
+                      onClick={() => handleUpdateGeom('preferredDistributionBarDia', dia)}
+                      className={`flex-1 py-1.5 px-2 rounded font-mono text-xs font-bold transition-all text-center ${
+                        isSelected
+                          ? 'bg-sky-600 text-white shadow-sm ring-2 ring-sky-400'
+                          : 'bg-white text-slate-800 border border-slate-300 hover:border-sky-500'
+                      }`}
+                      title={`Select T${dia} Transverse Distribution Rebar`}
+                    >
+                      T{dia}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="text-[10px] text-slate-600 space-y-0.5 pt-1">
+                <div>Ast Provided: <strong className="text-sky-900">{activeStoreyDesign.flight1.distributionAstProvided} mm²/m</strong></div>
+                <div>Code check: <strong className="text-sky-900">IS 456 Cl. 26.5.2.1 (0.12%)</strong></div>
+              </div>
+            </div>
+
+            {/* 3. Top Support Negative Steel */}
+            <div className="space-y-2 p-3 bg-purple-50/60 rounded-lg border border-purple-200">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] text-purple-950 font-bold uppercase">
+                  3. Top Support Steel (ϕ)
+                </label>
+                <span className="text-[10px] text-purple-700 font-bold bg-purple-100 px-2 py-0.5 rounded border border-purple-300">
+                  T{customGeometry.preferredTopSupportBarDia ?? 10} @ 150 mm
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {[8, 10, 12, 16].map((dia) => {
+                  const isSelected = (customGeometry.preferredTopSupportBarDia ?? 10) === dia;
+
+                  return (
+                    <button
+                      key={dia}
+                      type="button"
+                      onClick={() => handleUpdateGeom('preferredTopSupportBarDia', dia)}
+                      className={`flex-1 py-1.5 px-2 rounded font-mono text-xs font-bold transition-all text-center ${
+                        isSelected
+                          ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-400'
+                          : 'bg-white text-slate-800 border border-slate-300 hover:border-purple-500'
+                      }`}
+                      title={`Select T${dia} Top Negative Support Steel`}
+                    >
+                      T{dia}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="text-[10px] text-slate-600 space-y-0.5 pt-1">
+                <div>Support Extension: <strong className="text-purple-900">0.28 Leff + Ld</strong></div>
+                <div>Kink Cross-over: <strong className="text-emerald-800">SP:34 Cl. 10.4 Safe</strong></div>
+              </div>
+            </div>
+          </div>
+
+          {/* Spacing Caps & Clear Cover Controls */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-200">
             <div>
               <label className="text-[10px] text-slate-500 font-bold uppercase block mb-1">
-                Room Length L (m)
+                Max Main Spacing Cap (mm)
               </label>
-              <input
-                type="number"
-                step="0.1"
-                min="3.0"
-                max="8.0"
-                value={customGeometry.roomLength}
-                onChange={(e) => handleUpdateGeom('roomLength', parseFloat(e.target.value) || 4.8)}
-                className="w-full px-2 py-1 bg-white border border-slate-300 rounded font-bold text-slate-800 focus:border-indigo-600 focus:outline-hidden"
-              />
+              <select
+                value={customGeometry.maxMainSpacingMm ?? 200}
+                onChange={(e) => handleUpdateGeom('maxMainSpacingMm', Number(e.target.value))}
+                className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded font-bold text-slate-800 focus:border-indigo-600 focus:outline-hidden cursor-pointer"
+              >
+                <option value={125}>125 mm (Dense / High Traffic)</option>
+                <option value={150}>150 mm (Standard SP:34)</option>
+                <option value={175}>175 mm</option>
+                <option value={200}>200 mm (Economy)</option>
+                <option value={250}>250 mm</option>
+                <option value={300}>300 mm (IS 456 Code Max 3d)</option>
+              </select>
             </div>
 
             <div>
               <label className="text-[10px] text-slate-500 font-bold uppercase block mb-1">
-                Room Width B (m)
+                Max Distribution Spacing (mm)
               </label>
-              <input
-                type="number"
-                step="0.1"
-                min="1.8"
-                max="5.0"
-                value={customGeometry.roomWidth}
-                onChange={(e) => handleUpdateGeom('roomWidth', parseFloat(e.target.value) || 2.4)}
-                className="w-full px-2 py-1 bg-white border border-slate-300 rounded font-bold text-slate-800 focus:border-indigo-600 focus:outline-hidden"
-              />
+              <select
+                value={customGeometry.maxDistributionSpacingMm ?? 250}
+                onChange={(e) => handleUpdateGeom('maxDistributionSpacingMm', Number(e.target.value))}
+                className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded font-bold text-slate-800 focus:border-indigo-600 focus:outline-hidden cursor-pointer"
+              >
+                <option value={150}>150 mm</option>
+                <option value={200}>200 mm (Standard)</option>
+                <option value={250}>250 mm (Economy)</option>
+                <option value={300}>300 mm</option>
+              </select>
             </div>
 
             <div>
               <label className="text-[10px] text-slate-500 font-bold uppercase block mb-1">
-                Flight Width W (m)
+                Waist Slab Clear Cover (mm)
               </label>
-              <input
-                type="number"
-                step="0.05"
-                min="0.9"
-                max="2.5"
-                value={customGeometry.flightWidthM}
-                onChange={(e) => handleUpdateGeom('flightWidthM', parseFloat(e.target.value) || 1.1)}
-                className="w-full px-2 py-1 bg-white border border-slate-300 rounded font-bold text-slate-800 focus:border-indigo-600 focus:outline-hidden"
-              />
-            </div>
-
-            <div>
-              <label className="text-[10px] text-slate-500 font-bold uppercase block mb-1">
-                Step Tread T (mm)
-              </label>
-              <input
-                type="number"
-                step="5"
-                min="225"
-                max="350"
-                value={customGeometry.treadMm}
-                onChange={(e) => handleUpdateGeom('treadMm', parseInt(e.target.value, 10) || 275)}
-                className="w-full px-2 py-1 bg-white border border-slate-300 rounded font-bold text-indigo-700 focus:border-indigo-600 focus:outline-hidden"
-              />
-            </div>
-
-            <div>
-              <label className="text-[10px] text-slate-500 font-bold uppercase block mb-1">
-                Target Riser R (mm)
-              </label>
-              <input
-                type="number"
-                step="5"
-                min="125"
-                max="200"
-                value={customGeometry.riserMm}
-                onChange={(e) => handleUpdateGeom('riserMm', parseInt(e.target.value, 10) || 160)}
-                className="w-full px-2 py-1 bg-white border border-slate-300 rounded font-bold text-indigo-700 focus:border-indigo-600 focus:outline-hidden"
-              />
-            </div>
-
-            <div>
-              <label className="text-[10px] text-slate-500 font-bold uppercase block mb-1">
-                Waist Slab tw (mm)
-              </label>
-              <input
-                type="number"
-                step="5"
-                min="120"
-                max="250"
-                value={customGeometry.waistSlabThicknessMm}
-                onChange={(e) => handleUpdateGeom('waistSlabThicknessMm', parseInt(e.target.value, 10) || 160)}
-                className="w-full px-2 py-1 bg-white border border-slate-300 rounded font-bold text-amber-700 focus:border-indigo-600 focus:outline-hidden"
-              />
+              <select
+                value={customGeometry.clearCoverMm ?? 20}
+                onChange={(e) => handleUpdateGeom('clearCoverMm', Number(e.target.value))}
+                className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded font-bold text-slate-800 focus:border-indigo-600 focus:outline-hidden cursor-pointer"
+              >
+                <option value={15}>15 mm (Mild Internal)</option>
+                <option value={20}>20 mm (Standard IS 456 Cl. 26.4)</option>
+                <option value={25}>25 mm (Moderate / Staircore)</option>
+                <option value={30}>30 mm (Severe External Fire)</option>
+              </select>
             </div>
           </div>
         </CollapsiblePanel>
 
-        {/* Panel 2: Dual-Side Landing Entries & Door Clearances */}
-        <CollapsiblePanel
-          title="DUAL-SIDE LANDING ENTRIES & ACCESS DOORS (NBC 2016)"
-          icon={<DoorOpen className="w-4 h-4 text-emerald-600" />}
-          storageKey="staircase-entries"
-          open={showLandingEntries}
-          onToggle={setShowLandingEntries}
-          variant="card"
-          contentClassName="p-4 space-y-3"
-        >
-          <div className="space-y-3">
-            {/* Left Door Entry Toggle & Width */}
-            <div className="flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200">
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="chk_left_door"
-                  checked={landingEntryConfig.hasLeftDoor}
-                  onChange={(e) => handleUpdateEntry('hasLeftDoor', e.target.checked)}
-                  className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                />
-                <label htmlFor="chk_left_door" className="font-bold text-slate-800 cursor-pointer">
-                  Left-Side Landing Entry Door
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Panel 2: Room Dimensions & Step Geometry */}
+          <CollapsiblePanel
+            title="ROOM GEOMETRY & ARCHITECTURAL DIMENSIONS (IS 456 Cl. 33)"
+            icon={<Maximize2 className="w-4 h-4 text-indigo-600" />}
+            storageKey="staircase-geom"
+            open={showParameters}
+            onToggle={setShowParameters}
+            variant="card"
+            contentClassName="p-4 space-y-3"
+          >
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-[10px] text-slate-500 font-bold uppercase block mb-1">
+                  Room Length L (m)
                 </label>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-slate-500">Door Width:</span>
                 <input
                   type="number"
-                  step="0.05"
-                  min="0.8"
-                  max="1.8"
-                  value={landingEntryConfig.leftDoorWidthM}
-                  onChange={(e) => handleUpdateEntry('leftDoorWidthM', parseFloat(e.target.value) || 1.0)}
-                  disabled={!landingEntryConfig.hasLeftDoor}
-                  className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-center font-bold text-slate-900 disabled:opacity-40"
+                  step="0.1"
+                  min="3.0"
+                  max="8.0"
+                  value={customGeometry.roomLength}
+                  onChange={(e) => handleUpdateGeom('roomLength', parseFloat(e.target.value) || 4.8)}
+                  className="w-full px-2 py-1 bg-white border border-slate-300 rounded font-bold text-slate-800 focus:border-indigo-600 focus:outline-hidden"
                 />
-                <span>m</span>
               </div>
-            </div>
 
-            {/* Right Door Entry Toggle & Width */}
-            <div className="flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200">
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="chk_right_door"
-                  checked={landingEntryConfig.hasRightDoor}
-                  onChange={(e) => handleUpdateEntry('hasRightDoor', e.target.checked)}
-                  className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                />
-                <label htmlFor="chk_right_door" className="font-bold text-slate-800 cursor-pointer">
-                  Right-Side Landing Entry Door
+              <div>
+                <label className="text-[10px] text-slate-500 font-bold uppercase block mb-1">
+                  Room Width B (m)
                 </label>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-slate-500">Door Width:</span>
                 <input
                   type="number"
-                  step="0.05"
-                  min="0.8"
-                  max="1.8"
-                  value={landingEntryConfig.rightDoorWidthM}
-                  onChange={(e) => handleUpdateEntry('rightDoorWidthM', parseFloat(e.target.value) || 1.0)}
-                  disabled={!landingEntryConfig.hasRightDoor}
-                  className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-center font-bold text-slate-900 disabled:opacity-40"
+                  step="0.1"
+                  min="1.8"
+                  max="5.0"
+                  value={customGeometry.roomWidth}
+                  onChange={(e) => handleUpdateGeom('roomWidth', parseFloat(e.target.value) || 2.4)}
+                  className="w-full px-2 py-1 bg-white border border-slate-300 rounded font-bold text-slate-800 focus:border-indigo-600 focus:outline-hidden"
                 />
-                <span>m</span>
               </div>
-            </div>
 
-            {/* Front Corridor Access */}
-            <div className="flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200">
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="chk_front_door"
-                  checked={landingEntryConfig.hasFrontDoor}
-                  onChange={(e) => handleUpdateEntry('hasFrontDoor', e.target.checked)}
-                  className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                />
-                <label htmlFor="chk_front_door" className="font-bold text-slate-800 cursor-pointer">
-                  Front Corridor / Hall Access
+              <div>
+                <label className="text-[10px] text-slate-500 font-bold uppercase block mb-1">
+                  Flight Width W (m)
                 </label>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-slate-500">Passage Width:</span>
                 <input
                   type="number"
                   step="0.05"
                   min="0.9"
-                  max="2.4"
-                  value={landingEntryConfig.frontDoorWidthM}
-                  onChange={(e) => handleUpdateEntry('frontDoorWidthM', parseFloat(e.target.value) || 1.2)}
-                  disabled={!landingEntryConfig.hasFrontDoor}
-                  className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-center font-bold text-slate-900 disabled:opacity-40"
+                  max="2.5"
+                  value={customGeometry.flightWidthM}
+                  onChange={(e) => handleUpdateGeom('flightWidthM', parseFloat(e.target.value) || 1.1)}
+                  className="w-full px-2 py-1 bg-white border border-slate-300 rounded font-bold text-slate-800 focus:border-indigo-600 focus:outline-hidden"
                 />
-                <span>m</span>
+              </div>
+
+              <div>
+                <label className="text-[10px] text-slate-500 font-bold uppercase block mb-1">
+                  Step Tread T (mm)
+                </label>
+                <input
+                  type="number"
+                  step="5"
+                  min="225"
+                  max="350"
+                  value={customGeometry.treadMm}
+                  onChange={(e) => handleUpdateGeom('treadMm', parseInt(e.target.value, 10) || 275)}
+                  className="w-full px-2 py-1 bg-white border border-slate-300 rounded font-bold text-indigo-700 focus:border-indigo-600 focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-slate-500 font-bold uppercase block mb-1">
+                  Target Riser R (mm)
+                </label>
+                <input
+                  type="number"
+                  step="5"
+                  min="125"
+                  max="200"
+                  value={customGeometry.riserMm}
+                  onChange={(e) => handleUpdateGeom('riserMm', parseInt(e.target.value, 10) || 160)}
+                  className="w-full px-2 py-1 bg-white border border-slate-300 rounded font-bold text-indigo-700 focus:border-indigo-600 focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-slate-500 font-bold uppercase block mb-1">
+                  Waist Slab tw (mm)
+                </label>
+                <input
+                  type="number"
+                  step="5"
+                  min="120"
+                  max="250"
+                  value={customGeometry.waistSlabThicknessMm}
+                  onChange={(e) => handleUpdateGeom('waistSlabThicknessMm', parseInt(e.target.value, 10) || 160)}
+                  className="w-full px-2 py-1 bg-white border border-slate-300 rounded font-bold text-amber-700 focus:border-indigo-600 focus:outline-hidden"
+                />
               </div>
             </div>
-          </div>
-        </CollapsiblePanel>
+          </CollapsiblePanel>
+
+          {/* Panel 3: Dual-Side Landing Entries & Door Clearances */}
+          <CollapsiblePanel
+            title="DUAL-SIDE LANDING ENTRIES & ACCESS DOORS (NBC 2016)"
+            icon={<DoorOpen className="w-4 h-4 text-emerald-600" />}
+            storageKey="staircase-entries"
+            open={showLandingEntries}
+            onToggle={setShowLandingEntries}
+            variant="card"
+            contentClassName="p-4 space-y-3"
+          >
+            <div className="space-y-3">
+              {/* Left Door Entry Toggle & Width */}
+              <div className="flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="chk_left_door"
+                    checked={landingEntryConfig.hasLeftDoor}
+                    onChange={(e) => handleUpdateEntry('hasLeftDoor', e.target.checked)}
+                    className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <label htmlFor="chk_left_door" className="font-bold text-slate-800 cursor-pointer">
+                    Left-Side Landing Entry Door
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500">Door Width:</span>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0.8"
+                    max="1.8"
+                    value={landingEntryConfig.leftDoorWidthM}
+                    onChange={(e) => handleUpdateEntry('leftDoorWidthM', parseFloat(e.target.value) || 1.0)}
+                    disabled={!landingEntryConfig.hasLeftDoor}
+                    className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-center font-bold text-slate-900 disabled:opacity-40"
+                  />
+                  <span>m</span>
+                </div>
+              </div>
+
+              {/* Right Door Entry Toggle & Width */}
+              <div className="flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="chk_right_door"
+                    checked={landingEntryConfig.hasRightDoor}
+                    onChange={(e) => handleUpdateEntry('hasRightDoor', e.target.checked)}
+                    className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <label htmlFor="chk_right_door" className="font-bold text-slate-800 cursor-pointer">
+                    Right-Side Landing Entry Door
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500">Door Width:</span>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0.8"
+                    max="1.8"
+                    value={landingEntryConfig.rightDoorWidthM}
+                    onChange={(e) => handleUpdateEntry('rightDoorWidthM', parseFloat(e.target.value) || 1.0)}
+                    disabled={!landingEntryConfig.hasRightDoor}
+                    className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-center font-bold text-slate-900 disabled:opacity-40"
+                  />
+                  <span>m</span>
+                </div>
+              </div>
+
+              {/* Front Corridor Access */}
+              <div className="flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="chk_front_door"
+                    checked={landingEntryConfig.hasFrontDoor}
+                    onChange={(e) => handleUpdateEntry('hasFrontDoor', e.target.checked)}
+                    className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <label htmlFor="chk_front_door" className="font-bold text-slate-800 cursor-pointer">
+                    Front Corridor / Hall Access
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500">Passage Width:</span>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0.9"
+                    max="2.4"
+                    value={landingEntryConfig.frontDoorWidthM}
+                    onChange={(e) => handleUpdateEntry('frontDoorWidthM', parseFloat(e.target.value) || 1.2)}
+                    disabled={!landingEntryConfig.hasFrontDoor}
+                    className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-center font-bold text-slate-900 disabled:opacity-40"
+                  />
+                  <span>m</span>
+                </div>
+              </div>
+            </div>
+          </CollapsiblePanel>
+        </div>
       </div>
 
       {/* Interactive CAD Vector Drawing Viewer */}
-      <div className="h-[620px] rounded-lg overflow-hidden border border-ui-border shadow-md">
+      <div className="h-[640px] rounded-lg overflow-hidden border border-ui-border shadow-md">
         <StaircaseDrawingSvg
           storeyDesign={activeStoreyDesign}
           activeFlightIndex={activeFlightIndex}

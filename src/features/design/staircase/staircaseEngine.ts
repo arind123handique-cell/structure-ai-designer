@@ -36,6 +36,13 @@ export interface StaircaseRoomGeometry {
   floorFinishKnM2: number; // Floor finish load (1.0 kN/m2)
   fck: number; // Concrete characteristic strength (e.g. 25 N/mm2)
   fy: number; // Steel yield strength (e.g. 500 N/mm2)
+  clearCoverMm?: number; // Clear cover to main rebar in mm (default 20 mm)
+  preferredMainBarDia?: number; // Preferred main tensile rebar diameter (10, 12, 16, 20 mm)
+  preferredDistributionBarDia?: number; // Preferred distribution rebar diameter (8, 10, 12 mm)
+  preferredTopSupportBarDia?: number; // Preferred top support negative steel diameter (8, 10, 12, 16 mm)
+  maxMainSpacingMm?: number; // User max spacing cap for main bars (mm)
+  maxDistributionSpacingMm?: number; // User max spacing cap for distribution bars (mm)
+  allowedUniversalDiameters?: number[]; // Universal rebar filter from project settings
 }
 
 export interface DiaphragmLevelInfo {
@@ -352,6 +359,12 @@ export class StaircaseDesignEngine {
       floorFinishKnM2: 1.0, // 1.0 kN/m2
       fck,
       fy,
+      clearCoverMm: 20,
+      preferredMainBarDia: 12,
+      preferredDistributionBarDia: 8,
+      preferredTopSupportBarDia: 10,
+      maxMainSpacingMm: 200,
+      maxDistributionSpacingMm: 250,
     };
   }
 
@@ -407,9 +420,24 @@ export class StaircaseDesignEngine {
 
     // Waist slab thickness and effective depth
     const D = geom.waistSlabThicknessMm; // mm
-    const clearCover = 20; // mm (IS 456 Cl. 26.4.2)
-    const barDiaEst = 12; // mm
-    const d = D - clearCover - barDiaEst / 2; // mm
+    const clearCover = geom.clearCoverMm ?? 20; // mm (IS 456 Cl. 26.4.2)
+
+    // Allowed & Preferred Rebar Selection
+    const universalAllowed =
+      geom.allowedUniversalDiameters && geom.allowedUniversalDiameters.length > 0
+        ? geom.allowedUniversalDiameters
+        : null;
+
+    // 1. Main Tension Rebar Diameter Selection
+    let mainBarDia = geom.preferredMainBarDia ?? 12;
+    if (universalAllowed) {
+      const allowedMains = universalAllowed.filter((d) => [10, 12, 16, 20, 25].includes(d));
+      if (allowedMains.length > 0 && !allowedMains.includes(mainBarDia)) {
+        mainBarDia = allowedMains[0];
+      }
+    }
+
+    const d = D - clearCover - mainBarDia / 2; // mm
 
     // Load calculations (IS 456 Cl. 33.2 & IS 875 Pt 2)
     // 1. Self-weight of waist slab on slope converted to plan:
@@ -460,28 +488,47 @@ export class StaircaseDesignEngine {
     const finalMainAstReq = Math.max(minAst, mainAstRequired);
 
     // Select main rebar spacing
-    const mainBarDia = 12; // mm
     const singleBarArea = (Math.PI * Math.pow(mainBarDia, 2)) / 4;
     const exactSpacing = (singleBarArea * 1000) / finalMainAstReq;
-    // Round down to standard spacing: 100, 125, 150, 175, 200 mm (max 3d or 300mm)
-    const maxSpacing = Math.min(3 * d, 300);
-    const mainRebarSpacing = Math.min(maxSpacing, Math.max(100, Math.floor(exactSpacing / 25) * 25));
+    // Round down to standard spacing: 100, 125, 150, 175, 200 mm (max 3d or 300mm or user limit)
+    const userMaxMainSpacing = geom.maxMainSpacingMm ?? 300;
+    const maxSpacing = Math.min(3 * d, 300, userMaxMainSpacing);
+    const mainRebarSpacing = Math.min(maxSpacing, Math.max(75, Math.floor(exactSpacing / 25) * 25));
     const mainAstProvided = parseFloat(((singleBarArea * 1000) / mainRebarSpacing).toFixed(1));
     const ptProvided = parseFloat(((mainAstProvided / (b * d)) * 100).toFixed(2));
     const mainRebarCallout = `T${mainBarDia} @ ${mainRebarSpacing} mm c/c (Bottom Main Tensile Rebar)`;
 
-    // Distribution steel (0.12% of gross section)
-    const distBarDia = 8; // mm
+    // 2. Distribution steel (0.12% of gross section)
+    let distBarDia = geom.preferredDistributionBarDia ?? 8;
+    if (universalAllowed) {
+      const allowedDists = universalAllowed.filter((d) => [8, 10, 12, 16].includes(d));
+      if (allowedDists.length > 0 && !allowedDists.includes(distBarDia)) {
+        distBarDia = allowedDists[0];
+      }
+    }
     const distSingleBarArea = (Math.PI * Math.pow(distBarDia, 2)) / 4;
     const distAstReq = minAst;
     const distExactSpacing = (distSingleBarArea * 1000) / distAstReq;
-    const distMaxSpacing = Math.min(5 * d, 450);
-    const distributionRebarSpacing = Math.min(distMaxSpacing, Math.max(125, Math.floor(distExactSpacing / 25) * 25));
+    const userMaxDistSpacing = geom.maxDistributionSpacingMm ?? 300;
+    const distMaxSpacing = Math.min(5 * d, 450, userMaxDistSpacing);
+    const distributionRebarSpacing = Math.min(distMaxSpacing, Math.max(100, Math.floor(distExactSpacing / 25) * 25));
     const distributionAstProvided = parseFloat(((distSingleBarArea * 1000) / distributionRebarSpacing).toFixed(1));
     const distributionRebarCallout = `T${distBarDia} @ ${distributionRebarSpacing} mm c/c (Transverse Distribution)`;
 
-    // Top negative steel at supports (50% of main steel as per IS 456)
-    const topNegativeRebarCallout = `T10 @ 150 mm c/c (Top Negative Rebar over 0.25 Leff)`;
+    // 3. Top negative steel at supports (50% of main steel as per IS 456)
+    let topBarDia =
+      geom.preferredTopSupportBarDia ?? (mainBarDia <= 10 ? 8 : mainBarDia === 12 ? 10 : 12);
+    if (universalAllowed) {
+      const allowedTops = universalAllowed.filter((d) => [8, 10, 12, 16].includes(d));
+      if (allowedTops.length > 0 && !allowedTops.includes(topBarDia)) {
+        topBarDia = allowedTops[0];
+      }
+    }
+    const topSingleBarArea = (Math.PI * Math.pow(topBarDia, 2)) / 4;
+    const topAstReq = Math.max(minAst, 0.5 * finalMainAstReq);
+    const topExactSpacing = (topSingleBarArea * 1000) / topAstReq;
+    const topSpacing = Math.min(maxSpacing, Math.max(100, Math.floor(topExactSpacing / 25) * 25));
+    const topNegativeRebarCallout = `T${topBarDia} @ ${topSpacing} mm c/c (Top Negative Rebar over 0.28 Leff + Ld)`;
 
     // Kink anchorage detail at junction (IS 13920 / SP:34)
     const Ld = Math.round(47 * mainBarDia); // 47 * phi for Fe500 in M25
@@ -489,8 +536,8 @@ export class StaircaseDesignEngine {
 
     // Landing reinforcement
     const landingThicknessMm = D;
-    const landingMainRebar = `T10 @ 150 mm c/c B.W. (Bottom Mesh)`;
-    const landingDistributionRebar = `T8 @ 150 mm c/c (Top Distribution / Negative Mesh)`;
+    const landingMainRebar = `T${Math.max(distBarDia, 10)} @ 150 mm c/c B.W. (Bottom Mesh)`;
+    const landingDistributionRebar = `T${distBarDia} @ 150 mm c/c (Top Distribution / Negative Mesh)`;
 
     // Dual Landing Entry Clearance Check
     // Clear landing passage width must be >= flight width as per NBC & IS 456

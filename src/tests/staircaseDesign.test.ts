@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { StaircaseDesignEngine } from '../features/design/staircase/staircaseEngine';
+import { StaircaseDesignEngine, StaircaseRoomGeometry } from '../features/design/staircase/staircaseEngine';
 import { NormalizedStructuralModel } from '../features/model/types';
 
 describe('StaircaseDesignEngine Unit & Integration Tests', () => {
@@ -162,5 +162,60 @@ describe('StaircaseDesignEngine Unit & Integration Tests', () => {
     const dia12 = bbs.diameterSummary.find((d) => d.dia === 12);
     expect(dia12).toBeDefined();
     expect(dia12!.unitWeightKgM).toBeCloseTo(0.888, 2);
+  });
+
+  it('should dynamically update rebar design, callouts, and BBS when user selects custom rebar diameters and spacing caps', () => {
+    const levels = StaircaseDesignEngine.extractDiaphragmLevels(null);
+    const defaultGeom = StaircaseDesignEngine.getDefaultGeometry();
+    const entry = StaircaseDesignEngine.getDefaultLandingEntryConfig();
+
+    // 1. Configure custom heavy commercial rebar selection: T16 main, T10 dist, T12 top
+    const customRebarGeom: StaircaseRoomGeometry = {
+      ...defaultGeom,
+      preferredMainBarDia: 16,
+      preferredDistributionBarDia: 10,
+      preferredTopSupportBarDia: 12,
+      maxMainSpacingMm: 175,
+      maxDistributionSpacingMm: 200,
+      clearCoverMm: 25,
+    };
+
+    const storey = StaircaseDesignEngine.designStorey(levels[0], customRebarGeom, entry);
+    expect(storey.flight1.mainRebarDia).toBe(16);
+    expect(storey.flight1.mainRebarCallout).toContain('T16');
+    expect(storey.flight1.distributionRebarDia).toBe(10);
+    expect(storey.flight1.distributionRebarCallout).toContain('T10');
+    expect(storey.flight1.topNegativeRebarCallout).toContain('T12');
+    expect(storey.flight1.mainRebarSpacing).toBeLessThanOrEqual(175);
+    expect(storey.flight1.distributionRebarSpacing).toBeLessThanOrEqual(200);
+
+    // Verify BBS schedule reflects T16 main bar
+    const mainBbsItem = storey.bbsSchedule?.items.find((i) => i.mark === 'ST1-01');
+    expect(mainBbsItem).toBeDefined();
+    expect(mainBbsItem?.diameter).toBe(16);
+    expect(mainBbsItem?.unitWeightKgM).toBeCloseTo((16 * 16) / 162.2, 2);
+
+    // 2. Configure Light rebar selection: T10 main, T8 dist
+    const lightRebarGeom: StaircaseRoomGeometry = {
+      ...defaultGeom,
+      preferredMainBarDia: 10,
+      preferredDistributionBarDia: 8,
+      maxMainSpacingMm: 150,
+      clearCoverMm: 20,
+    };
+    const lightStorey = StaircaseDesignEngine.designStorey(levels[0], lightRebarGeom, entry);
+    expect(lightStorey.flight1.mainRebarDia).toBe(10);
+    expect(lightStorey.flight1.mainRebarCallout).toContain('T10');
+    expect(lightStorey.flight1.distributionRebarDia).toBe(8);
+
+    // 3. Test Universal Rebar Filtering (restricting allowed diameters)
+    const filteredGeom: StaircaseRoomGeometry = {
+      ...defaultGeom,
+      preferredMainBarDia: 20,
+      allowedUniversalDiameters: [12, 16], // 20 is not allowed in universal rebar
+    };
+    const filteredStorey = StaircaseDesignEngine.designStorey(levels[0], filteredGeom, entry);
+    // Should fallback to allowed universal diameter (12)
+    expect(filteredStorey.flight1.mainRebarDia).toBe(12);
   });
 });
