@@ -193,8 +193,8 @@ export const AppLayout: React.FC = () => {
             <Suspense fallback={<ViewFallback />}>{renderMainView()}</Suspense>
           </div>
 
-          {/* Member Inspector Panel (if a member is selected) */}
-          {selectedMemberId && (
+          {/* Member Inspector Panel (if a member is selected in non-3D views; 3D view uses internal MemberDetailsDrawer) */}
+          {selectedMemberId && activeView !== '3d-model' && (
             <Suspense fallback={null}><MemberInspector /></Suspense>
           )}
         </div>

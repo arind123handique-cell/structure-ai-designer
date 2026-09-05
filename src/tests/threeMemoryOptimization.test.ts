@@ -99,6 +99,50 @@ describe('Three.js 3D Viewport Lightweight Memory Optimization', () => {
 
       unitGeom.dispose();
     });
+
+    it('camera raycaster correctly intersects column and beam in 3D perspective scene', () => {
+      const scene = new THREE.Scene();
+      const dynamicGroup = new THREE.Group();
+      scene.add(dynamicGroup);
+
+      const camera = new THREE.PerspectiveCamera(45, 800 / 600, 0.1, 2000);
+      camera.position.set(10, 8, 12);
+      camera.lookAt(2.5, 1.75, 0);
+      camera.updateMatrixWorld(true);
+
+      const unitBox = new THREE.BoxGeometry(1, 1, 1);
+
+      // Column from (0, 0, 0) to (0, 3.5, 0)
+      const colMesh = new THREE.Mesh(unitBox, new THREE.MeshBasicMaterial());
+      colMesh.scale.set(0.3, 3.5, 0.45);
+      colMesh.position.set(0, 1.75, 0);
+      colMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 1, 0));
+      colMesh.userData = { memberId: 1, type: 'member', isColumn: true };
+      dynamicGroup.add(colMesh);
+
+      // Beam from (0, 3.5, 0) to (5, 3.5, 0)
+      const beamMesh = new THREE.Mesh(unitBox, new THREE.MeshBasicMaterial());
+      const beamDir = new THREE.Vector3(1, 0, 0);
+      beamMesh.scale.set(0.3, 5.0, 0.45);
+      beamMesh.position.set(2.5, 3.5, 0);
+      beamMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), beamDir);
+      beamMesh.userData = { memberId: 2, type: 'member', isColumn: false };
+      dynamicGroup.add(beamMesh);
+
+      scene.updateMatrixWorld(true);
+
+      // Project beam midpoint (2.5, 3.5, 0) to screen NDC
+      const screenPos = new THREE.Vector3(2.5, 3.5, 0).project(camera);
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(screenPos.x, screenPos.y), camera);
+
+      const hits = raycaster.intersectObjects([dynamicGroup], true);
+      expect(hits.length).toBeGreaterThan(0);
+      expect(hits[0].object.userData.memberId).toBe(2);
+
+      unitBox.dispose();
+    });
   });
 
   describe('3D Rebar Renderer Shared Unit Ring Geometry', () => {

@@ -295,6 +295,8 @@ export const Structural3DViewer: React.FC = () => {
   const [showArchStaircases, setShowArchStaircases] = useState(true);
   const [selectedGradeBeamId, setSelectedGradeBeamId] = useState<string | null>(null);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const multiSelectModeRef = useRef(multiSelectMode);
+  multiSelectModeRef.current = multiSelectMode;
 
   // 3D Reinforcement detailing toggles (real-time ON/OFF per component)
   const [rebarEnabled, setRebarEnabled] = useState(false);
@@ -493,7 +495,7 @@ export const Structural3DViewer: React.FC = () => {
         const elapsed = Date.now() - pointerDownTime;
         // If mouse barely moved (< 6px within 1s), user tapped/clicked to select
         if (dist < 6 && elapsed < 1000) {
-          performRaycastSelectionRef.current(e.clientX, e.clientY, e.shiftKey || e.ctrlKey);
+          performRaycastSelectionRef.current(e.clientX, e.clientY, e.shiftKey || e.ctrlKey || multiSelectModeRef.current);
         }
       }
     };
@@ -1445,6 +1447,9 @@ export const Structural3DViewer: React.FC = () => {
       const dynamicGroup = dynamicGroupRef.current;
       if (!dynamicGroup) return;
 
+      // Force world matrices to update for accurate raycast intersection with scaled unit geometries
+      sceneRef.current.updateMatrixWorld(true);
+
       const targets: THREE.Object3D[] = [dynamicGroup];
       if (arch3DLayerRef.current) {
         targets.push(arch3DLayerRef.current.getGroup());
@@ -1602,12 +1607,6 @@ export const Structural3DViewer: React.FC = () => {
   // Sync latest raycast selection function to ref for native DOM listener
   performRaycastSelectionRef.current = performRaycastSelection;
 
-  // Click & Raycasting Selection — processes primary left-click (e.button === 0)
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
-    performRaycastSelection(e.clientX, e.clientY, e.shiftKey || e.ctrlKey || multiSelectMode);
-  };
-
   // Camera Presets
   const setCameraPreset = (preset: 'iso' | 'top' | 'front' | 'side' | 'fit') => {
     if (!controlsRef.current || !cameraRef.current || !activeModel) return;
@@ -1689,7 +1688,6 @@ export const Structural3DViewer: React.FC = () => {
       {/* 3D Canvas Viewport */}
       <div
         ref={containerRef}
-        onPointerDown={handlePointerDown}
         className="w-full h-full cursor-crosshair flex-1 min-h-0 relative z-[5]"
         title="Click: select member • Drag: orbit • Scroll: zoom"
       />

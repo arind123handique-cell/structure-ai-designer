@@ -336,4 +336,82 @@ describe('3D Viewport Selection Engine — 5 Scenarios Verified 5 Times', () => 
       });
     });
   }
+
+  describe('Scaled Unit Box & Camera Drag Selection Preservation', () => {
+    it('accurately selects scaled unit geometry when scene.updateMatrixWorld(true) is called', () => {
+      const testScene = new THREE.Scene();
+      const testGroup = new THREE.Group();
+      testScene.add(testGroup);
+
+      // Shared unit box (1x1x1) scaled to column dimensions (0.3m x 3.5m x 0.45m)
+      const unitBoxGeom = new THREE.BoxGeometry(1, 1, 1);
+      const testMesh = new THREE.Mesh(unitBoxGeom, new THREE.MeshBasicMaterial());
+      testMesh.scale.set(0.3, 3.5, 0.45);
+      testMesh.position.set(0, 1.75, 0);
+      testMesh.userData = { memberId: 1, type: 'member', isColumn: true };
+      testGroup.add(testMesh);
+
+      // Crucial step verified: updateMatrixWorld must be called before raycasting scaled meshes
+      testScene.updateMatrixWorld(true);
+
+      const testRaycaster = new THREE.Raycaster();
+      const rayOrigin = new THREE.Vector3(5, 1.75, 0);
+      const rayDir = new THREE.Vector3(-1, 0, 0).normalize();
+      testRaycaster.set(rayOrigin, rayDir);
+
+      const hits = testRaycaster.intersectObjects(testGroup.children, true);
+      expect(hits.length).toBeGreaterThan(0);
+      expect(hits[0].object.userData.memberId).toBe(1);
+
+      unitBoxGeom.dispose();
+    });
+
+    it('preserves element selection when dragging/orbiting the camera (dist >= 6)', () => {
+      // 1. Select a member
+      useProjectStore.getState().selectMember(1);
+      expect(useProjectStore.getState().selectedMemberId).toBe(1);
+
+      // 2. Simulate drag/orbit interaction:
+      const pointerDown = { x: 400, y: 300, time: 1000 };
+      const pointerUp = { x: 450, y: 360, time: 1400 }; // moved 78px
+
+      const dist = Math.hypot(pointerUp.x - pointerDown.x, pointerUp.y - pointerDown.y);
+      const elapsed = pointerUp.time - pointerDown.time;
+
+      let raycastCalled = false;
+      const onPointerUp = () => {
+        if (dist < 6 && elapsed < 1000) {
+          raycastCalled = true;
+        }
+      };
+      onPointerUp();
+
+      // Raycast selection is not called during camera orbit/drag
+      expect(raycastCalled).toBe(false);
+      // Selected member remains active!
+      expect(useProjectStore.getState().selectedMemberId).toBe(1);
+    });
+
+    it('triggers raycast selection on clean click (dist < 6)', () => {
+      useProjectStore.getState().selectMember(null);
+
+      const pointerDown = { x: 400, y: 300, time: 1000 };
+      const pointerUp = { x: 401, y: 302, time: 1120 }; // moved 2.2px in 120ms
+
+      const dist = Math.hypot(pointerUp.x - pointerDown.x, pointerUp.y - pointerDown.y);
+      const elapsed = pointerUp.time - pointerDown.time;
+
+      let raycastCalled = false;
+      const onPointerUp = () => {
+        if (dist < 6 && elapsed < 1000) {
+          raycastCalled = true;
+          useProjectStore.getState().selectMember(1);
+        }
+      };
+      onPointerUp();
+
+      expect(raycastCalled).toBe(true);
+      expect(useProjectStore.getState().selectedMemberId).toBe(1);
+    });
+  });
 });

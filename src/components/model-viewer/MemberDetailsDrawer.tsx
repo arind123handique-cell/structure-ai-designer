@@ -3,9 +3,15 @@
  * MemberDetailsDrawer — right-side overlay panel when a structural member is selected.
  * Shows: member info, BMD, SFD, design status, rebar callout, and 3D rebar cross-section.
  */
-import { useRef, useEffect, useMemo } from 'react';
+import { useRef, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
-import { X, CheckCircle2, AlertTriangle, XCircle, Ruler, Weight, Cpu } from 'lucide-react';
+import { X, CheckCircle2, AlertTriangle, XCircle, Ruler, Weight, Cpu, FileText, Edit3 } from 'lucide-react';
+import { CalculationModal } from '@/features/calculations/CalculationModal';
+import { DetailedCalculationReport } from '@/features/calculations/types';
+import { SectionEditModal } from '@/features/design/common/SectionEditModal';
+import { BeamDesignEngine } from '@/features/design/beam/beamDesignEngine';
+import { ColumnDesignEngine } from '@/features/design/column/columnDesignEngine';
+import { useProjectStore } from '@/features/projects/projectStore';
 
 interface MemberForceRecord {
   memberId: number;
@@ -274,12 +280,11 @@ function RebarCrossSection({ b_mm, D_mm, colDesign, beamDesign, isColumn }: { b_
     // Cover dimension lines
     const dimMat = new THREE.LineBasicMaterial({ color: 0x475569, linewidth: 1 });
 
-    // Render loop
-    const animate = () => {
+    // Render on demand (0% idle GPU/CPU)
+    const renderScene = () => {
       renderer.render(scene, camera);
-      rafRef.current = requestAnimationFrame(animate);
     };
-    rafRef.current = requestAnimationFrame(animate);
+    renderScene();
 
     // Resize
     const ro = new ResizeObserver((entries) => {
@@ -288,15 +293,17 @@ function RebarCrossSection({ b_mm, D_mm, colDesign, beamDesign, isColumn }: { b_
         camera.aspect = nw / nh;
         camera.updateProjectionMatrix();
         renderer.setSize(nw, nh);
+        renderScene();
       }
     });
     ro.observe(el);
 
     return () => {
-      cancelAnimationFrame(rafRef.current);
       ro.disconnect();
       renderer.dispose();
       barGeom.dispose();
+      tieGeom.dispose();
+      dimMat.dispose();
     };
   }, [b_mm, D_mm, colDesign, beamDesign, isColumn]);
 
@@ -378,12 +385,57 @@ export function MemberDetailsDrawer({
   }, [memberId, memberForces]);
 
   // Design data
+  const { activeProject } = useProjectStore();
+  const [calculationReport, setCalculationReport] = useState<DetailedCalculationReport | null>(null);
+  const [isEditSectionOpen, setIsEditSectionOpen] = useState(false);
+
   const design = isColumn ? colDesign : beamDesign;
   const rebarCallout = isColumn
     ? (colDesign?.rebar?.callout || '4-T20 (default)')
     : (beamDesign?.topRebar?.callout ? `${beamDesign.topRebar.callout} / ${beamDesign.bottomRebar?.callout || '-'}` : '2-T20 / 2-T20 (default)');
   const designStatus = design?.status || null;
   const sectionLabel = `${b_mm} × ${D_mm} mm`;
+
+  const handleOpenCalculation = () => {
+    const fck = activeProject?.metadata.designSettings.concreteGrade === 'M30' ? 30 : 25;
+    const fy = activeProject?.metadata.designSettings.steelGrade === 'Fe500D' ? 500 : 500;
+    const forces = memberForces.filter((f) => f.memberId === memberId);
+    const maxForce = forces.reduce(
+      (max, curr) => (Math.abs(curr.mz) > Math.abs(max.mz) ? curr : max),
+      forces[0] || { axial: 0, vy: 0, vz: 0, my: 0, mz: 0, loadCaseId: 1 }
+    );
+
+    if (isColumn) {
+      const result = ColumnDesignEngine.design({
+        memberId,
+        b: b_mm,
+        D: D_mm,
+        unsupportedHeight: length_m || 3.5,
+        fck,
+        fy,
+        cover: activeProject?.metadata.designSettings.clearCoverColumn || 40,
+        Pu: Math.max(500, Math.abs(maxForce.axial)),
+        Mux: Math.max(35, Math.abs(maxForce.mz)),
+        Muy: Math.max(20, Math.abs(maxForce.my)),
+        governingLoadCase: maxForce.loadCaseId,
+      });
+      setCalculationReport(result.calculationReport);
+    } else {
+      const result = BeamDesignEngine.design({
+        memberId,
+        b: b_mm,
+        D: D_mm,
+        spanLength: length_m || 4.0,
+        fck,
+        fy,
+        cover: activeProject?.metadata.designSettings.clearCoverBeam || 25,
+        Mu: Math.max(10, Math.abs(maxForce.mz)),
+        Vu: Math.max(10, Math.abs(maxForce.vy)),
+        governingLoadCase: maxForce.loadCaseId,
+      });
+      setCalculationReport(result.calculationReport);
+    }
+  };
 
   return (
     <div
@@ -399,16 +451,37 @@ export function MemberDetailsDrawer({
           </span>
           {designStatus && <StatusBadge status={designStatus} />}
         </div>
-        <button onClick={onClose} className="p-1 rounded hover:bg-slate-700/50 text-slate-400 hover:text-white transition-colors">
-          <X className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleOpenCalculation}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] font-mono font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded border border-indigo-400/60 transition-colors shadow-2xs"
+            title="Generate IS 456 / IS 13920 Calculation Sheet"
+          >
+            <FileText className="w-3 h-3" />
+            <span>IS 456</span>
+          </button>
+          <button onClick={onClose} className="p-1 rounded hover:bg-slate-700/50 text-slate-400 hover:text-white transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Content — scrollable */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 text-xs text-slate-300">
         {/* Member info */}
         <section>
-          <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2">Member Information</h3>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-[10px] uppercase tracking-widest text-slate-500">Member Information</h3>
+            <button
+              type="button"
+              onClick={() => setIsEditSectionOpen(true)}
+              className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 underline font-mono"
+            >
+              <Edit3 className="w-3 h-3" />
+              Modify Section
+            </button>
+          </div>
           <div className="grid grid-cols-2 gap-2 text-[11px]">
             <div className="flex items-center gap-1.5"><Ruler className="w-3 h-3 text-sky-400" /><span className="text-slate-500">Section:</span> <span className="text-slate-200 font-semibold">{sectionLabel}</span></div>
             <div className="flex items-center gap-1.5"><Ruler className="w-3 h-3 text-sky-400" /><span className="text-slate-500">Length:</span> <span className="text-slate-200 font-semibold">{length_m.toFixed(2)} m</span></div>
@@ -554,6 +627,18 @@ export function MemberDetailsDrawer({
           </section>
         )}
       </div>
+
+      {/* Detailed IS 456 / IS 13920 Calculation Report Modal */}
+      {calculationReport && (
+        <CalculationModal report={calculationReport} onClose={() => setCalculationReport(null)} />
+      )}
+
+      {/* Section Edit Modal */}
+      <SectionEditModal
+        memberId={memberId}
+        isOpen={isEditSectionOpen}
+        onClose={() => setIsEditSectionOpen(false)}
+      />
     </div>
   );
 }
