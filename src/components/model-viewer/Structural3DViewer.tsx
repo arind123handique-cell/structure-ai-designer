@@ -16,6 +16,12 @@ import { MemberDetailsDrawer } from './MemberDetailsDrawer';
 import { PlateDetailsDrawer } from './PlateDetailsDrawer';
 import { EtabsPropertyInspector } from '@/features/etabs/components/EtabsPropertyInspector';
 import { AssignFrameLoadsModal, AssignFrameSectionModal } from '@/features/etabs/components/EtabsModals';
+import { CalculationModal } from '@/features/calculations/CalculationModal';
+import { DetailedCalculationReport } from '@/features/calculations/types';
+import { RenderMode, ConceptColorMode, SectionLegendItem, StoryLegendItem, MaterialLegendItem } from './Structural3DTypes';
+import { Structural3DStudioPanel } from './Structural3DStudioPanel';
+import { Structural3DInspectorPanel } from './Structural3DInspectorPanel';
+import { Structural3DLegends } from './Structural3DLegends';
 import {
   RotateCcw,
   Eye,
@@ -34,6 +40,9 @@ import {
   AppWindow,
   Footprints,
   Sliders,
+  SlidersHorizontal,
+  Camera,
+  Palette,
 } from 'lucide-react';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -296,6 +305,13 @@ export const Structural3DViewer: React.FC = () => {
 
   const [isAssignLoadsOpen, setIsAssignLoadsOpen] = useState(false);
   const [isAssignSectionOpen, setIsAssignSectionOpen] = useState(false);
+  const [calculationReport, setCalculationReport] = useState<DetailedCalculationReport | null>(null);
+
+  // 3D Redesign States: Render Modes, Concept Colours, Studio Panel, Story Isolation
+  const [renderMode, setRenderMode] = useState<RenderMode>('SOLID');
+  const [conceptColor, setConceptColor] = useState<ConceptColorMode>('TYPE');
+  const [showStudioPanel, setShowStudioPanel] = useState(true);
+  const [selectedStoryElevation, setSelectedStoryElevation] = useState<'ALL' | number>('ALL');
 
   const handleDeleteSelected = async () => {
     if (selectedMemberId) {
@@ -306,6 +322,175 @@ export const Structural3DViewer: React.FC = () => {
       selectNode(null);
     }
   };
+
+  const handleSelectAllColumns = () => {
+    if (!activeModel) return;
+    const colIds: number[] = [];
+    activeModel.members.forEach((m) => {
+      if (m.classification === 'COLUMN') colIds.push(m.id);
+    });
+    if (colIds.length > 0) selectMember(colIds[0]);
+  };
+
+  const handleSelectAllBeams = () => {
+    if (!activeModel) return;
+    const beamIds: number[] = [];
+    activeModel.members.forEach((m) => {
+      if (m.classification === 'BEAM') beamIds.push(m.id);
+    });
+    if (beamIds.length > 0) selectMember(beamIds[0]);
+  };
+
+  const handleClearSelection = () => {
+    selectMember(null);
+    selectNode(null);
+    (selectPlate as any)(null);
+    clearSelectedSupportNodes();
+    setSelectedGradeBeamId(null);
+  };
+
+  const handleTakeSnapshot = () => {
+    if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
+    rendererRef.current.render(sceneRef.current, cameraRef.current);
+    const dataUrl = rendererRef.current.domElement.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.download = `Structural_3D_Model_${Date.now()}.png`;
+    link.href = dataUrl;
+    link.click();
+  };
+
+  // 1. Compute Section Legends & Color Map
+  const sectionLegends = useMemo<SectionLegendItem[]>(() => {
+    if (!activeModel) return [];
+    const map = new Map<string, { count: number; name: string }>();
+    activeModel.members.forEach((m) => {
+      const isCol = m.classification === 'COLUMN';
+      const b = Math.round((m.section.zd || (isCol ? 0.45 : 0.3)) * 1000);
+      const D = Math.round((m.section.yd || (isCol ? 0.55 : 0.45)) * 1000);
+      const key = `${b}×${D}`;
+      const existing = map.get(key) || { count: 0, name: `${b}×${D} mm (${isCol ? 'Col' : 'Beam'})` };
+      existing.count++;
+      map.set(key, existing);
+    });
+
+    const SECTION_PALETTE = [
+      { hex: '#38bdf8', int: 0x38bdf8 },
+      { hex: '#10b981', int: 0x10b981 },
+      { hex: '#f59e0b', int: 0xf59e0b },
+      { hex: '#8b5cf6', int: 0x8b5cf6 },
+      { hex: '#ec4899', int: 0xec4899 },
+      { hex: '#06b6d4', int: 0x06b6d4 },
+      { hex: '#84cc16', int: 0x84cc16 },
+      { hex: '#f97316', int: 0xf97316 },
+      { hex: '#6366f1', int: 0x6366f1 },
+      { hex: '#14b8a6', int: 0x14b8a6 },
+    ];
+
+    const result: SectionLegendItem[] = [];
+    let idx = 0;
+    map.forEach((val, key) => {
+      const p = SECTION_PALETTE[idx % SECTION_PALETTE.length];
+      result.push({
+        key,
+        name: val.name,
+        colorHex: p.hex,
+        colorInt: p.int,
+        count: val.count,
+      });
+      idx++;
+    });
+    return result;
+  }, [activeModel]);
+
+  const sectionColorMap = useMemo(() => {
+    const map = new Map<string, number>();
+    sectionLegends.forEach((item) => map.set(item.key, item.colorInt));
+    return map;
+  }, [sectionLegends]);
+
+  // 2. Compute Story / Elevation Legends
+  const storyLegends = useMemo<StoryLegendItem[]>(() => {
+    if (!activeModel) return [];
+    const elevMap = new Map<number, number>();
+    activeModel.members.forEach((m) => {
+      const n1 = activeModel.nodes.get(m.startNodeId);
+      const n2 = activeModel.nodes.get(m.endNodeId);
+      if (n1 && n2) {
+        const avgY = Math.round(((n1.y + n2.y) / 2) * 10) / 10;
+        elevMap.set(avgY, (elevMap.get(avgY) || 0) + 1);
+      }
+    });
+
+    const sortedElevs = Array.from(elevMap.keys()).sort((a, b) => a - b);
+    const STORY_PALETTE = [
+      { hex: '#f59e0b', int: 0xf59e0b },
+      { hex: '#3b82f6', int: 0x3b82f6 },
+      { hex: '#10b981', int: 0x10b981 },
+      { hex: '#8b5cf6', int: 0x8b5cf6 },
+      { hex: '#ec4899', int: 0xec4899 },
+      { hex: '#06b6d4', int: 0x06b6d4 },
+      { hex: '#eab308', int: 0xeab308 },
+    ];
+
+    return sortedElevs.map((elv, idx) => {
+      const p = STORY_PALETTE[idx % STORY_PALETTE.length];
+      return {
+        elevationY: elv,
+        label: elv === 0 ? 'Base / Plinth' : `Storey ${idx} (EL. +${elv.toFixed(1)}m)`,
+        colorHex: p.hex,
+        colorInt: p.int,
+        memberCount: elevMap.get(elv) || 0,
+      };
+    });
+  }, [activeModel]);
+
+  const getStoryColor = useCallback(
+    (y: number): number => {
+      if (storyLegends.length === 0) return 0x38bdf8;
+      let closest = storyLegends[0];
+      let minDiff = Math.abs(storyLegends[0].elevationY - y);
+      for (const leg of storyLegends) {
+        const diff = Math.abs(leg.elevationY - y);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = leg;
+        }
+      }
+      return closest.colorInt;
+    },
+    [storyLegends]
+  );
+
+  // 3. Compute Material Legends
+  const materialLegends = useMemo<MaterialLegendItem[]>(() => {
+    return [
+      { materialName: 'Concrete M25', colorHex: '#64748b', colorInt: 0x64748b, count: activeModel?.members.size || 0 },
+      { materialName: 'Steel Fe500', colorHex: '#ea580c', colorInt: 0xea580c, count: activeModel?.members.size || 0 },
+    ];
+  }, [activeModel]);
+
+  // 4. Compute Demand-Capacity Ratio (IS 456 DCR)
+  const getMemberDcr = useCallback(
+    (memberId: number): number => {
+      if (!activeModel) return 0.45;
+      const forces = activeModel.memberForces.filter((f) => f.memberId === memberId);
+      if (forces.length === 0) return 0.55;
+      const maxMz = Math.max(...forces.map((f) => Math.abs(f.mz)));
+      const maxP = Math.max(...forces.map((f) => Math.abs(f.axial)));
+      const dcrM = maxMz / 120;
+      const dcrP = maxP / 1200;
+      return Math.min(Math.max(dcrM, dcrP, 0.35), 1.25);
+    },
+    [activeModel]
+  );
+
+  const getDcrColor = useCallback((dcr: number): { hex: string; int: number } => {
+    if (dcr <= 0.5) return { hex: '#10b981', int: 0x10b981 };
+    if (dcr <= 0.75) return { hex: '#84cc16', int: 0x84cc16 };
+    if (dcr <= 0.9) return { hex: '#f59e0b', int: 0xf59e0b };
+    if (dcr <= 1.0) return { hex: '#f97316', int: 0xf97316 };
+    return { hex: '#ef4444', int: 0xef4444 };
+  }, []);
 
   const [showLabels, setShowLabels] = useState(false);
   const [showWallLabels, setShowWallLabels] = useState(false);
@@ -782,14 +967,62 @@ export const Structural3DViewer: React.FC = () => {
         }
       }
 
+      // Storey Isolation filter
+      if (selectedStoryElevation !== 'ALL') {
+        const avgY = (n1.y + n2.y) / 2;
+        if (
+          Math.abs(avgY - selectedStoryElevation) > 1.8 &&
+          Math.abs(n1.y - selectedStoryElevation) > 1.8 &&
+          Math.abs(n2.y - selectedStoryElevation) > 1.8
+        ) {
+          return;
+        }
+      }
+
       const isSelected = selectedMemberId === member.id;
-      const material = isSelected ? selectedMaterial : isCol ? columnMaterial : beamMaterial;
+      const midpoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+
+      // Determine concept color
+      let colorInt = isCol ? 0x10b981 : 0x38bdf8;
+      if (conceptColor === 'SECTION') {
+        const secKey = `${Math.round(b * 1000)}×${Math.round(D * 1000)}`;
+        colorInt = sectionColorMap.get(secKey) || colorInt;
+      } else if (conceptColor === 'STORY') {
+        colorInt = getStoryColor(midpoint.y);
+      } else if (conceptColor === 'MATERIAL') {
+        colorInt = isCol ? 0x2563eb : 0x64748b;
+      } else if (conceptColor === 'UTILIZATION') {
+        const dcr = getMemberDcr(member.id);
+        colorInt = getDcrColor(dcr).int;
+      } else if (conceptColor === 'CYBERPUNK') {
+        colorInt = 0x0f172a;
+      }
+
+      let material: THREE.Material;
+      if (isSelected) {
+        material = selectedMaterial;
+      } else if (renderMode === 'CLAY') {
+        material = new THREE.MeshStandardMaterial({ color: 0xdedede, roughness: 0.85, metalness: 0.05 });
+      } else if (renderMode === 'WIREFRAME') {
+        material = new THREE.MeshBasicMaterial({ color: colorInt, wireframe: true, transparent: true, opacity: 0.35 });
+      } else if (renderMode === 'XRAY') {
+        material = new THREE.MeshStandardMaterial({
+          color: colorInt,
+          transparent: true,
+          opacity: 0.22,
+          roughness: 0.1,
+          metalness: 0.1,
+          depthWrite: false,
+        });
+      } else {
+        material = new THREE.MeshStandardMaterial({ color: colorInt, roughness: 0.35, metalness: 0.1 });
+      }
 
       // High-performance shared unit box geometry with scale sizing (0 heap buffer allocation)
       const mesh = new THREE.Mesh(sharedGeoms.unitBox, material);
-      mesh.scale.set(b, distance, D);
+      const isAnalytical = renderMode === 'ANALYTICAL';
+      mesh.scale.set(isAnalytical ? 0.06 : b, distance, isAnalytical ? 0.06 : D);
 
-      const midpoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
       mesh.position.copy(midpoint);
 
       const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
@@ -807,7 +1040,17 @@ export const Structural3DViewer: React.FC = () => {
       memberMeshesRef.current.set(member.id, mesh);
 
       // Add crisp edges geometry lines using shared unit edges and shared edge material
-      const edgeMat = isSelected ? edgeSelectedMaterial : isCol ? edgeColumnMaterial : edgeBeamMaterial;
+      let edgeMat = isSelected ? edgeSelectedMaterial : isCol ? edgeColumnMaterial : edgeBeamMaterial;
+      if (!isSelected) {
+        if (conceptColor === 'CYBERPUNK') {
+          edgeMat = new THREE.LineBasicMaterial({ color: isCol ? 0x00f0ff : 0xff007f, linewidth: 2 });
+        } else if (renderMode === 'CLAY') {
+          edgeMat = new THREE.LineBasicMaterial({ color: 0x1e293b, linewidth: 1.5 });
+        } else if (renderMode === 'WIREFRAME') {
+          edgeMat = new THREE.LineBasicMaterial({ color: colorInt, linewidth: 2 });
+        }
+      }
+
       const edgeLine = new THREE.LineSegments(sharedGeoms.unitEdges, edgeMat);
       edgeLine.scale.copy(mesh.scale);
       edgeLine.position.copy(mesh.position);
@@ -815,6 +1058,20 @@ export const Structural3DViewer: React.FC = () => {
       edgeLine.userData = { memberId: member.id, type: 'member', isColumn: isCol };
       dynamicGroup.add(edgeLine);
       mesh.userData.edgeLine = edgeLine;
+
+      // Add joint node spheres for Wireframe & Analytical modes
+      if (renderMode === 'ANALYTICAL' || renderMode === 'WIREFRAME') {
+        const nodeSphMat = new THREE.MeshBasicMaterial({ color: isCol ? 0x34d399 : 0x38bdf8 });
+        const sphere1 = new THREE.Mesh(sharedGeoms.unitBox, nodeSphMat);
+        sphere1.scale.set(0.12, 0.12, 0.12);
+        sphere1.position.copy(p1);
+        dynamicGroup.add(sphere1);
+
+        const sphere2 = new THREE.Mesh(sharedGeoms.unitBox, nodeSphMat);
+        sphere2.scale.set(0.12, 0.12, 0.12);
+        sphere2.position.copy(p2);
+        dynamicGroup.add(sphere2);
+      }
 
       // ---- 3D Reinforcement detailing (per-member rebar) ----
       if (rebarEnabled && reinforcementShared) {
@@ -1378,6 +1635,10 @@ export const Structural3DViewer: React.FC = () => {
     rebarShowColumnTies,
     rebarShowBeamBars,
     rebarShowBeamStirrups,
+    renderMode,
+    conceptColor,
+    selectedStoryElevation,
+    sectionColorMap,
   ]);
 
   // High-Performance Instant Selection Highlighter (0.01ms - zero mesh reallocation)
@@ -1461,8 +1722,9 @@ export const Structural3DViewer: React.FC = () => {
 
   const performRaycastSelection = useCallback(
     (clientX: number, clientY: number, isMulti: boolean) => {
-      if (!containerRef.current || !cameraRef.current || !sceneRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
+      const canvasEl = rendererRef.current?.domElement || containerRef.current;
+      if (!canvasEl || !cameraRef.current || !sceneRef.current) return;
+      const rect = canvasEl.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return;
 
       mouseRef.current.x = ((clientX - rect.left) / rect.width) * 2 - 1;
@@ -1687,261 +1949,49 @@ export const Structural3DViewer: React.FC = () => {
     const raw = cd?.D || cd?.dMm || bd?.D || bd?.dMm || selectedMember.section?.yd || 0.45;
     return raw > 5 ? Math.round(raw) : Math.round(raw * 1000);
   })());
-  const drawerLength = selectedMember?.length ?? 0;
-  const drawerNode1 = selectedMember?.startNodeId ?? 0;
-  const drawerNode2 = selectedMember?.endNodeId ?? 0;
-  const drawerMemberForces = activeModel?.memberForces || [];
 
   return (
-    <div className="relative w-full h-full flex flex-col overflow-hidden bg-surface-dark font-sans min-h-0">
-      {/* Video Stream Underlay (Live Drone / Camera Feed) */}
-      {isStreamActive && (
-        <div
-          ref={videoContainerRef}
-          className="absolute inset-0 z-0 overflow-hidden pointer-events-none flex items-center justify-center bg-black"
-          style={{ opacity: arCalibration.underlayOpacity }}
-        />
-      )}
-
-      {/* Cyberpunk CRT Scanlines Overlay */}
-      {isScanlinesEnabled && (
-        <div className="absolute inset-0 cyber-scanlines pointer-events-none z-10" />
-      )}
-
-      {/* Tactical Cyberpunk HUD Overlay */}
-      <VideoViewportOverlay />
-
-      {/* 3D Canvas Viewport */}
-      <div
-        ref={containerRef}
-        className="w-full h-full cursor-crosshair flex-1 min-h-0 relative z-[5]"
-        title="Click: select member • Drag: orbit • Scroll: zoom"
+    <div className="relative w-full h-full flex overflow-hidden bg-deep-navy font-sans min-h-0 select-none">
+      {/* 1. Left Dockable 3D Studio & Explorer Panel */}
+      <Structural3DStudioPanel
+        isOpen={showStudioPanel}
+        onClose={() => setShowStudioPanel(false)}
+        renderMode={renderMode}
+        onSetRenderMode={(m) => {
+          setRenderMode(m);
+          if (m === 'XRAY') setRebarEnabled(true);
+        }}
+        conceptColor={conceptColor}
+        onSetConceptColor={setConceptColor}
+        rebarEnabled={rebarEnabled}
+        onToggleRebar={setRebarEnabled}
+        rebarShowColumnBars={rebarShowColumnBars}
+        onToggleColBars={setRebarShowColumnBars}
+        rebarShowBeamBars={rebarShowBeamBars}
+        onToggleBeamBars={setRebarShowBeamBars}
+        rebarShowColumnTies={rebarShowColumnTies}
+        onToggleColTies={setRebarShowColumnTies}
+        rebarShowBeamStirrups={rebarShowBeamStirrups}
+        onToggleBeamStirrups={setRebarShowBeamStirrups}
+        storyElevations={storyLegends.map((s) => s.elevationY)}
+        selectedStoryElevation={selectedStoryElevation}
+        onSelectStoryElevation={setSelectedStoryElevation}
+        model={activeModel}
+        filterLayers={filterLayers}
+        onToggleFilterLayer={toggleFilterLayer}
+        showLabels={showLabels}
+        onToggleLabels={() => setShowLabels(!showLabels)}
+        onSelectAllColumns={handleSelectAllColumns}
+        onSelectAllBeams={handleSelectAllBeams}
+        onClearSelection={handleClearSelection}
+        onFitView={() => frameCameraToModel(activeModel)}
+        onTakeSnapshot={handleTakeSnapshot}
+        onSelectMember={(id) => selectMember(id)}
+        selectedMemberId={selectedMemberId}
       />
 
-      {/* Top Toolbar Controls */}
-      <div className="absolute top-4 left-4 flex items-center gap-2 bg-deep-navy/90 backdrop-blur-md border border-slate-700/60 p-1.5 rounded shadow-lg z-20 font-mono">
-        <button
-          onClick={() => setCameraPreset('iso')}
-          className="px-2.5 py-1 text-xs text-slate-200 hover:text-white hover:bg-slate-800 rounded transition-colors"
-          title="Isometric View"
-        >
-          ISO
-        </button>
-        <button
-          onClick={() => setCameraPreset('top')}
-          className="px-2.5 py-1 text-xs text-slate-200 hover:text-white hover:bg-slate-800 rounded transition-colors"
-          title="Top View (X-Z Plan)"
-        >
-          TOP
-        </button>
-        <button
-          onClick={() => setCameraPreset('front')}
-          className="px-2.5 py-1 text-xs text-slate-200 hover:text-white hover:bg-slate-800 rounded transition-colors"
-          title="Front Elevation (X-Y)"
-        >
-          FRONT
-        </button>
-        <button
-          onClick={() => setCameraPreset('side')}
-          className="px-2.5 py-1 text-xs text-slate-200 hover:text-white hover:bg-slate-800 rounded transition-colors"
-          title="Side Elevation (Z-Y)"
-        >
-          SIDE
-        </button>
-        <div className="w-[1px] h-4 bg-slate-700 mx-1" />
-        <button
-          onClick={() => setCameraPreset('fit')}
-          className="p-1 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
-          title="Reset / Fit View"
-        >
-          <Maximize2 className="w-3.5 h-3.5" />
-        </button>
-        <div className="w-[1px] h-4 bg-slate-700 mx-1" />
-        {/* In-Engine 4K Video Recorder */}
-        <CinematicRecorderControl canvasRef={canvasRef} />
-      </div>
-
-      {/* Layer Filter & 3D Selection Toggles */}
-      <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-deep-navy/90 backdrop-blur-md border border-slate-700/60 p-1.5 rounded shadow-lg z-10 flex-wrap font-mono">
-        {/* Inspector Panels Toggle Switch */}
-        <button
-          onClick={() => toggleInspectorPanel()}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            showInspectorPanel
-              ? 'bg-indigo-600 text-white border border-indigo-500 font-bold shadow-xs'
-              : 'text-slate-400 hover:text-slate-200 border border-slate-700 bg-slate-800/40'
-          }`}
-          title={showInspectorPanel ? 'Inspector Panels: ON (Click to Hide)' : 'Inspector Panels: OFF (Click to Show)'}
-        >
-          <Sliders className="w-3.5 h-3.5 text-indigo-300" />
-          <span>{showInspectorPanel ? 'Inspector: ON' : 'Inspector: OFF'}</span>
-        </button>
-
-        {/* Multi-Select Toggle Button */}
-        <button
-          onClick={() => setMultiSelectMode(!multiSelectMode)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            multiSelectMode
-              ? 'bg-amber-500/30 text-amber-300 border border-amber-500 font-bold shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Toggle Multi-Select Mode to merge pile caps (or hold Shift)"
-        >
-          <CheckSquare className="w-3.5 h-3.5 text-amber-400" />
-          <span>Multi-Select {selectedSupportNodeIds.length > 0 ? `(${selectedSupportNodeIds.length})` : ''}</span>
-        </button>
-
-        {/* 3D Label Toggle Button */}
-        <button
-          onClick={() => setShowLabels(!showLabels)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            showLabels
-              ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/50 font-bold shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Toggle 3D Column / Joint Labels (C1, C2, C3, C4...)"
-        >
-          <Tag className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Labels</span>
-        </button>
-
-        {/* Shear Wall Labels Toggle — ON/OFF switch per user request */}
-        <button
-          onClick={() => setShowWallLabels(!showWallLabels)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            showWallLabels
-              ? 'bg-violet-500/25 text-violet-300 border border-violet-500/50 font-bold shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Toggle Shear Wall Labels (SW-89, SW-90, etc) in 3D — ON/OFF"
-        >
-          <Layers className="w-3.5 h-3.5 text-violet-400" />
-          <span>Wall Labels</span>
-        </button>
-
-        {/* Slabs Toggle — horizontal floor & roof diaphragm plates */}
-        <button
-          onClick={() => setShowSlabs(!showSlabs)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            showSlabs ? 'bg-sky-500/25 text-sky-300 border border-sky-500/50 font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Toggle Horizontal Floor & Roof Slabs (ON/OFF)"
-        >
-          <Layers className="w-3.5 h-3.5 text-sky-400" />
-          <span>Slabs</span>
-        </button>
-
-        {/* Slab Numbers / Labels Toggle — ON/OFF switch per user request */}
-        <button
-          onClick={() => setShowSlabLabels(!showSlabLabels)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            showSlabLabels
-              ? 'bg-blue-500/25 text-blue-300 border border-blue-500/50 font-bold shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Toggle 3D Floor Slab Numbers (S1, S2, S3, S4, S5...) — ON/OFF"
-        >
-          <Tag className="w-3.5 h-3.5 text-blue-400" />
-          <span>Slab Numbers</span>
-        </button>
-
-        {/* Shear Walls Toggle — vertical lift core shear wall plates */}
-        <button
-          onClick={() => setShowWalls(!showWalls)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            showWalls ? 'bg-violet-500/25 text-violet-300 border border-violet-500/50 font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Toggle Vertical Lift Core Shear Walls on Combined Pile Cap (ON/OFF)"
-        >
-          <Box className="w-3.5 h-3.5 text-violet-400" />
-          <span>Shear Walls</span>
-        </button>
-
-        {/* 3D Pile Cap & Piles Toggle Button */}
-        <button
-          onClick={() => setShowPileCaps(!showPileCaps)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            showPileCaps
-              ? 'bg-sky-500/25 text-sky-300 border border-sky-500/50 font-bold shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Toggle 3D Pile Cap Foundations & Combined Mat Caps"
-        >
-          <Box className="w-3.5 h-3.5 text-sky-400" />
-          <span>Pile Caps {combinedPileCaps.length > 0 ? `(${combinedPileCaps.length} Comb)` : ''}</span>
-        </button>
-
-        {/* 3D Foundation Grade Tie Beams Toggle Button */}
-        <button
-          onClick={() => setShowGradeBeams(!showGradeBeams)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            showGradeBeams
-              ? 'bg-indigo-500/25 text-indigo-300 border border-indigo-500/50 font-bold shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Toggle 3D Foundation Grade Tie Beams connecting pile caps"
-        >
-          <Compass className="w-3.5 h-3.5 text-indigo-400" />
-          <span>Grade Beams</span>
-        </button>
-
-        {/* 3D Rebar Detail Master Toggle — ON/OFF switch for reinforcement graphical detailing */}
-        <button
-          onClick={() => setRebarEnabled(!rebarEnabled)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            rebarEnabled
-              ? 'bg-amber-500/25 text-amber-300 border border-amber-500/50 font-bold shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Toggle 3D Reinforcement Graphical Detailing (Rebar) — ON/OFF"
-        >
-          <Zap className="w-3.5 h-3.5 text-amber-400" />
-          <span>Rebar Detail</span>
-        </button>
-
-        {/* Per-component Rebar toggles — only active when Rebar Detail is ON */}
-        {rebarEnabled && (
-          <>
-            <span className="text-[10px] uppercase tracking-wide text-amber-500/70 px-0.5">Rebar:</span>
-            <button
-              onClick={() => setRebarShowColumnBars(!rebarShowColumnBars)}
-              className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
-                rebarShowColumnBars ? 'bg-amber-500/15 text-amber-300 border border-amber-500/40' : 'text-slate-500 hover:text-slate-300'
-              }`}
-              title="Column Longitudinal Bars (ON/OFF)"
-            >
-              <span className="w-2 h-2 rounded-full bg-amber-400"></span>Col Bars
-            </button>
-            <button
-              onClick={() => setRebarShowColumnTies(!rebarShowColumnTies)}
-              className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
-                rebarShowColumnTies ? 'bg-sky-500/15 text-sky-300 border border-sky-500/40' : 'text-slate-500 hover:text-slate-300'
-              }`}
-              title="Column Ties (ON/OFF)"
-            >
-              <span className="w-2 h-2 rounded-full bg-sky-400"></span>Col Ties
-            </button>
-            <button
-              onClick={() => setRebarShowBeamBars(!rebarShowBeamBars)}
-              className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
-                rebarShowBeamBars ? 'bg-amber-500/15 text-amber-300 border border-amber-500/40' : 'text-slate-500 hover:text-slate-300'
-              }`}
-              title="Beam Main Bars (Top + Bottom) (ON/OFF)"
-            >
-              <span className="w-2 h-2 rounded-full bg-amber-400"></span>Beam Bars
-            </button>
-            <button
-              onClick={() => setRebarShowBeamStirrups(!rebarShowBeamStirrups)}
-              className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
-                rebarShowBeamStirrups ? 'bg-sky-500/15 text-sky-300 border border-sky-500/40' : 'text-slate-500 hover:text-slate-300'
-              }`}
-              title="Beam Stirrups (ON/OFF)"
-            >
-              <span className="w-2 h-2 rounded-full bg-sky-400"></span>Stirrups
-            </button>
-          </>
-        )}
-
+      {/* 2. Center 3D WebGL Canvas Viewport */}
+      <div className="flex-1 h-full relative overflow-hidden flex flex-col min-h-0">
         <div className="w-[1px] h-4 bg-slate-700 mx-1" />
 
         <button
@@ -2310,50 +2360,221 @@ export const Structural3DViewer: React.FC = () => {
         </div>
       )}
 
-      {/* Bottom Right Coordinate HUD */}
-      <div className="absolute bottom-4 right-4 bg-deep-navy/80 backdrop-blur-md border border-slate-800 px-3 py-1.5 rounded text-[11px] font-mono text-slate-400 z-10 flex items-center gap-3">
-        <span className="flex items-center gap-1 text-emerald-400">
-          <Zap className="w-3 h-3 text-amber-400" />
-          High-Speed 3D Engine
-        </span>
-        <span>Columns: {activeModel?.statistics.totalColumns || 0}</span>
-        <span>Combined Caps: {combinedPileCaps.length}</span>
-        <span>Supports: {activeModel?.statistics.totalSupports || 0}</span>
-      </div>
-
-      {/* Controls Hint */}
-      <div className="absolute bottom-4 left-4 bg-deep-navy/70 backdrop-blur-md border border-slate-800 px-3 py-1.5 rounded text-[10px] font-mono text-slate-500 z-10">
-        <span className="text-emerald-400">Click</span> select · <span className="text-sky-400">Drag</span> orbit · <span className="text-slate-400">Scroll</span> zoom
-      </div>
-
-      {/* Right Dockable Property & Forces Inspector (Matching ETABS Studio per user request) */}
-      {showInspectorPanel && (selectedMemberId !== null || selectedNodeId !== null) && (
-        <div className="absolute top-0 right-0 bottom-0 z-20 flex shadow-2xl">
-          <EtabsPropertyInspector
-            model={activeModel}
-            selectedMemberId={selectedMemberId}
-            selectedNodeId={selectedNodeId}
-            onClose={() => {
-              selectMember(null);
-              selectNode(null);
-            }}
-            onOpenAssignLoads={() => setIsAssignLoadsOpen(true)}
-            onOpenAssignSection={() => setIsAssignSectionOpen(true)}
-            onDeleteSelected={handleDeleteSelected}
-          />
-        </div>
-      )}
-
-      {/* Plate Details Drawer — opens when a slab or shear wall is selected and inspector is enabled */}
-      {showInspectorPanel && selectedPlateId && activeModel?.plates.get(selectedPlateId) && (
-        <PlateDetailsDrawer
-          plate={activeModel.plates.get(selectedPlateId)!}
-          nodes={(activeModel.plates.get(selectedPlateId)?.nodeIds || []).map((id: number) => activeModel.nodes.get(id))}
-          onClose={() => (selectPlate as any)(null)}
+      {/* 2. Center 3D WebGL Canvas Viewport */}
+      <div className="flex-1 h-full relative overflow-hidden flex flex-col min-h-0">
+        <div
+          ref={containerRef}
+          className="w-full h-full cursor-crosshair flex-1 min-h-0 relative z-[5]"
+          title="Click: select member • Drag: orbit • Scroll: zoom"
         />
-      )}
 
-      {/* Assign Frame Loads Modal */}
+        {/* Video feed overlay if active */}
+        {isStreamActive && (
+          <div
+            ref={videoContainerRef}
+            className="absolute inset-0 z-0 overflow-hidden pointer-events-none flex items-center justify-center bg-black"
+            style={{ opacity: arCalibration?.underlayOpacity ?? 0.4 }}
+          />
+        )}
+        <VideoViewportOverlay />
+
+        {/* Top Floating Control Bar */}
+        <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-20 flex-wrap gap-2">
+          {/* Left Group: Studio Toggle + Render Mode Pills + Concept Color */}
+          <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 p-1.5 rounded-lg shadow-xl pointer-events-auto font-mono text-xs">
+            <button
+              onClick={() => setShowStudioPanel(!showStudioPanel)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
+                showStudioPanel
+                  ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                  : 'text-slate-300 hover:text-white bg-slate-800/60'
+              }`}
+              title="Toggle 3D Studio & Display Controls Panel"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-300" />
+              <span className="hidden sm:inline">Studio</span>
+            </button>
+
+            <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+
+            {/* Render Mode Quick Pills */}
+            <div className="flex items-center gap-1 bg-slate-950/60 p-0.5 rounded border border-slate-800">
+              {[
+                { id: 'SOLID', label: 'Solid' },
+                { id: 'WIREFRAME', label: 'Wire' },
+                { id: 'ANALYTICAL', label: 'Stick' },
+                { id: 'XRAY', label: 'X-Ray' },
+                { id: 'CLAY', label: 'Clay' },
+              ].map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => {
+                    setRenderMode(m.id as RenderMode);
+                    if (m.id === 'XRAY') setRebarEnabled(true);
+                  }}
+                  className={`px-2 py-0.5 text-[11px] rounded transition-colors ${
+                    renderMode === m.id
+                      ? 'bg-indigo-600 text-white font-bold shadow-2xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title={`${m.label} Render Mode`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+
+            {/* Concept Colour Dropdown */}
+            <div className="flex items-center gap-1">
+              <Palette className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+              <select
+                value={conceptColor}
+                onChange={(e) => setConceptColor(e.target.value as ConceptColorMode)}
+                className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:border-sky-500 font-mono"
+                title="Concept Color Scheme"
+              >
+                <option value="TYPE">Color: By Type</option>
+                <option value="SECTION">Color: By Section</option>
+                <option value="STORY">Color: By Storey</option>
+                <option value="MATERIAL">Color: By Material</option>
+                <option value="UTILIZATION">Color: DCR Stress Heatmap</option>
+                <option value="CYBERPUNK">Color: Cyberpunk Neon</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Right Group: Camera Presets + Snapshot + Inspector Toggle */}
+          <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 p-1.5 rounded-lg shadow-xl pointer-events-auto font-mono text-xs">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setCameraPreset('iso')}
+                className="px-2 py-1 text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                title="Isometric View"
+              >
+                ISO
+              </button>
+              <button
+                onClick={() => setCameraPreset('top')}
+                className="px-2 py-1 text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                title="Top Plan (X-Z)"
+              >
+                TOP
+              </button>
+              <button
+                onClick={() => setCameraPreset('front')}
+                className="px-2 py-1 text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                title="Front Elevation (X-Y)"
+              >
+                FRONT
+              </button>
+              <button
+                onClick={() => setCameraPreset('side')}
+                className="px-2 py-1 text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                title="Side Elevation (Z-Y)"
+              >
+                SIDE
+              </button>
+              <button
+                onClick={() => setCameraPreset('fit')}
+                className="p-1 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                title="Reset / Fit Extents"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+
+            <button
+              onClick={handleTakeSnapshot}
+              className="p-1.5 text-indigo-300 hover:text-white hover:bg-indigo-600/30 rounded transition-colors"
+              title="Export HD 3D Snapshot (PNG)"
+            >
+              <Camera className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              onClick={() => setMultiSelectMode(!multiSelectMode)}
+              className={`flex items-center gap-1 px-2 py-1 text-[11px] rounded transition-colors ${
+                multiSelectMode
+                  ? 'bg-amber-500/30 text-amber-300 border border-amber-500 font-bold shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Toggle Multi-Select"
+            >
+              <CheckSquare className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden md:inline">Multi</span>
+            </button>
+
+            <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+
+            <button
+              onClick={() => toggleInspectorPanel()}
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
+                showInspectorPanel
+                  ? 'bg-indigo-600 text-white border border-indigo-500 font-bold shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200 border border-slate-700 bg-slate-800/40'
+              }`}
+              title={showInspectorPanel ? 'Inspector Panels: ON (Click to Hide)' : 'Inspector Panels: OFF (Click to Show)'}
+            >
+              <Sliders className="w-3.5 h-3.5 text-indigo-300" />
+              <span>{showInspectorPanel ? 'Inspector: ON' : 'Inspector: OFF'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Floating Legends */}
+        <Structural3DLegends
+          conceptColor={conceptColor}
+          sectionLegends={sectionLegends}
+          storyLegends={storyLegends}
+          materialLegends={materialLegends}
+        />
+
+        {/* Bottom Right Coordinate HUD */}
+        <div className="absolute bottom-4 right-4 bg-deep-navy/80 backdrop-blur-md border border-slate-800 px-3 py-1.5 rounded text-[11px] font-mono text-slate-400 z-10 flex items-center gap-3">
+          <span className="flex items-center gap-1 text-emerald-400">
+            <Zap className="w-3 h-3 text-amber-400" />
+            Direct 3D FEM
+          </span>
+          <span>Cols: {activeModel?.statistics.totalColumns || 0}</span>
+          <span>Beams: {activeModel?.statistics.totalBeams || 0}</span>
+          <span>Plates: {activeModel?.plates.size || 0}</span>
+          <span>Supports: {activeModel?.statistics.totalSupports || 0}</span>
+        </div>
+
+        {/* Controls Hint */}
+        <div className="absolute bottom-4 left-4 bg-deep-navy/70 backdrop-blur-md border border-slate-800 px-3 py-1.5 rounded text-[10px] font-mono text-slate-500 z-10">
+          <span className="text-emerald-400">Click</span> select · <span className="text-sky-400">Drag</span> orbit · <span className="text-slate-400">Scroll</span> zoom
+        </div>
+      </div>
+
+      {/* 3. Right Dockable Engineering Inspector Panel */}
+      <Structural3DInspectorPanel
+        isOpen={showInspectorPanel}
+        onClose={() => toggleInspectorPanel(false)}
+        model={activeModel}
+        selectedMemberId={selectedMemberId}
+        selectedNodeId={selectedNodeId}
+        selectedPlateId={selectedPlateId}
+        selectedSupportNodeIds={new Set(selectedSupportNodeIds)}
+        selectedGradeBeamId={selectedGradeBeamId}
+        onSelectMember={selectMember}
+        onSelectNode={selectNode}
+        onOpenAssignLoads={() => setIsAssignLoadsOpen(true)}
+        onOpenAssignSection={() => setIsAssignSectionOpen(true)}
+        onDeleteSelected={handleDeleteSelected}
+        onOpenCalculationModal={(report) => setCalculationReport(report)}
+      />
+
+      {/* 4. Modals */}
+      <CalculationModal
+        report={calculationReport}
+        onClose={() => setCalculationReport(null)}
+      />
+
       <AssignFrameLoadsModal
         isOpen={isAssignLoadsOpen}
         onClose={() => setIsAssignLoadsOpen(false)}
@@ -2368,7 +2589,6 @@ export const Structural3DViewer: React.FC = () => {
         }}
       />
 
-      {/* Assign Frame Section Modal */}
       <AssignFrameSectionModal
         isOpen={isAssignSectionOpen}
         onClose={() => setIsAssignSectionOpen(false)}
