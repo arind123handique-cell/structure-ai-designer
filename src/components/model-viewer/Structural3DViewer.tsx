@@ -13,6 +13,7 @@ import { StaircaseDesignEngine } from '@/features/design/staircase/staircaseEngi
 import { Architectural3DLayer } from '@/features/architectural/3d/Architectural3DLayer';
 import { buildMemberReinforcement, createReinforcementShared, disposeReinforcementShared } from './Reinforcement3DRenderer';
 import { MemberDetailsDrawer } from './MemberDetailsDrawer';
+import { PlateDetailsDrawer } from './PlateDetailsDrawer';
 import {
   RotateCcw,
   Eye,
@@ -493,8 +494,8 @@ export const Structural3DViewer: React.FC = () => {
         const dy = e.clientY - pointerDownPos.y;
         const dist = Math.hypot(dx, dy);
         const elapsed = Date.now() - pointerDownTime;
-        // If mouse barely moved (< 6px within 1s), user tapped/clicked to select
-        if (dist < 6 && elapsed < 1000) {
+        // Tolerant click discrimination for high-DPI screens, mice & touchpads (< 14px movement, < 2500ms)
+        if (dist < 14 && elapsed < 2500) {
           performRaycastSelectionRef.current(e.clientX, e.clientY, e.shiftKey || e.ctrlKey || multiSelectModeRef.current);
         }
       }
@@ -2300,6 +2301,15 @@ export const Structural3DViewer: React.FC = () => {
           beamDesign={drawerBeamDesign}
           memberForces={drawerMemberForces}
           onClose={() => selectMember(null)}
+        />
+      )}
+
+      {/* Plate Details Drawer — opens when a slab or shear wall is selected */}
+      {selectedPlateId && activeModel?.plates.get(selectedPlateId) && (
+        <PlateDetailsDrawer
+          plate={activeModel.plates.get(selectedPlateId)!}
+          nodes={(activeModel.plates.get(selectedPlateId)?.nodeIds || []).map((id: number) => activeModel.nodes.get(id))}
+          onClose={() => (selectPlate as any)(null)}
         />
       )}
     </div>
