@@ -6,6 +6,8 @@ import {
   ShieldCheck,
   FolderPlus,
   Building,
+  Grid,
+  Layers,
 } from 'lucide-react';
 
 export interface StoreyElevationItem {
@@ -17,6 +19,10 @@ interface EtabsToolbarProps {
   selectedStoreyElevation: number;
   availableElevations: StoreyElevationItem[];
   onChangeStoreyElevation: (elevation: number) => void;
+  storeyScope?: 'ONE_STORY' | 'ALL_STORIES';
+  onChangeStoreyScope?: (scope: 'ONE_STORY' | 'ALL_STORIES') => void;
+  onOpenGridSystem?: () => void;
+  onOpenStoryData?: () => void;
   onNewProject: () => void;
   onRunAnalysis: () => void;
   onRunDesign: () => void;
@@ -29,6 +35,10 @@ export const EtabsToolbar: React.FC<EtabsToolbarProps> = React.memo(({
   selectedStoreyElevation,
   availableElevations,
   onChangeStoreyElevation,
+  storeyScope = 'ONE_STORY',
+  onChangeStoreyScope,
+  onOpenGridSystem,
+  onOpenStoryData,
   onNewProject,
   onRunAnalysis,
   onRunDesign,
@@ -99,10 +109,63 @@ export const EtabsToolbar: React.FC<EtabsToolbarProps> = React.memo(({
 
         <div className="h-5 w-px bg-slate-600 mx-1" />
 
+        {/* Story Scope: One Story vs All Stories */}
+        <div className="flex items-center bg-slate-900 rounded border border-slate-700 p-0.5" title="Story Scope: Add columns/beams across all continuous floors or active floor only">
+          <button
+            type="button"
+            onClick={() => onChangeStoreyScope?.('ONE_STORY')}
+            className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
+              storeyScope === 'ONE_STORY'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            One Story
+          </button>
+          <button
+            type="button"
+            onClick={() => onChangeStoreyScope?.('ALL_STORIES')}
+            className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
+              storeyScope === 'ALL_STORIES'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            All Stories
+          </button>
+        </div>
+
+        {/* Quick Modal Launchers for Grid System and Story Data */}
+        {onOpenGridSystem && (
+          <button
+            type="button"
+            onClick={onOpenGridSystem}
+            className="flex items-center gap-1 px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-sky-300 hover:text-sky-200 rounded border border-slate-600 font-bold transition-all"
+            title="Edit Grids, Spacings & Add Bays"
+          >
+            <Grid className="w-3.5 h-3.5" />
+            <span>Grids</span>
+          </button>
+        )}
+
+        {onOpenStoryData && (
+          <button
+            type="button"
+            onClick={onOpenStoryData}
+            className="flex items-center gap-1 px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-emerald-300 hover:text-emerald-200 rounded border border-slate-600 font-bold transition-all"
+            title="Edit Story Heights & Add Floor on Top"
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>Stories</span>
+          </button>
+        )}
+
+        <div className="h-5 w-px bg-slate-600 mx-1" />
+
         {/* Storey Elevation Dropdown */}
         <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1 rounded border border-slate-700">
           <Building className="w-3.5 h-3.5 text-sky-400" />
-          <span className="text-[10px] text-slate-400 uppercase font-bold">Story Level:</span>
+          <span className="text-[10px] text-slate-400 uppercase font-bold">Level:</span>
           <select
             value={selectedStoreyElevation}
             onChange={(e) => onChangeStoreyElevation(Number(e.target.value))}

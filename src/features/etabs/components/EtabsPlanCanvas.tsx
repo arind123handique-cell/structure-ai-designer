@@ -18,6 +18,14 @@ interface EtabsPlanCanvasProps {
   activeTool: EtabsDrawTool;
   onAddColumn: (x: number, z: number) => void;
   onAddBeam: (startNodeId: number, endNodeId: number) => void;
+  onAddBeamAtCoords?: (
+    x1: number,
+    z1: number,
+    x2: number,
+    z2: number,
+    startNodeId?: number,
+    endNodeId?: number
+  ) => void;
   onQuickBeam?: (nodeId: number) => void;
   onAddPlate?: (nodeIds: number[], classification: 'SLAB' | 'WALL') => void;
   onAssignLoadToMember?: (memberId: number) => void;
@@ -35,6 +43,7 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
   activeTool,
   onAddColumn,
   onAddBeam,
+  onAddBeamAtCoords,
   onQuickBeam,
   onAddPlate,
   onAssignLoadToMember,
@@ -87,6 +96,21 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
   const gridLinesZ = activeFloorPlan?.gridLinesZ || [];
   const bounds = activeFloorPlan?.bounds || { minX: 0, maxX: 15, minZ: 0, maxZ: 12 };
 
+  // Precompute grid intersections for snapping
+  const gridIntersections = useMemo(() => {
+    const list: { x: number; z: number; label: string }[] = [];
+    gridLinesX.forEach((gx) => {
+      gridLinesZ.forEach((gz) => {
+        list.push({
+          x: gx.coord,
+          z: gz.coord,
+          label: `${gx.id || gx.label} / ${gz.id || gz.label}`,
+        });
+      });
+    });
+    return list;
+  }, [gridLinesX, gridLinesZ]);
+
   // Calculate Center of Mass (CM) & Center of Rigidity (CR) on active storey
   const cmCrData = useMemo(() => {
     if (!activeFloorPlan || columns.length === 0) return null;
@@ -119,14 +143,28 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
     return { cmX, cmZ, crX, crZ, ex, ez, edx };
   }, [activeFloorPlan, columns, bounds]);
 
-  // Extract internal forces for active framing beams
+  // Extract internal forces for active framing beams (O(N) indexed grouping)
   const memberForcesMap = useMemo(() => {
     const map = new Map<number, { maxMoment: number; maxShear: number; spanMoment: number }>();
     if (!model) return map;
 
+    // Pre-group member forces by memberId in a single pass O(M)
+    const forcesByMember = new Map<number, typeof model.memberForces>();
+    if (model.memberForces) {
+      for (let i = 0; i < model.memberForces.length; i++) {
+        const mf = model.memberForces[i];
+        let list = forcesByMember.get(mf.memberId);
+        if (!list) {
+          list = [];
+          forcesByMember.set(mf.memberId, list);
+        }
+        list.push(mf);
+      }
+    }
+
     beams.forEach((b) => {
-      const forces = model.memberForces.filter((mf) => mf.memberId === b.memberId);
-      if (forces.length > 0) {
+      const forces = forcesByMember.get(b.memberId);
+      if (forces && forces.length > 0) {
         const maxM = forces.reduce((max, f) => Math.max(max, Math.abs(f.mz || 0)), 0);
         const maxV = forces.reduce((max, f) => Math.max(max, Math.abs(f.vy || 0)), 0);
         map.set(b.memberId, {
@@ -149,9 +187,28 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
     return map;
   }, [model, beams]);
 
-  // Drawing beam state
-  const [beamStartNodeId, setBeamStartNodeId] = useState<number | null>(null);
+  // Drawing beam & CAD snapping state
+  const [drawingBeamStart, setDrawingBeamStart] = useState<{
+    x: number;
+    z: number;
+    nodeId?: number;
+  } | null>(null);
+  const [activeSnap, setActiveSnap] = useState<{
+    x: number;
+    z: number;
+    rawX: number;
+    rawZ: number;
+    type: 'COLUMN' | 'GRID' | 'ORTHO';
+    label: string;
+    nodeId?: number;
+  } | null>(null);
   const [cursorCoord, setCursorCoord] = useState<{ x: number; z: number }>({ x: 0, z: 0 });
+
+  // Reset drawing state when active tool switches
+  useEffect(() => {
+    setDrawingBeamStart(null);
+  }, [activeTool]);
+
   // Slab/wall polygon node selection state
   const [slabNodes, setSlabNodes] = useState<number[]>([]);
   const [wallNodes, setWallNodes] = useState<number[]>([]);
@@ -186,14 +243,55 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
     autoFitView();
   }, [activeFloorPlan?.levelIndex, model?.statistics.totalNodes, autoFitView]);
 
-  // Coordinate transforms: World (m) -> Screen (px) & Screen (px) -> World (m)
-  const toWorld = useCallback((screenX: number, screenY: number) => {
-    const rawX = (screenX - pan.x) / scale;
-    const rawZ = (screenY - pan.y) / scale;
-    const snapX = Math.round(rawX * 2) / 2; // snap to 0.5m
-    const snapZ = Math.round(rawZ * 2) / 2;
-    return { x: snapX, z: snapZ, rawX, rawZ };
-  }, [pan, scale]);
+  // Coordinate transforms: World (m) -> Screen (px) & Screen (px) -> World (m) with CAD snapping
+  const toWorld = useCallback(
+    (screenX: number, screenY: number) => {
+      const rawX = (screenX - pan.x) / scale;
+      const rawZ = (screenY - pan.y) / scale;
+
+      // 1. Column snap (tolerance 0.35m)
+      for (const col of columns) {
+        if (Math.hypot(col.x - rawX, col.z - rawZ) <= 0.35) {
+          return {
+            x: col.x,
+            z: col.z,
+            rawX,
+            rawZ,
+            type: 'COLUMN' as const,
+            label: col.label || `Joint N${col.nodeId}`,
+            nodeId: col.nodeId,
+          };
+        }
+      }
+
+      // 2. Grid intersection snap (tolerance 0.35m)
+      for (const gi of gridIntersections) {
+        if (Math.hypot(gi.x - rawX, gi.z - rawZ) <= 0.35) {
+          return {
+            x: gi.x,
+            z: gi.z,
+            rawX,
+            rawZ,
+            type: 'GRID' as const,
+            label: gi.label,
+          };
+        }
+      }
+
+      // 3. Orthogonal grid snap fallback (0.5m)
+      const snapX = Math.round(rawX * 2) / 2;
+      const snapZ = Math.round(rawZ * 2) / 2;
+      return {
+        x: snapX,
+        z: snapZ,
+        rawX,
+        rawZ,
+        type: 'ORTHO' as const,
+        label: `${snapX.toFixed(1)}, ${snapZ.toFixed(1)}`,
+      };
+    },
+    [pan, scale, columns, gridIntersections]
+  );
 
   // Mouse event handlers
   const handleMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -204,17 +302,43 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
     }
 
     const rect = e.currentTarget.getBoundingClientRect();
-    const clickPos = toWorld(e.clientX - rect.left, e.clientY - rect.top);
+    const snap = toWorld(e.clientX - rect.left, e.clientY - rect.top);
 
     if (activeTool === 'QUICK_COLUMN') {
-      onAddColumn(clickPos.x, clickPos.z);
+      onAddColumn(snap.x, snap.z);
+      return;
+    }
+
+    if (activeTool === 'DRAW_BEAM' || activeTool === 'QUICK_BEAM') {
+      if (!drawingBeamStart) {
+        setDrawingBeamStart({ x: snap.x, z: snap.z, nodeId: snap.nodeId });
+      } else {
+        const dist = Math.hypot(snap.x - drawingBeamStart.x, snap.z - drawingBeamStart.z);
+        if (dist > 0.2) {
+          if (onAddBeamAtCoords) {
+            onAddBeamAtCoords(
+              drawingBeamStart.x,
+              drawingBeamStart.z,
+              snap.x,
+              snap.z,
+              drawingBeamStart.nodeId,
+              snap.nodeId
+            );
+          } else if (drawingBeamStart.nodeId && snap.nodeId) {
+            onAddBeam(drawingBeamStart.nodeId, snap.nodeId);
+          }
+        }
+        setDrawingBeamStart(null);
+      }
+      return;
     }
   };
 
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const worldPos = toWorld(e.clientX - rect.left, e.clientY - rect.top);
-    setCursorCoord({ x: worldPos.x, z: worldPos.z });
+    const snap = toWorld(e.clientX - rect.left, e.clientY - rect.top);
+    setCursorCoord({ x: snap.x, z: snap.z });
+    setActiveSnap(snap);
 
     if (isPanning) {
       setPan({
@@ -247,26 +371,29 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
 
   const handleNodeClick = (e: React.MouseEvent, nodeId: number) => {
     e.stopPropagation();
-    if (activeTool === 'DRAW_BEAM') {
-      if (!beamStartNodeId) {
-        setBeamStartNodeId(nodeId);
+    if (activeTool === 'DRAW_BEAM' || activeTool === 'QUICK_BEAM') {
+      const node = model?.nodes.get(nodeId);
+      const nx = node ? node.x : 0;
+      const nz = node ? node.z : 0;
+
+      if (!drawingBeamStart) {
+        setDrawingBeamStart({ x: nx, z: nz, nodeId });
       } else {
-        if (beamStartNodeId !== nodeId) {
-          onAddBeam(beamStartNodeId, nodeId);
+        if (drawingBeamStart.nodeId !== nodeId || Math.hypot(nx - drawingBeamStart.x, nz - drawingBeamStart.z) > 0.2) {
+          if (onAddBeamAtCoords) {
+            onAddBeamAtCoords(
+              drawingBeamStart.x,
+              drawingBeamStart.z,
+              nx,
+              nz,
+              drawingBeamStart.nodeId,
+              nodeId
+            );
+          } else {
+            onAddBeam(drawingBeamStart.nodeId || nodeId, nodeId);
+          }
         }
-        setBeamStartNodeId(null);
-      }
-    } else if (activeTool === 'QUICK_BEAM') {
-      if (onQuickBeam) {
-        onQuickBeam(nodeId);
-      } else {
-        // Fallback: manual two-node beam
-        if (!beamStartNodeId) {
-          setBeamStartNodeId(nodeId);
-        } else {
-          if (beamStartNodeId !== nodeId) onAddBeam(beamStartNodeId, nodeId);
-          setBeamStartNodeId(null);
-        }
+        setDrawingBeamStart(null);
       }
     } else if (activeTool === 'DRAW_SLAB') {
       if (slabNodes.includes(nodeId)) {
@@ -774,34 +901,108 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
             </g>
           )}
 
-          {/* Temporary Drawing Beam Line Preview */}
-          {beamStartNodeId && (() => {
-            const startNode = model?.nodes.get(beamStartNodeId);
-            if (!startNode) return null;
-
-            return (
+          {/* Real-time Dynamic Rubber-Band Beam Drafting Preview */}
+          {drawingBeamStart && (
+            <g pointerEvents="none">
               <line
-                x1={startNode.x}
-                y1={startNode.z}
-                x2={cursorCoord.x}
-                y2={cursorCoord.z}
-                stroke="#ef4444"
-                strokeWidth={0.08}
-                strokeDasharray="0.2,0.2"
+                x1={drawingBeamStart.x}
+                y1={drawingBeamStart.z}
+                x2={activeSnap?.x ?? cursorCoord.x}
+                y2={activeSnap?.z ?? cursorCoord.z}
+                stroke="#f59e0b"
+                strokeWidth={0.25}
+                strokeDasharray="0.3,0.15"
               />
-            );
-          })()}
+              {/* Span Length Pill */}
+              <g
+                transform={`translate(${
+                  (drawingBeamStart.x + (activeSnap?.x ?? cursorCoord.x)) / 2
+                }, ${
+                  (drawingBeamStart.z + (activeSnap?.z ?? cursorCoord.z)) / 2 - 0.35
+                })`}
+              >
+                <rect
+                  x="-1.0"
+                  y="-0.22"
+                  width="2.0"
+                  height="0.44"
+                  fill="#0f172a"
+                  rx="0.08"
+                  stroke="#f59e0b"
+                  strokeWidth={0.03}
+                />
+                <text
+                  x="0"
+                  y="0.08"
+                  fill="#fef08a"
+                  fontSize="0.22"
+                  fontWeight="bold"
+                  textAnchor="middle"
+                >
+                  L = {Math.hypot(
+                    (activeSnap?.x ?? cursorCoord.x) - drawingBeamStart.x,
+                    (activeSnap?.z ?? cursorCoord.z) - drawingBeamStart.z
+                  ).toFixed(2)}m
+                </text>
+              </g>
+            </g>
+          )}
+
+          {/* Active Snap Target Ring Indicator */}
+          {activeSnap && (activeTool === 'QUICK_COLUMN' || activeTool === 'DRAW_BEAM' || activeTool === 'QUICK_BEAM') && (
+            <g pointerEvents="none" transform={`translate(${activeSnap.x}, ${activeSnap.z})`}>
+              <circle
+                cx="0"
+                cy="0"
+                r={0.28}
+                fill="none"
+                stroke={activeSnap.type === 'COLUMN' ? '#38bdf8' : activeSnap.type === 'GRID' ? '#eab308' : '#64748b'}
+                strokeWidth={0.05}
+              />
+              <circle cx="0" cy="0" r={0.06} fill="#f59e0b" />
+              {activeSnap.label && (
+                <g transform="translate(0.35, -0.35)">
+                  <rect
+                    x="-0.1"
+                    y="-0.2"
+                    width={activeSnap.label.length * 0.14 + 0.3}
+                    height="0.36"
+                    fill="#0f172a"
+                    rx="0.06"
+                    stroke="#475569"
+                    strokeWidth={0.02}
+                    opacity="0.95"
+                  />
+                  <text
+                    x={(activeSnap.label.length * 0.14 + 0.1) / 2}
+                    y="0.05"
+                    fill="#f8fafc"
+                    fontSize="0.18"
+                    fontWeight="bold"
+                    textAnchor="middle"
+                  >
+                    {activeSnap.label}
+                  </text>
+                </g>
+              )}
+            </g>
+          )}
         </g>
       </svg>
 
       {/* Bottom Status & Coordinate Information */}
       <div className="absolute bottom-3 left-3 z-10 bg-slate-900/95 border border-slate-700 px-3.5 py-1.5 rounded-lg text-xs text-slate-300 shadow-2xl flex items-center gap-4 backdrop-blur-xs">
         <span>Cursor: X=<strong className="text-white">{cursorCoord.x.toFixed(2)}m</strong>, Z=<strong className="text-white">{cursorCoord.z.toFixed(2)}m</strong></span>
+        {activeSnap && (
+          <span className="text-sky-300 font-bold">
+            Snap: {activeSnap.type} [{activeSnap.label}]
+          </span>
+        )}
         <span>•</span>
         <span className="text-slate-400 text-[11px]">
-          {activeTool === 'QUICK_COLUMN' && 'Click grid intersection to place RCC Column (450x450)'}
-          {activeTool === 'DRAW_BEAM' && (beamStartNodeId ? 'Click end joint to finish beam' : 'Click start joint to begin beam')}
-          {activeTool === 'QUICK_BEAM' && 'Click 2 joints to draw a framing beam (300x450)'}
+          {activeTool === 'QUICK_COLUMN' && 'Click grid intersection or joint to place RCC Column (450x450)'}
+          {activeTool === 'DRAW_BEAM' && (drawingBeamStart ? 'Click second joint or grid intersection to finish beam' : 'Click first joint or grid intersection to begin beam')}
+          {activeTool === 'QUICK_BEAM' && 'Click 2 joints or grid intersections to draw a framing beam (300x450)'}
           {activeTool === 'DRAW_SLAB' && `Click 4 nodes to define slab panel (${slabNodes.length}/4 selected)`}
           {activeTool === 'DRAW_WALL' && `Click 2 nodes to draw shear wall (${wallNodes.length}/2 selected)`}
           {activeTool === 'DRAW_STAIRCASE' && 'Select a beam to place a dog-legged RCC staircase module'}

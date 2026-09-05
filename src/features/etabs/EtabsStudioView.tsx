@@ -59,6 +59,7 @@ export const EtabsStudioView: React.FC = () => {
   } = useProjectStore();
 
   const [activeTool, setActiveTool] = useState<EtabsDrawTool>('SELECT');
+  const [storeyScope, setStoreyScope] = useState<'ONE_STORY' | 'ALL_STORIES'>('ONE_STORY');
 
   // Modal Window States
   const [isWizardOpen, setIsWizardOpen] = useState(false);
@@ -199,21 +200,91 @@ export const EtabsStudioView: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleDeleteSelected]);
 
-  // Add Column at 2D coordinate across active floor / all floors
+  // Add Column at 2D coordinate across active floor or all continuous floors
   const handleAddColumn = async (x: number, z: number) => {
     if (!activeModel) return;
 
-    // Find base elevation and top elevation
-    const baseNodeId = await addStructuralNode(x, 0, z, true);
-    const topNodeId = await addStructuralNode(x, selectedStoreyElevation, z, false);
+    if (storeyScope === 'ALL_STORIES') {
+      // Gather all distinct storey elevations sorted ascending
+      const rawElevs = availableElevations.map((e) => e.elevationY);
+      const uniqueElevs = Array.from(new Set(rawElevs)).sort((a, b) => a - b);
+      const elevs = uniqueElevs.length >= 2 ? uniqueElevs : [0, selectedStoreyElevation || 3.2];
 
-    await addStructuralMember(baseNodeId, topNodeId, { yd: 0.45, zd: 0.45, name: 'C450x450' }, 'COLUMN');
+      const nodeIds: number[] = [];
+      for (let i = 0; i < elevs.length; i++) {
+        const y = elevs[i];
+        const isSupport = i === 0;
+        const nodeId = await addStructuralNode(x, y, z, isSupport);
+        nodeIds.push(nodeId);
+      }
+
+      // Connect successive floor levels with vertical columns
+      for (let i = 0; i < nodeIds.length - 1; i++) {
+        await addStructuralMember(
+          nodeIds[i],
+          nodeIds[i + 1],
+          { yd: 0.45, zd: 0.45, name: 'C450x450' },
+          'COLUMN'
+        );
+      }
+    } else {
+      // ONE_STORY mode: column placed between floor below and selectedStoreyElevation
+      const sortedElevs = availableElevations.map((e) => e.elevationY).sort((a, b) => a - b);
+      const idx = sortedElevs.findIndex((e) => Math.abs(e - selectedStoreyElevation) < 0.1);
+      const botElev = idx > 0 ? sortedElevs[idx - 1] : 0;
+      const isGround = botElev === 0 || idx <= 0;
+
+      const baseNodeId = await addStructuralNode(x, botElev, z, isGround);
+      const topNodeId = await addStructuralNode(x, selectedStoreyElevation, z, false);
+
+      await addStructuralMember(
+        baseNodeId,
+        topNodeId,
+        { yd: 0.45, zd: 0.45, name: 'C450x450' },
+        'COLUMN'
+      );
+    }
     await handleExecuteAnalysis();
   };
 
   // Add Beam between 2 joints
   const handleAddBeam = async (startNodeId: number, endNodeId: number) => {
     await addStructuralMember(startNodeId, endNodeId, { yd: 0.45, zd: 0.3, name: 'B300x450' }, 'BEAM');
+    await handleExecuteAnalysis();
+  };
+
+  // Add Beam between 2 coordinates (creating joints automatically if needed)
+  const handleAddBeamAtCoords = async (
+    x1: number,
+    z1: number,
+    x2: number,
+    z2: number,
+    startNodeId?: number,
+    endNodeId?: number
+  ) => {
+    if (!activeModel) return;
+
+    if (storeyScope === 'ALL_STORIES') {
+      // Replicate beam across all framing floor levels (elevations > 0)
+      const rawElevs = availableElevations.map((e) => e.elevationY);
+      const uniqueElevs = Array.from(new Set(rawElevs)).sort((a, b) => a - b);
+      const framingElevs = uniqueElevs.filter((y) => y > 0.1);
+      const targetElevs = framingElevs.length > 0 ? framingElevs : [selectedStoreyElevation];
+
+      for (const y of targetElevs) {
+        const n1 = await addStructuralNode(x1, y, z1, false);
+        const n2 = await addStructuralNode(x2, y, z2, false);
+        if (n1 !== n2) {
+          await addStructuralMember(n1, n2, { yd: 0.45, zd: 0.3, name: 'B300x450' }, 'BEAM');
+        }
+      }
+    } else {
+      const sId = startNodeId ?? (await addStructuralNode(x1, selectedStoreyElevation, z1, false));
+      const eId = endNodeId ?? (await addStructuralNode(x2, selectedStoreyElevation, z2, false));
+      if (sId !== eId) {
+        await addStructuralMember(sId, eId, { yd: 0.45, zd: 0.3, name: 'B300x450' }, 'BEAM');
+      }
+    }
     await handleExecuteAnalysis();
   };
 
@@ -316,6 +387,10 @@ export const EtabsStudioView: React.FC = () => {
         selectedStoreyElevation={selectedStoreyElevation}
         availableElevations={availableElevations}
         onChangeStoreyElevation={setSelectedStoreyElevation}
+        storeyScope={storeyScope}
+        onChangeStoreyScope={setStoreyScope}
+        onOpenGridSystem={() => openRegisteredWindow('gridSystem')}
+        onOpenStoryData={() => openRegisteredWindow('storyData')}
         onNewProject={() => setNewProjectModalOpen(true)}
         onRunAnalysis={handleRunAnalysis}
         onRunDesign={() => setIsDesignOpen(true)}
@@ -383,6 +458,7 @@ export const EtabsStudioView: React.FC = () => {
                 activeTool={activeTool}
                 onAddColumn={handleAddColumn}
                 onAddBeam={handleAddBeam}
+                onAddBeamAtCoords={handleAddBeamAtCoords}
                 onQuickBeam={handleAddBeamFromNode}
                 onAddPlate={handleAddPlate}
                 onAssignLoadToMember={(memberId) => {

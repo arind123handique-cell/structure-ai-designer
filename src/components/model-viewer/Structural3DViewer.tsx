@@ -41,9 +41,10 @@ import { cyberAudio } from '@/features/video/audio/cyberAudioSynthesizer';
 import { videoStreamEngine } from '@/features/video/engines/videoStreamEngine';
 import { cvDefectDetector } from '@/features/video/engines/cvDefectDetector';
 import { useThemeStore } from '@/features/theme/themeStore';
+import { LruCache } from '@/utils/memoryManager';
 
-// Global texture cache for 3D sprites to avoid allocating hundreds of canvases on every state update
-const spriteTextureCache = new Map<string, THREE.CanvasTexture>();
+// Bounded LRU texture cache for 3D sprites to avoid memory leaks and cap RAM usage
+const spriteTextureCache = new LruCache<string, THREE.CanvasTexture>(30, (tex) => tex.dispose());
 
 /**
  * Traverses and deeply disposes Three.js geometries, materials, and non-cached textures
@@ -549,7 +550,6 @@ export const Structural3DViewer: React.FC = () => {
       } catch (e) {
         // ignore
       }
-      spriteTextureCache.forEach((tex) => tex.dispose());
       spriteTextureCache.clear();
     };
   }, []);

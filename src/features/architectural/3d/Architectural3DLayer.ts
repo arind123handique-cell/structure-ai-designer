@@ -15,9 +15,10 @@ import {
 import { ArchitecturalGeometryEngine } from '../engines/architecturalGeometryEngine';
 import { StaircasePlacementEngine } from '../engines/staircasePlacementEngine';
 import { DiaphragmLevelInfo } from '@/features/design/staircase/staircaseEngine';
+import { LruCache } from '@/utils/memoryManager';
 
-// Global texture cache to prevent creating duplicate textures / canvases across renders
-const badgeTextureCache = new Map<string, THREE.CanvasTexture>();
+// Bounded LRU texture cache to prevent creating duplicate textures / canvases across renders
+const badgeTextureCache = new LruCache<string, THREE.CanvasTexture>(30, (tex) => tex.dispose());
 
 function getOrCreateBadgeTexture(
   title: string,
@@ -812,7 +813,6 @@ export class Architectural3DLayer {
   public dispose() {
     disposeHierarchy(this.group);
     this.group.clear();
-    badgeTextureCache.forEach((tex) => tex.dispose());
     badgeTextureCache.clear();
   }
 }

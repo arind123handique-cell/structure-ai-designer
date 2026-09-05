@@ -115,6 +115,7 @@ export class ProjectStorage {
       nodeDisplacements: model.nodeDisplacements ? Array.from(model.nodeDisplacements.entries()) : undefined,
       designSummaries: model.designSummaries ? Array.from(model.designSummaries.entries()) : undefined,
       storyDrifts: model.storyDrifts,
+      customGrids: model.customGrids,
       boundingBox: model.boundingBox,
       statistics: model.statistics,
     };
@@ -137,6 +138,7 @@ export class ProjectStorage {
       nodeDisplacements: serialized.nodeDisplacements ? new Map(serialized.nodeDisplacements) : undefined,
       designSummaries: serialized.designSummaries ? new Map(serialized.designSummaries) : new Map(),
       storyDrifts: serialized.storyDrifts,
+      customGrids: serialized.customGrids,
       boundingBox: serialized.boundingBox,
       statistics: serialized.statistics,
     };

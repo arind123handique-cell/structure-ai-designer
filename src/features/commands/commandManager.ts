@@ -25,7 +25,7 @@ export class CommandManager {
   private static instance: CommandManager | null = null;
   private undoStack: StructuralCommand[] = [];
   private redoStack: StructuralCommand[] = [];
-  private maxHistory: number = 50;
+  private maxHistory: number = 15;
   private listeners: Set<CommandHistoryListener> = new Set();
   private isExecuting: boolean = false;
 

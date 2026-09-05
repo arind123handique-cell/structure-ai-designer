@@ -234,6 +234,16 @@ export class FloorPlanEngine {
     colGridX.sort((a, b) => a - b);
     colGridZ.sort((a, b) => a - b);
 
+    // If user has customized or added grid lines, respect customGrids
+    if (model.customGrids?.x && model.customGrids.x.length > 0) {
+      colGridX.splice(0, colGridX.length, ...model.customGrids.x);
+      colGridX.sort((a, b) => a - b);
+    }
+    if (model.customGrids?.z && model.customGrids.z.length > 0) {
+      colGridZ.splice(0, colGridZ.length, ...model.customGrids.z);
+      colGridZ.sort((a, b) => a - b);
+    }
+
     // Fallback if no columns found in model
     if (colGridX.length === 0) colGridX.push(model.boundingBox.minX, model.boundingBox.maxX);
     if (colGridZ.length === 0) colGridZ.push(model.boundingBox.minZ, model.boundingBox.maxZ);

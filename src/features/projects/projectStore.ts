@@ -261,6 +261,10 @@ export interface ProjectState {
   assignShellLoads: (levelY: number, load: ShellLoad) => Promise<void>;
   assignMemberModifiers: (memberIds: number[], modifiers: Partial<MemberModifier>) => Promise<void>;
   replicateStory: (sourceElevationY: number, targetElevationsY: number[]) => Promise<void>;
+  updateGridSystem: (gridX: number[], gridZ: number[]) => Promise<void>;
+  updateStoryHeights: (updatedElevations: { oldElev: number; newElev: number }[]) => Promise<void>;
+  addStoryOnTop: (height: number, replicateFraming?: boolean) => Promise<void>;
+  deleteStoryLevel: (elevationY: number) => Promise<void>;
   updateLoadPatterns: (patterns: LoadCase[]) => Promise<void>;
   updateLoadCombinations: (combos: LoadCombination[]) => Promise<void>;
 }
@@ -3657,6 +3661,302 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         totalMembers: newMembers.size,
         totalBeams: Array.from(newMembers.values()).filter((m) => m.classification === 'BEAM').length,
         totalColumns: Array.from(newMembers.values()).filter((m) => m.classification === 'COLUMN').length,
+      },
+    };
+
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+
+    await runFemAnalysis();
+  },
+
+  updateGridSystem: async (gridX: number[], gridZ: number[]) => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel) return;
+
+    const sortedX = Array.from(new Set(gridX)).sort((a, b) => a - b);
+    const sortedZ = Array.from(new Set(gridZ)).sort((a, b) => a - b);
+
+    const updatedModel: NormalizedStructuralModel = {
+      ...activeModel,
+      customGrids: { x: sortedX, z: sortedZ },
+    };
+
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+  },
+
+  updateStoryHeights: async (updatedElevations: { oldElev: number; newElev: number }[]) => {
+    const { activeModel, activeProject, runFemAnalysis } = get();
+    if (!activeModel || updatedElevations.length === 0) return;
+
+    const newNodes = new Map(activeModel.nodes);
+    const newMembers = new Map(activeModel.members);
+
+    for (const [id, node] of newNodes.entries()) {
+      const match = updatedElevations.find((ue) => Math.abs(node.y - ue.oldElev) < 0.05);
+      if (match) {
+        newNodes.set(id, {
+          ...node,
+          y: Math.round(match.newElev * 1000) / 1000,
+        });
+      }
+    }
+
+    // Recalculate member lengths
+    for (const [id, member] of newMembers.entries()) {
+      const n1 = newNodes.get(member.startNodeId);
+      const n2 = newNodes.get(member.endNodeId);
+      if (n1 && n2) {
+        const len = Math.hypot(n2.x - n1.x, n2.y - n1.y, n2.z - n1.z);
+        newMembers.set(id, {
+          ...member,
+          length: Math.round(len * 1000) / 1000,
+        });
+      }
+    }
+
+    const allNodeY = Array.from(newNodes.values()).map((n) => n.y);
+    const maxY = allNodeY.length > 0 ? Math.max(...allNodeY) : activeModel.boundingBox.maxY;
+    const minY = allNodeY.length > 0 ? Math.min(...allNodeY) : activeModel.boundingBox.minY;
+
+    const updatedModel: NormalizedStructuralModel = {
+      ...activeModel,
+      nodes: newNodes,
+      members: newMembers,
+      boundingBox: {
+        ...activeModel.boundingBox,
+        minY,
+        maxY,
+      },
+      statistics: {
+        ...activeModel.statistics,
+        maxElevation: maxY,
+        baseElevation: minY,
+      },
+    };
+
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+
+    await runFemAnalysis();
+  },
+
+  addStoryOnTop: async (height: number, replicateFraming: boolean = true) => {
+    const { activeModel, activeProject, runFemAnalysis } = get();
+    if (!activeModel || height <= 0.1) return;
+
+    const newNodes = new Map(activeModel.nodes);
+    const newMembers = new Map(activeModel.members);
+    const newPlates = new Map(activeModel.plates);
+
+    let maxNodeId = Math.max(0, ...Array.from(newNodes.keys()));
+    let maxMemId = Math.max(0, ...Array.from(newMembers.keys()));
+    let maxPlateId = Math.max(0, ...Array.from(newPlates.keys()));
+
+    const allNodeY = Array.from(newNodes.values()).map((n) => n.y);
+    if (allNodeY.length === 0) return;
+    const topY = Math.max(...allNodeY);
+    const newTopY = Math.round((topY + height) * 1000) / 1000;
+
+    // Find all nodes at top floor
+    const topNodes = Array.from(newNodes.values()).filter((n) => Math.abs(n.y - topY) < 0.15);
+    if (topNodes.length === 0) return;
+
+    const oldToNewNodeMap = new Map<number, number>();
+
+    // 1. Create duplicate nodes at new top elevation
+    for (const tn of topNodes) {
+      maxNodeId += 1;
+      newNodes.set(maxNodeId, {
+        id: maxNodeId,
+        x: tn.x,
+        y: newTopY,
+        z: tn.z,
+        isSupport: false,
+      });
+      oldToNewNodeMap.set(tn.id, maxNodeId);
+
+      // 2. Add continuous column connecting top floor to new top floor
+      maxMemId += 1;
+      newMembers.set(maxMemId, {
+        id: maxMemId,
+        startNodeId: tn.id,
+        endNodeId: maxNodeId,
+        length: Math.round(height * 1000) / 1000,
+        classification: 'COLUMN',
+        isAutoClassified: true,
+        section: { type: 'RECTANGULAR', yd: 0.45, zd: 0.45, name: 'C450x450' },
+        materialName: 'CONCRETE',
+        designStatus: 'NOT_DESIGNED',
+      });
+    }
+
+    // 3. If replicateFraming is true, duplicate framing beams on the top floor
+    if (replicateFraming) {
+      const topBeams = Array.from(newMembers.values()).filter((m) => {
+        const s = newNodes.get(m.startNodeId);
+        const e = newNodes.get(m.endNodeId);
+        return s && e && Math.abs(s.y - topY) < 0.15 && Math.abs(e.y - topY) < 0.15;
+      });
+
+      for (const tb of topBeams) {
+        const newStart = oldToNewNodeMap.get(tb.startNodeId);
+        const newEnd = oldToNewNodeMap.get(tb.endNodeId);
+        if (newStart && newEnd) {
+          maxMemId += 1;
+          newMembers.set(maxMemId, {
+            id: maxMemId,
+            startNodeId: newStart,
+            endNodeId: newEnd,
+            length: tb.length,
+            classification: 'BEAM',
+            isAutoClassified: true,
+            section: { ...tb.section },
+            materialName: tb.materialName,
+            designStatus: 'NOT_DESIGNED',
+          });
+        }
+      }
+
+      // Replicate slab plates on the top floor if any
+      const topPlates = Array.from(newPlates.values()).filter((p) => {
+        return p.nodeIds.every((nid) => {
+          const n = newNodes.get(nid);
+          return n && Math.abs(n.y - topY) < 0.15;
+        });
+      });
+
+      for (const tp of topPlates) {
+        const newPlateNodes = tp.nodeIds.map((nid) => oldToNewNodeMap.get(nid)).filter((id): id is number => id !== undefined);
+        if (newPlateNodes.length === tp.nodeIds.length) {
+          maxPlateId += 1;
+          newPlates.set(maxPlateId, {
+            ...tp,
+            id: maxPlateId,
+            nodeIds: newPlateNodes,
+          });
+        }
+      }
+    }
+
+    const updatedModel: NormalizedStructuralModel = {
+      ...activeModel,
+      nodes: newNodes,
+      members: newMembers,
+      plates: newPlates,
+      boundingBox: {
+        ...activeModel.boundingBox,
+        maxY: newTopY,
+      },
+      statistics: {
+        ...activeModel.statistics,
+        totalNodes: newNodes.size,
+        totalMembers: newMembers.size,
+        totalBeams: Array.from(newMembers.values()).filter((m) => m.classification === 'BEAM').length,
+        totalColumns: Array.from(newMembers.values()).filter((m) => m.classification === 'COLUMN').length,
+        totalPlates: newPlates.size,
+        maxElevation: newTopY,
+      },
+    };
+
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+
+    await runFemAnalysis();
+  },
+
+  deleteStoryLevel: async (elevationY: number) => {
+    const { activeModel, activeProject, runFemAnalysis } = get();
+    if (!activeModel) return;
+
+    // Do not delete ground / foundation floor (level with base supports)
+    const nodesAtLevel = Array.from(activeModel.nodes.values()).filter(
+      (n) => Math.abs(n.y - elevationY) < 0.15
+    );
+    const hasSupports = nodesAtLevel.some((n) => activeModel.supports?.has(n.id) || n.isSupport);
+    if (hasSupports) {
+      console.warn('Cannot delete foundation/base story level containing supports.');
+      return;
+    }
+
+    const nodeIdsToRemove = new Set(nodesAtLevel.map((n) => n.id));
+    if (nodeIdsToRemove.size === 0) return;
+
+    const newNodes = new Map(activeModel.nodes);
+    const newMembers = new Map(activeModel.members);
+    const newPlates = new Map(activeModel.plates);
+
+    // Delete connected members
+    for (const [mid, m] of activeModel.members.entries()) {
+      if (nodeIdsToRemove.has(m.startNodeId) || nodeIdsToRemove.has(m.endNodeId)) {
+        newMembers.delete(mid);
+      }
+    }
+
+    // Delete connected plates
+    for (const [pid, p] of activeModel.plates.entries()) {
+      if (p.nodeIds.some((nid) => nodeIdsToRemove.has(nid))) {
+        newPlates.delete(pid);
+      }
+    }
+
+    // Delete nodes
+    for (const nid of nodeIdsToRemove) {
+      newNodes.delete(nid);
+    }
+
+    const allNodeY = Array.from(newNodes.values()).map((n) => n.y);
+    const maxY = allNodeY.length > 0 ? Math.max(...allNodeY) : 0;
+    const minY = allNodeY.length > 0 ? Math.min(...allNodeY) : 0;
+
+    const updatedModel: NormalizedStructuralModel = {
+      ...activeModel,
+      nodes: newNodes,
+      members: newMembers,
+      plates: newPlates,
+      boundingBox: {
+        ...activeModel.boundingBox,
+        minY,
+        maxY,
+      },
+      statistics: {
+        ...activeModel.statistics,
+        totalNodes: newNodes.size,
+        totalMembers: newMembers.size,
+        totalBeams: Array.from(newMembers.values()).filter((m) => m.classification === 'BEAM').length,
+        totalColumns: Array.from(newMembers.values()).filter((m) => m.classification === 'COLUMN').length,
+        totalPlates: newPlates.size,
+        maxElevation: maxY,
+        baseElevation: minY,
       },
     };
 

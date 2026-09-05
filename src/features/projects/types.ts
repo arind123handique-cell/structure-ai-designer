@@ -33,6 +33,7 @@ export interface SerializedStructuralModel {
   nodeDisplacements?: [number, { [loadCaseId: number]: [number, number, number, number, number, number] }][];
   designSummaries?: [number, MemberDesignSummary][];
   storyDrifts: StoryDriftRecord[];
+  customGrids?: { x: number[]; z: number[] };
   boundingBox: {
     minX: number;
     maxX: number;

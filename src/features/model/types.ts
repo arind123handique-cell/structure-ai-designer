@@ -181,6 +181,7 @@ export interface NormalizedStructuralModel {
   nodeDisplacements?: Map<number, { [loadCaseId: number]: [number, number, number, number, number, number] }>; // [ux, uy, uz, rx, ry, rz] in m / rad
   designSummaries?: Map<number, MemberDesignSummary>;
   storyDrifts: StoryDriftRecord[];
+  customGrids?: { x: number[]; z: number[] };
   boundingBox: {
     minX: number;
     maxX: number;
