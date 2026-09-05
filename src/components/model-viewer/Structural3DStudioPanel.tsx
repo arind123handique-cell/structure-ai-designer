@@ -102,8 +102,6 @@ export const Structural3DStudioPanel: React.FC<Structural3DStudioPanelProps> = (
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedStory, setExpandedStory] = useState<string | null>('ALL');
 
-  if (!isOpen) return null;
-
   // Filtered members for explorer
   const memberList = React.useMemo(() => {
     if (!model) return [];
@@ -132,6 +130,8 @@ export const Structural3DStudioPanel: React.FC<Structural3DStudioPanelProps> = (
         m.sectionName.toLowerCase().includes(q)
     );
   }, [memberList, searchQuery]);
+
+  if (!isOpen) return null;
 
   return (
     <div

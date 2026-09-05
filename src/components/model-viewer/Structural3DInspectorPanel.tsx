@@ -62,8 +62,6 @@ export const Structural3DInspectorPanel: React.FC<Structural3DInspectorPanelProp
   const [activeTab, setActiveTab] = useState<'PROPERTIES' | 'LOADS' | 'FORCES' | 'DESIGN'>('PROPERTIES');
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
 
-  if (!isOpen) return null;
-
   // Check if anything is selected
   const hasSelection =
     selectedMemberId !== null ||
@@ -186,6 +184,8 @@ export const Structural3DInspectorPanel: React.FC<Structural3DInspectorPanelProp
         m.size.toLowerCase().includes(q)
     );
   }, [quickMembers, memberSearchQuery]);
+
+  if (!isOpen) return null;
 
   return (
     <div
