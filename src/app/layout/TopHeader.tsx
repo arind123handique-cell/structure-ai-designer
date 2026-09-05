@@ -43,6 +43,8 @@ export const TopHeader: React.FC<TopHeaderProps> = React.memo(({ onHide }) => {
   const setImportModalOpen = useProjectStore(s => s.setImportModalOpen);
   const setNewProjectModalOpen = useProjectStore(s => s.setNewProjectModalOpen);
   const setActiveView = useProjectStore(s => s.setActiveView);
+  const showInspectorPanel = useProjectStore(s => s.showInspectorPanel);
+  const toggleInspectorPanel = useProjectStore(s => s.toggleInspectorPanel);
   const batchUpdateSections = useProjectStore(s => s.batchUpdateSections);
   const universalRebarSelection = useProjectStore(s => s.universalRebarSelection);
   const setUniversalRebarModalOpen = useProjectStore(s => s.setUniversalRebarModalOpen);
@@ -201,6 +203,21 @@ export const TopHeader: React.FC<TopHeaderProps> = React.memo(({ onHide }) => {
             title={!isSoundMuted ? 'Mute Audio' : 'Unmute Audio'}
           >
             {!isSoundMuted ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+          </button>
+
+          {/* Inspector Panel Toggle Switch */}
+          <button
+            type="button"
+            onClick={() => toggleInspectorPanel()}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border font-mono text-xs font-semibold transition-all shadow-xs ${
+              showInspectorPanel
+                ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-500 shadow-indigo-500/20'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+            }`}
+            title={showInspectorPanel ? 'Inspector Panels: ON (Click to Hide)' : 'Inspector Panels: OFF (Click to Show)'}
+          >
+            <Sliders className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">{showInspectorPanel ? 'Inspector: ON' : 'Inspector: OFF'}</span>
           </button>
 
           {/* Light / Dark Theme Switcher */}

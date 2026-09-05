@@ -14,6 +14,8 @@ import { Architectural3DLayer } from '@/features/architectural/3d/Architectural3
 import { buildMemberReinforcement, createReinforcementShared, disposeReinforcementShared } from './Reinforcement3DRenderer';
 import { MemberDetailsDrawer } from './MemberDetailsDrawer';
 import { PlateDetailsDrawer } from './PlateDetailsDrawer';
+import { EtabsPropertyInspector } from '@/features/etabs/components/EtabsPropertyInspector';
+import { AssignFrameLoadsModal, AssignFrameSectionModal } from '@/features/etabs/components/EtabsModals';
 import {
   RotateCcw,
   Eye,
@@ -31,6 +33,7 @@ import {
   DoorOpen,
   AppWindow,
   Footprints,
+  Sliders,
 } from 'lucide-react';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -280,7 +283,29 @@ export const Structural3DViewer: React.FC = () => {
     architecturalStaircases,
     selectedArchitecturalId,
     selectArchitecturalElement,
+    showInspectorPanel,
+    toggleInspectorPanel,
+    deleteStructuralElements,
+    assignFrameLoads,
+    deleteMemberLoads,
+    assignMemberSection,
+    runStaticAnalysis,
+    selectedNodeId,
+    selectNode,
   } = useProjectStore() as any;
+
+  const [isAssignLoadsOpen, setIsAssignLoadsOpen] = useState(false);
+  const [isAssignSectionOpen, setIsAssignSectionOpen] = useState(false);
+
+  const handleDeleteSelected = async () => {
+    if (selectedMemberId) {
+      await deleteStructuralElements([], [selectedMemberId]);
+      selectMember(null);
+    } else if (selectedNodeId) {
+      await deleteStructuralElements([selectedNodeId], []);
+      selectNode(null);
+    }
+  };
 
   const [showLabels, setShowLabels] = useState(false);
   const [showWallLabels, setShowWallLabels] = useState(false);
@@ -1738,6 +1763,20 @@ export const Structural3DViewer: React.FC = () => {
 
       {/* Layer Filter & 3D Selection Toggles */}
       <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-deep-navy/90 backdrop-blur-md border border-slate-700/60 p-1.5 rounded shadow-lg z-10 flex-wrap font-mono">
+        {/* Inspector Panels Toggle Switch */}
+        <button
+          onClick={() => toggleInspectorPanel()}
+          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
+            showInspectorPanel
+              ? 'bg-indigo-600 text-white border border-indigo-500 font-bold shadow-xs'
+              : 'text-slate-400 hover:text-slate-200 border border-slate-700 bg-slate-800/40'
+          }`}
+          title={showInspectorPanel ? 'Inspector Panels: ON (Click to Hide)' : 'Inspector Panels: OFF (Click to Show)'}
+        >
+          <Sliders className="w-3.5 h-3.5 text-indigo-300" />
+          <span>{showInspectorPanel ? 'Inspector: ON' : 'Inspector: OFF'}</span>
+        </button>
+
         {/* Multi-Select Toggle Button */}
         <button
           onClick={() => setMultiSelectMode(!multiSelectMode)}
@@ -2287,31 +2326,58 @@ export const Structural3DViewer: React.FC = () => {
         <span className="text-emerald-400">Click</span> select · <span className="text-sky-400">Drag</span> orbit · <span className="text-slate-400">Scroll</span> zoom
       </div>
 
-      {/* Member Details Drawer — opens when a structural member is selected */}
-      {selectedMember && selectedMemberId && !selectedGradeBeamId && (
-        <MemberDetailsDrawer
-          memberId={drawerMemberId}
-          isColumn={drawerIsColumn}
-          b_mm={drawerBmm}
-          D_mm={drawerDmm}
-          length_m={drawerLength}
-          node1Id={drawerNode1}
-          node2Id={drawerNode2}
-          colDesign={drawerColDesign}
-          beamDesign={drawerBeamDesign}
-          memberForces={drawerMemberForces}
-          onClose={() => selectMember(null)}
-        />
+      {/* Right Dockable Property & Forces Inspector (Matching ETABS Studio per user request) */}
+      {showInspectorPanel && (selectedMemberId !== null || selectedNodeId !== null) && (
+        <div className="absolute top-0 right-0 bottom-0 z-20 flex shadow-2xl">
+          <EtabsPropertyInspector
+            model={activeModel}
+            selectedMemberId={selectedMemberId}
+            selectedNodeId={selectedNodeId}
+            onClose={() => {
+              selectMember(null);
+              selectNode(null);
+            }}
+            onOpenAssignLoads={() => setIsAssignLoadsOpen(true)}
+            onOpenAssignSection={() => setIsAssignSectionOpen(true)}
+            onDeleteSelected={handleDeleteSelected}
+          />
+        </div>
       )}
 
-      {/* Plate Details Drawer — opens when a slab or shear wall is selected */}
-      {selectedPlateId && activeModel?.plates.get(selectedPlateId) && (
+      {/* Plate Details Drawer — opens when a slab or shear wall is selected and inspector is enabled */}
+      {showInspectorPanel && selectedPlateId && activeModel?.plates.get(selectedPlateId) && (
         <PlateDetailsDrawer
           plate={activeModel.plates.get(selectedPlateId)!}
           nodes={(activeModel.plates.get(selectedPlateId)?.nodeIds || []).map((id: number) => activeModel.nodes.get(id))}
           onClose={() => (selectPlate as any)(null)}
         />
       )}
+
+      {/* Assign Frame Loads Modal */}
+      <AssignFrameLoadsModal
+        isOpen={isAssignLoadsOpen}
+        onClose={() => setIsAssignLoadsOpen(false)}
+        selectedMemberIds={selectedMemberId ? [selectedMemberId] : []}
+        onAssignLoads={async (memberIds, load) => {
+          await assignFrameLoads(memberIds, load);
+          if (activeModel) await runStaticAnalysis();
+        }}
+        onDeleteLoads={async (memberIds) => {
+          await deleteMemberLoads(memberIds);
+          if (activeModel) await runStaticAnalysis();
+        }}
+      />
+
+      {/* Assign Frame Section Modal */}
+      <AssignFrameSectionModal
+        isOpen={isAssignSectionOpen}
+        onClose={() => setIsAssignSectionOpen(false)}
+        selectedMemberIds={selectedMemberId ? [selectedMemberId] : []}
+        onAssignSection={async (memberIds, section) => {
+          await assignMemberSection(memberIds, section);
+          if (activeModel) await runStaticAnalysis();
+        }}
+      />
     </div>
   );
 };

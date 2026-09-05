@@ -139,6 +139,8 @@ export interface ProjectState {
   detachNodesFromCombinedPileCap: (nodeIdsToDetach: number[]) => void;
   clearDetachedCombinedCapNodes: () => void;
   setActiveView: (view: ViewTab) => void;
+  showInspectorPanel: boolean;
+  toggleInspectorPanel: (show?: boolean) => void;
   toggleFilterLayer: (layer: keyof FilterLayerState) => void;
   setImportModalOpen: (open: boolean) => void;
   updateDesignSettings: (settings: Partial<DesignParameters>) => Promise<void>;
@@ -347,6 +349,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     showNodeLabels: false,
     showMemberLabels: false,
   },
+  showInspectorPanel: true,
+  toggleInspectorPanel: (show) =>
+    set((state) => ({
+      showInspectorPanel: show !== undefined ? show : !state.showInspectorPanel,
+    })),
   isImportModalOpen: false,
   isNewProjectModalOpen: false,
   setNewProjectModalOpen: (isNewProjectModalOpen) => set({ isNewProjectModalOpen }),

@@ -45,6 +45,7 @@ const ViewFallback: React.FC = () => (
 export const AppLayout: React.FC = () => {
   const activeView = useProjectStore(s => s.activeView);
   const selectedMemberId = useProjectStore(s => s.selectedMemberId);
+  const showInspectorPanel = useProjectStore(s => s.showInspectorPanel);
   const { user } = useAuth();
 
   // Navigation panel visibility (persisted)
@@ -193,8 +194,8 @@ export const AppLayout: React.FC = () => {
             <Suspense fallback={<ViewFallback />}>{renderMainView()}</Suspense>
           </div>
 
-          {/* Member Inspector Panel (if a member is selected in non-3D views; 3D view uses internal MemberDetailsDrawer) */}
-          {selectedMemberId && activeView !== '3d-model' && (
+          {/* Member Inspector Panel (renders when member selected and inspector switch is enabled) */}
+          {selectedMemberId && showInspectorPanel && (
             <Suspense fallback={null}><MemberInspector /></Suspense>
           )}
         </div>
