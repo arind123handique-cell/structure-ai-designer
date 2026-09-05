@@ -2713,12 +2713,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             updatedAt: new Date().toISOString(),
           },
         };
-        await ProjectStorage.saveProject(updatedProject);
+        try {
+          await ProjectStorage.saveProject(updatedProject);
+        } catch (storageErr) {
+          console.warn('Could not save project to local DB:', storageErr);
+        }
         set({ activeProject: updatedProject });
       }
     } catch (e) {
       console.error('FEM analysis failed:', e);
       set({ isLoading: false });
+      throw e;
     }
   },
 

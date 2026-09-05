@@ -97,12 +97,6 @@ describe('3D Viewport Selection Engine — 5 Scenarios Verified 5 Times', () => 
     raycaster.set(rayOrigin, rayDirection);
 
     const intersects = raycaster.intersectObjects(dynamicGroup.children, true);
-    // console.log
-    if (intersects.length === 0) {
-      console.log('RAY MISSED! Origin:', rayOrigin, 'Dir:', rayDirection, 'DynamicGroup children:', dynamicGroup.children.length);
-    } else {
-      console.log('RAY HIT! Count:', intersects.length, 'Targets:', intersects.map(i => i.object.userData));
-    }
 
     if (intersects.length > 0) {
       let hitTarget: THREE.Object3D | null = null;
@@ -150,18 +144,15 @@ describe('3D Viewport Selection Engine — 5 Scenarios Verified 5 Times', () => 
         const u = hitTarget.userData;
         if (u.type === 'support' && u.nodeId) {
           useProjectStore.getState().selectSupportNode(Number(u.nodeId), isMulti);
-          useProjectStore.getState().selectMember(null);
-          useProjectStore.getState().selectPlate(null);
+          useProjectStore.setState({ selectedMemberId: null, selectedPlateId: null });
           return;
         } else if (u.type === 'plate' && u.plateId) {
           useProjectStore.getState().selectPlate(Number(u.plateId));
-          useProjectStore.getState().selectMember(null);
           if (!isMulti) useProjectStore.getState().clearSelectedSupportNodes();
           return;
         } else if (u.memberId != null || resolvedMemberId != null) {
           const targetId = resolvedMemberId ?? Number(u.memberId);
           useProjectStore.getState().selectMember(targetId);
-          useProjectStore.getState().selectPlate(null);
           if (!isMulti) useProjectStore.getState().clearSelectedSupportNodes();
           return;
         }
@@ -303,8 +294,8 @@ describe('3D Viewport Selection Engine — 5 Scenarios Verified 5 Times', () => 
       });
 
       it(`[Scenario 4 / Iteration ${iteration}]: Support / Foundation Selection — clicking Support at Node 1 selects Support Node #1`, () => {
-        // Raycast directed at Support Cone at (0, -0.3, 0)
-        const origin = new THREE.Vector3(0, -0.3, 5);
+        // Raycast directed at Support Cone at (0, -0.4, 5)
+        const origin = new THREE.Vector3(0, -0.4, 5);
         const dir = new THREE.Vector3(0, 0, -1).normalize();
 
         performRaycastSelection(origin, dir);

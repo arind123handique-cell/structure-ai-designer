@@ -62,26 +62,27 @@ export const RunAnalysisWindow: React.FC<WindowContentProps> = ({ close }) => {
       const pct = Math.min(100, Math.round((i / STEPS.length) * 100));
       setProgress(pct);
       setStatusLine(STEPS[i - 1]?.detail ?? '');
-      window.setTimeout(() => advance(i + 1), 280);
+      window.setTimeout(() => advance(i + 1), 60);
     };
     advance(1);
 
     // Yield to the browser to ensure the running state and progress bar paint immediately
-    await sleep(60);
+    await sleep(40);
 
     let solveErr: unknown = null;
     try {
       await runFemAnalysis();
     } catch (e) {
+      console.error('RunAnalysis failed:', e);
       solveErr = e;
     }
 
     const elapsedMs = performance.now() - t0;
-    const remaining = Math.max(0, 1200 - elapsedMs);
+    const remaining = Math.max(0, 500 - elapsedMs);
     await sleep(remaining);
 
     cancelledRef.current = true;
-    setStepIdx(STEPS.length);
+    setStepIdx(STEPS.length + 1);
     setProgress(100);
     setStatusLine('analysis complete');
     setElapsed(Math.round(performance.now() - t0));
@@ -89,7 +90,7 @@ export const RunAnalysisWindow: React.FC<WindowContentProps> = ({ close }) => {
     if (solveErr) {
       setPhase('error');
     } else {
-      await sleep(350);
+      await sleep(250);
       setPhase('done');
     }
   };
