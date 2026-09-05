@@ -11,7 +11,7 @@ import { PileDesignEngine } from '@/features/design/pile/pileDesignEngine';
 import { CombinedPileCapEngine, CombinedPileCapGroup } from '@/features/design/pilecap/combinedPileCapEngine';
 import { StaircaseDesignEngine } from '@/features/design/staircase/staircaseEngine';
 import { Architectural3DLayer } from '@/features/architectural/3d/Architectural3DLayer';
-import { buildMemberReinforcement, createReinforcementShared } from './Reinforcement3DRenderer';
+import { buildMemberReinforcement, createReinforcementShared, disposeReinforcementShared } from './Reinforcement3DRenderer';
 import { MemberDetailsDrawer } from './MemberDetailsDrawer';
 import {
   RotateCcw,
@@ -48,11 +48,11 @@ const spriteTextureCache = new LruCache<string, THREE.CanvasTexture>(30, (tex) =
 
 /**
  * Traverses and deeply disposes Three.js geometries, materials, and non-cached textures
- * to prevent GPU/RAM memory leaks.
+ * to prevent GPU/RAM memory leaks. Preserves persistent shared geometries and materials.
  */
 function disposeThreeObject(obj: THREE.Object3D) {
   obj.traverse((child: any) => {
-    if (child.geometry) {
+    if (child.geometry && !child.geometry.userData?.isShared) {
       child.geometry.dispose();
     }
     if (child.material) {
@@ -167,6 +167,21 @@ export const Structural3DViewer: React.FC = () => {
   const supportConeMeshesRef = useRef<THREE.Mesh[]>([]);
   const gradeBeamMeshesRef = useRef<THREE.Group[]>([]);
 
+  // Shared persistent unit geometries to avoid per-member BufferGeometry allocations
+  const sharedGeometriesRef = useRef<{
+    unitBox: THREE.BoxGeometry;
+    unitEdges: THREE.EdgesGeometry;
+    supportCone: THREE.ConeGeometry;
+    unitCylinder: THREE.CylinderGeometry;
+    unitCone: THREE.ConeGeometry;
+  }>({
+    unitBox: Object.assign(new THREE.BoxGeometry(1, 1, 1), { userData: { isShared: true } }),
+    unitEdges: Object.assign(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), { userData: { isShared: true } }),
+    supportCone: Object.assign(new THREE.ConeGeometry(0.35, 0.6, 4), { userData: { isShared: true } }),
+    unitCylinder: Object.assign(new THREE.CylinderGeometry(1, 1, 1, 6), { userData: { isShared: true } }),
+    unitCone: Object.assign(new THREE.ConeGeometry(1, 1, 6), { userData: { isShared: true } }),
+  });
+
   // Shared persistent materials to avoid reallocating on every render & selection
   const materialsRef = useRef({
     beam: Object.assign(new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.35, metalness: 0.1 }), { userData: { isShared: true } }),
@@ -194,6 +209,24 @@ export const Structural3DViewer: React.FC = () => {
     pileCap: Object.assign(new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.4, metalness: 0.1 }), { userData: { isShared: true } }),
     selectedPileCap: Object.assign(new THREE.MeshStandardMaterial({ color: 0xd97706, emissive: 0xb45309, emissiveIntensity: 0.4, roughness: 0.3 }), { userData: { isShared: true } }),
     pile: Object.assign(new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.35, metalness: 0.25 }), { userData: { isShared: true } }),
+    // Shared line materials for crisp structural outlines
+    edgeBeam: Object.assign(new THREE.LineBasicMaterial({ color: 0x2563eb, linewidth: 1 }), { userData: { isShared: true } }),
+    edgeColumn: Object.assign(new THREE.LineBasicMaterial({ color: 0x059669, linewidth: 1 }), { userData: { isShared: true } }),
+    edgeSelected: Object.assign(new THREE.LineBasicMaterial({ color: 0xfde047, linewidth: 1 }), { userData: { isShared: true } }),
+    // Grade Beams
+    gradeBeam: Object.assign(new THREE.MeshStandardMaterial({ color: 0x4f46e5, roughness: 0.35, metalness: 0.2 }), { userData: { isShared: true } }),
+    selectedGradeBeam: Object.assign(new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xd97706, emissiveIntensity: 0.4, roughness: 0.25 }), { userData: { isShared: true } }),
+    edgeGradeBeam: Object.assign(new THREE.LineBasicMaterial({ color: 0x818cf8, linewidth: 1 }), { userData: { isShared: true } }),
+    edgeSelectedGradeBeam: Object.assign(new THREE.LineBasicMaterial({ color: 0xfde68a, linewidth: 1 }), { userData: { isShared: true } }),
+    // Pile Caps edges & combined caps
+    edgePileCap: Object.assign(new THREE.LineBasicMaterial({ color: 0x94a3b8, linewidth: 1 }), { userData: { isShared: true } }),
+    edgeSelectedPileCap: Object.assign(new THREE.LineBasicMaterial({ color: 0xfef08a, linewidth: 1 }), { userData: { isShared: true } }),
+    combinedCap: Object.assign(new THREE.MeshStandardMaterial({ color: 0x065f46, roughness: 0.35, metalness: 0.2 }), { userData: { isShared: true } }),
+    shearWallCombinedCap: Object.assign(new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.35, metalness: 0.2 }), { userData: { isShared: true } }),
+    selectedCombinedCap: Object.assign(new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.35, metalness: 0.2 }), { userData: { isShared: true } }),
+    edgeCombinedCap: Object.assign(new THREE.LineBasicMaterial({ color: 0x34d399, linewidth: 1.5 }), { userData: { isShared: true } }),
+    edgeShearWallCombinedCap: Object.assign(new THREE.LineBasicMaterial({ color: 0xf87171, linewidth: 1.5 }), { userData: { isShared: true } }),
+    edgeSelectedCombinedCap: Object.assign(new THREE.LineBasicMaterial({ color: 0xfde047, linewidth: 1.5 }), { userData: { isShared: true } }),
   });
 
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
@@ -536,6 +569,19 @@ export const Structural3DViewer: React.FC = () => {
       renderer.domElement?.removeEventListener('pointerup', onPointerUpNative);
       controls.dispose();
       disposeThreeObject(scene);
+
+      // Deeply dispose persistent shared geometries and materials on component unmount
+      if (sharedGeometriesRef.current) {
+        Object.values(sharedGeometriesRef.current).forEach((geom: any) => {
+          if (geom && typeof geom.dispose === 'function') geom.dispose();
+        });
+      }
+      if (materialsRef.current) {
+        Object.values(materialsRef.current).forEach((mat: any) => {
+          if (mat && typeof mat.dispose === 'function') mat.dispose();
+        });
+      }
+
       if (composerRef.current) {
         try {
           composerRef.current.renderTarget1?.dispose();
@@ -646,7 +692,24 @@ export const Structural3DViewer: React.FC = () => {
       pileCap: pileCapMaterial,
       selectedPileCap: selectedPileCapMaterial,
       pile: pileMat,
+      edgeBeam: edgeBeamMaterial,
+      edgeColumn: edgeColumnMaterial,
+      edgeSelected: edgeSelectedMaterial,
+      gradeBeam: gradeBeamMaterial,
+      selectedGradeBeam: selectedGradeBeamMaterial,
+      edgeGradeBeam: edgeGradeBeamMaterial,
+      edgeSelectedGradeBeam: edgeSelectedGradeBeamMaterial,
+      edgePileCap: edgePileCapMaterial,
+      edgeSelectedPileCap: edgeSelectedPileCapMaterial,
+      combinedCap: combinedCapMaterial,
+      shearWallCombinedCap: shearWallCombinedCapMaterial,
+      selectedCombinedCap: selectedCombinedCapMaterial,
+      edgeCombinedCap: edgeCombinedCapMaterial,
+      edgeShearWallCombinedCap: edgeShearWallCombinedCapMaterial,
+      edgeSelectedCombinedCap: edgeSelectedCombinedCapMaterial,
     } = materialsRef.current;
+
+    const sharedGeoms = sharedGeometriesRef.current;
 
     // 1. Draw Members with exact designed structural cross-section dimensions (b × D)
     members.forEach((member) => {
@@ -691,11 +754,13 @@ export const Structural3DViewer: React.FC = () => {
         }
       }
 
-      const geometry = new THREE.BoxGeometry(b, distance, D);
       const isSelected = selectedMemberId === member.id;
       const material = isSelected ? selectedMaterial : isCol ? columnMaterial : beamMaterial;
 
-      const mesh = new THREE.Mesh(geometry, material);
+      // High-performance shared unit box geometry with scale sizing (0 heap buffer allocation)
+      const mesh = new THREE.Mesh(sharedGeoms.unitBox, material);
+      mesh.scale.set(b, distance, D);
+
       const midpoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
       mesh.position.copy(midpoint);
 
@@ -713,15 +778,10 @@ export const Structural3DViewer: React.FC = () => {
       dynamicGroup.add(mesh);
       memberMeshesRef.current.set(member.id, mesh);
 
-      // Add crisp edges geometry lines for exact 3D structural outline
-      const edges = new THREE.EdgesGeometry(geometry);
-      const edgeLine = new THREE.LineSegments(
-        edges,
-        new THREE.LineBasicMaterial({
-          color: isSelected ? 0xfde047 : isCol ? 0x059669 : 0x2563eb,
-          linewidth: 1,
-        })
-      );
+      // Add crisp edges geometry lines using shared unit edges and shared edge material
+      const edgeMat = isSelected ? edgeSelectedMaterial : isCol ? edgeColumnMaterial : edgeBeamMaterial;
+      const edgeLine = new THREE.LineSegments(sharedGeoms.unitEdges, edgeMat);
+      edgeLine.scale.copy(mesh.scale);
       edgeLine.position.copy(mesh.position);
       edgeLine.quaternion.copy(mesh.quaternion);
       edgeLine.userData = { memberId: member.id, type: 'member', isColumn: isCol };
@@ -966,8 +1026,7 @@ export const Structural3DViewer: React.FC = () => {
         const isAbsorbed = absorbedNodeMap.has(supp.nodeId);
 
         // Support Joint Pyramid (4-sided cone)
-        const coneGeom = new THREE.ConeGeometry(0.35, 0.6, 4);
-        const coneMesh = new THREE.Mesh(coneGeom, isSelected ? selectedSupportMaterial : supportMaterial);
+        const coneMesh = new THREE.Mesh(sharedGeoms.supportCone, isSelected ? selectedSupportMaterial : supportMaterial);
         coneMesh.position.set(node.x, node.y - 0.3, node.z);
         coneMesh.userData = { type: 'support', nodeId: supp.nodeId };
         dynamicGroup.add(coneMesh);
@@ -1021,7 +1080,9 @@ export const Structural3DViewer: React.FC = () => {
             ];
           }
 
-          let capGeom: THREE.BufferGeometry;
+          let capMesh: THREE.Mesh;
+          let capLine: THREE.LineSegments;
+
           if (capResult.pileCount === 5) {
             const Rp = (capResult.pileSpacing / 1000) / (2 * Math.sin(Math.PI / 5));
             const overhangM = (capResult.edgeDistance || 300) / 1000;
@@ -1035,35 +1096,44 @@ export const Structural3DViewer: React.FC = () => {
               else shape.lineTo(px, py);
             }
             shape.closePath();
-            capGeom = new THREE.ExtrudeGeometry(shape, { depth: capDepth, bevelEnabled: false });
+            const capGeom = new THREE.ExtrudeGeometry(shape, { depth: capDepth, bevelEnabled: false });
             capGeom.rotateX(-Math.PI / 2);
             capGeom.translate(0, -capDepth, 0);
+
+            capMesh = new THREE.Mesh(capGeom, isSelected ? selectedPileCapMaterial : pileCapMaterial);
+            const capEdges = new THREE.EdgesGeometry(capGeom);
+            capLine = new THREE.LineSegments(
+              capEdges,
+              isSelected ? edgeSelectedPileCapMaterial : edgePileCapMaterial
+            );
           } else {
-            capGeom = new THREE.BoxGeometry(capWidth, capDepth, capLength);
-            capGeom.translate(0, -capDepth / 2, 0);
+            // Standard rectangular pile cap: uses shared unitBox & unitEdges with 0 geometry allocation
+            capMesh = new THREE.Mesh(sharedGeoms.unitBox, isSelected ? selectedPileCapMaterial : pileCapMaterial);
+            capMesh.scale.set(capWidth, capDepth, capLength);
+            capMesh.position.set(0, -capDepth / 2, 0);
+
+            capLine = new THREE.LineSegments(
+              sharedGeoms.unitEdges,
+              isSelected ? edgeSelectedPileCapMaterial : edgePileCapMaterial
+            );
+            capLine.scale.copy(capMesh.scale);
+            capLine.position.copy(capMesh.position);
           }
 
-          const capMesh = new THREE.Mesh(capGeom, isSelected ? selectedPileCapMaterial : pileCapMaterial);
           capMesh.userData = { type: 'support', nodeId: supp.nodeId };
           capGroup.add(capMesh);
-
-          const capEdges = new THREE.EdgesGeometry(capGeom);
-          const capLine = new THREE.LineSegments(
-            capEdges,
-            new THREE.LineBasicMaterial({ color: isSelected ? 0xfef08a : 0x94a3b8, linewidth: 1 })
-          );
           capGroup.add(capLine);
+          capGroup.userData = { type: 'support', nodeId: supp.nodeId };
 
-          // 6-segment cylinders for low memory (reduced from 8)
-          const pileShaftGeom = new THREE.CylinderGeometry(pileRadius, pileRadius, pileLength, 6);
-          const pileToeGeom = new THREE.ConeGeometry(pileRadius, 0.35, 6);
-
+          // Piles: use shared unitCylinder and unitCone with scaling
           pileOffsets.forEach((off) => {
-            const shaftMesh = new THREE.Mesh(pileShaftGeom, pileMat);
+            const shaftMesh = new THREE.Mesh(sharedGeoms.unitCylinder, pileMat);
+            shaftMesh.scale.set(pileRadius, pileLength, pileRadius);
             shaftMesh.position.set(off.x, -capDepth - pileLength / 2, off.z);
             capGroup.add(shaftMesh);
 
-            const toeMesh = new THREE.Mesh(pileToeGeom, pileMat);
+            const toeMesh = new THREE.Mesh(sharedGeoms.unitCone, pileMat);
+            toeMesh.scale.set(pileRadius, 0.35, pileRadius);
             toeMesh.rotation.x = Math.PI;
             toeMesh.position.set(off.x, -capDepth - pileLength - 0.18, off.z);
             capGroup.add(toeMesh);
@@ -1102,42 +1172,47 @@ export const Structural3DViewer: React.FC = () => {
           const pileLength = 5.0;
 
           const combGroup = new THREE.Group();
+          combGroup.userData = {
+            type: 'combinedPileCap',
+            groupId: grp.groupId,
+            nodeIds: grp.nodeIds,
+            isShearWall,
+          };
 
-          const combMat = new THREE.MeshStandardMaterial({
-            color: isSelected ? 0xd97706 : isShearWall ? 0x991b1b : 0x065f46,
-            roughness: 0.35,
-            metalness: 0.2,
-          });
+          const combMat = isSelected
+            ? selectedCombinedCapMaterial
+            : isShearWall
+            ? shearWallCombinedCapMaterial
+            : combinedCapMaterial;
 
-          const boxGeom = new THREE.BoxGeometry(capL, capD, capB);
-          boxGeom.translate(0, -capD / 2, 0);
-
-          const combMesh = new THREE.Mesh(boxGeom, combMat);
+          const combMesh = new THREE.Mesh(sharedGeoms.unitBox, combMat);
+          combMesh.scale.set(capL, capD, capB);
+          combMesh.position.set(0, -capD / 2, 0);
           combMesh.userData = { type: 'combinedPileCap', groupId: grp.groupId, nodeIds: grp.nodeIds };
           combGroup.add(combMesh);
 
-          const edges = new THREE.EdgesGeometry(boxGeom);
-          const line = new THREE.LineSegments(
-            edges,
-            new THREE.LineBasicMaterial({
-              color: isSelected ? 0xfde047 : isShearWall ? 0xf87171 : 0x34d399,
-              linewidth: 1.5,
-            })
-          );
-          combGroup.add(line);
+          const lineMat = isSelected
+            ? edgeSelectedCombinedCapMaterial
+            : isShearWall
+            ? edgeShearWallCombinedCapMaterial
+            : edgeCombinedCapMaterial;
 
-          const pileShaftGeom = new THREE.CylinderGeometry(pileRadius, pileRadius, pileLength, 6);
-          const pileToeGeom = new THREE.ConeGeometry(pileRadius, 0.35, 6);
+          const line = new THREE.LineSegments(sharedGeoms.unitEdges, lineMat);
+          line.scale.copy(combMesh.scale);
+          line.position.copy(combMesh.position);
+          combGroup.add(line);
 
           grp.pileOffsets.forEach((off) => {
             const px = off.x / 1000;
             const pz = -off.z / 1000;
 
-            const shaftMesh = new THREE.Mesh(pileShaftGeom, pileMat);
+            const shaftMesh = new THREE.Mesh(sharedGeoms.unitCylinder, pileMat);
+            shaftMesh.scale.set(pileRadius, pileLength, pileRadius);
             shaftMesh.position.set(px, -capD - pileLength / 2, pz);
             combGroup.add(shaftMesh);
 
-            const toeMesh = new THREE.Mesh(pileToeGeom, pileMat);
+            const toeMesh = new THREE.Mesh(sharedGeoms.unitCone, pileMat);
+            toeMesh.scale.set(pileRadius, 0.35, pileRadius);
             toeMesh.rotation.x = Math.PI;
             toeMesh.position.set(px, -capD - pileLength - 0.18, pz);
             combGroup.add(toeMesh);
@@ -1164,9 +1239,6 @@ export const Structural3DViewer: React.FC = () => {
 
     // 4. Draw Grade Tie Beams
     if (showGradeBeams && gradeBeamsList.length > 0) {
-      const normalGradeBeamMat = new THREE.MeshStandardMaterial({ color: 0x4f46e5, roughness: 0.35, metalness: 0.2 });
-      const selectedGradeBeamMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xd97706, emissiveIntensity: 0.4, roughness: 0.25 });
-
       gradeBeamsList.forEach((gb) => {
         const n1 = nodes.get(gb.startNodeId);
         const n2 = nodes.get(gb.endNodeId);
@@ -1182,17 +1254,18 @@ export const Structural3DViewer: React.FC = () => {
         const D = gb.D / 1000;
 
         const isSelected = selectedGradeBeamId === gb.gradeBeamId;
-        const boxGeom = new THREE.BoxGeometry(b, D, distance);
-        const boxMesh = new THREE.Mesh(boxGeom, isSelected ? selectedGradeBeamMat : normalGradeBeamMat);
+        const boxMesh = new THREE.Mesh(
+          sharedGeoms.unitBox,
+          isSelected ? selectedGradeBeamMaterial : gradeBeamMaterial
+        );
+        boxMesh.scale.set(b, D, distance);
         boxMesh.position.set(0, -D / 2, 0);
         boxMesh.userData = { gradeBeamId: gb.gradeBeamId, type: 'gradebeam' };
         gbGroup.add(boxMesh);
 
-        const edges = new THREE.EdgesGeometry(boxGeom);
-        const line = new THREE.LineSegments(
-          edges,
-          new THREE.LineBasicMaterial({ color: isSelected ? 0xfde68a : 0x818cf8, linewidth: 1 })
-        );
+        const edgeMat = isSelected ? edgeSelectedGradeBeamMaterial : edgeGradeBeamMaterial;
+        const line = new THREE.LineSegments(sharedGeoms.unitEdges, edgeMat);
+        line.scale.copy(boxMesh.scale);
         line.position.copy(boxMesh.position);
         gbGroup.add(line);
 
@@ -1203,6 +1276,7 @@ export const Structural3DViewer: React.FC = () => {
         const defaultForward = new THREE.Vector3(0, 0, 1);
         gbGroup.quaternion.setFromUnitVectors(defaultForward, dir);
 
+        gbGroup.userData = { gradeBeamId: gb.gradeBeamId, type: 'gradebeam' };
         dynamicGroup.add(gbGroup);
         gradeBeamMeshesRef.current.push(gbGroup);
       });
@@ -1231,6 +1305,12 @@ export const Structural3DViewer: React.FC = () => {
     }
 
     needsSceneRenderRef.current = true;
+
+    return () => {
+      if (reinforcementShared) {
+        disposeReinforcementShared(reinforcementShared);
+      }
+    };
   }, [
     activeModel,
     filterLayers,
@@ -1282,7 +1362,9 @@ export const Structural3DViewer: React.FC = () => {
       const isCol = mesh.userData.isColumn;
       mesh.material = isSelected ? mats.selected : (isCol ? mats.column : mats.beam);
       if (mesh.userData.edgeLine) {
-        mesh.userData.edgeLine.material.color.setHex(isSelected ? 0xfde047 : isCol ? 0x059669 : 0x2563eb);
+        mesh.userData.edgeLine.material = isSelected
+          ? mats.edgeSelected
+          : (isCol ? mats.edgeColumn : mats.edgeBeam);
       }
     });
 
@@ -1299,14 +1381,49 @@ export const Structural3DViewer: React.FC = () => {
       mesh.material = isSelected ? mats.selectedSupport : mats.support;
     });
 
-    // 4. Pile Caps
+    // 4. Pile Caps & Combined Caps
     pileCapMeshesRef.current.forEach((group) => {
-      const isSelected = group.userData.nodeIds
-        ? group.userData.nodeIds.some((nid: number) => selectedSupportNodeIds.includes(nid))
-        : selectedSupportNodeIds.includes(group.userData.nodeId);
+      const u = group.userData;
+      const isSelected = u.nodeIds
+        ? u.nodeIds.some((nid: number) => selectedSupportNodeIds.includes(nid))
+        : (u.nodeId ? selectedSupportNodeIds.includes(u.nodeId) : false);
+
+      const isCombined = u.type === 'combinedPileCap';
+      const isShearWall = u.isShearWall;
+
       group.traverse((child) => {
-        if (child instanceof THREE.Mesh && child.userData.type === 'cap') {
-          child.material = isSelected ? mats.selectedPileCap : mats.pileCap;
+        if (child instanceof THREE.Mesh) {
+          if (child.userData.type === 'support') {
+            child.material = isSelected ? mats.selectedPileCap : mats.pileCap;
+          } else if (child.userData.type === 'combinedPileCap') {
+            child.material = isSelected
+              ? mats.selectedCombinedCap
+              : isShearWall
+              ? mats.shearWallCombinedCap
+              : mats.combinedCap;
+          }
+        } else if (child instanceof THREE.LineSegments) {
+          if (isCombined) {
+            child.material = isSelected
+              ? mats.edgeSelectedCombinedCap
+              : isShearWall
+              ? mats.edgeShearWallCombinedCap
+              : mats.edgeCombinedCap;
+          } else {
+            child.material = isSelected ? mats.edgeSelectedPileCap : mats.edgePileCap;
+          }
+        }
+      });
+    });
+
+    // 5. Grade Beams
+    gradeBeamMeshesRef.current.forEach((group) => {
+      const isSelected = group.userData.gradeBeamId === selectedGradeBeamId;
+      group.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.userData.type === 'gradebeam') {
+          child.material = isSelected ? mats.selectedGradeBeam : mats.gradeBeam;
+        } else if (child instanceof THREE.LineSegments) {
+          child.material = isSelected ? mats.edgeSelectedGradeBeam : mats.edgeGradeBeam;
         }
       });
     });

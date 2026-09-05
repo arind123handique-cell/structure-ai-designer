@@ -28,14 +28,29 @@ interface BarPos { x: number; z: number }
 export interface ReinforcementShared {
   barRadius: number;
   barGeom: THREE.CylinderGeometry;
+  unitRingGeom: THREE.BufferGeometry;
   barMat: THREE.MeshStandardMaterial;
   tieMat: THREE.LineBasicMaterial;
 }
 
 export function createReinforcementShared(barRadius: number): ReinforcementShared {
+  const ringPts = [
+    new THREE.Vector3(-0.5, 0, -0.5),
+    new THREE.Vector3(0.5, 0, -0.5),
+    new THREE.Vector3(0.5, 0, 0.5),
+    new THREE.Vector3(-0.5, 0, 0.5),
+    new THREE.Vector3(-0.5, 0, -0.5),
+  ];
+  const unitRingGeom = new THREE.BufferGeometry().setFromPoints(ringPts);
+  unitRingGeom.userData = { isShared: true };
+
+  const barGeom = new THREE.CylinderGeometry(barRadius, barRadius, 1, 6);
+  barGeom.userData = { isShared: true };
+
   return {
     barRadius,
-    barGeom: new THREE.CylinderGeometry(barRadius, barRadius, 1, 6),
+    barGeom,
+    unitRingGeom,
     barMat: new THREE.MeshStandardMaterial({
       color: 0xfbbf24, // amber/gold rebar
       roughness: 0.3,
@@ -51,6 +66,7 @@ export function createReinforcementShared(barRadius: number): ReinforcementShare
 export function disposeReinforcementShared(shared: ReinforcementShared | null) {
   if (!shared) return;
   shared.barGeom.dispose();
+  shared.unitRingGeom.dispose();
   shared.barMat.dispose();
   shared.tieMat.dispose();
 }
@@ -126,20 +142,17 @@ function buildColumnBars(length: number, b: number, D: number, rebar: any, cover
 /** Build column ties (rectangular rings) at regular spacing along length. */
 function buildColumnTies(length: number, b: number, D: number, coverMm: number, radius: number, shared: ReinforcementShared, group: THREE.Group) {
   const inset = (coverMm / 1000) + radius - 0.004;
-  const hw = b / 2 - inset;
-  const hd = D / 2 - inset;
+  const hw = Math.max(0.001, b / 2 - inset);
+  const hd = Math.max(0.001, D / 2 - inset);
   const nTies = Math.min(MAX_TIES, Math.max(1, Math.round(length / COLUMN_TIE_SPACING_M)));
-  const pts = [
-    new THREE.Vector3(-hw, 0, -hd),
-    new THREE.Vector3(hw, 0, -hd),
-    new THREE.Vector3(hw, 0, hd),
-    new THREE.Vector3(-hw, 0, hd),
-    new THREE.Vector3(-hw, 0, -hd),
-  ];
+  const scaleX = hw * 2;
+  const scaleZ = hd * 2;
   for (let i = 0; i <= nTies; i += 1) {
     const y = -length / 2 + (length * i) / nTies;
-    const geom = new THREE.BufferGeometry().setFromPoints(pts.map((p) => new THREE.Vector3(p.x, y, p.z)));
-    group.add(new THREE.Line(geom, shared.tieMat));
+    const line = new THREE.Line(shared.unitRingGeom, shared.tieMat);
+    line.scale.set(scaleX, 1, scaleZ);
+    line.position.set(0, y, 0);
+    group.add(line);
   }
 }
 
@@ -166,20 +179,17 @@ function buildBeamBars(length: number, b: number, D: number, topBars: any[], bot
 function buildBeamStirrups(length: number, b: number, D: number, spacingMm: number, coverMm: number, shared: ReinforcementShared, group: THREE.Group) {
   const spacing = Math.max(0.075, (spacingMm || 150) / 1000);
   const inset = (coverMm / 1000) + 0.004;
-  const hw = b / 2 - inset;
-  const hd = D / 2 - inset;
+  const hw = Math.max(0.001, b / 2 - inset);
+  const hd = Math.max(0.001, D / 2 - inset);
   const n = Math.min(MAX_TIES, Math.max(1, Math.round(length / spacing)));
-  const pts = [
-    new THREE.Vector3(-hw, 0, -hd),
-    new THREE.Vector3(hw, 0, -hd),
-    new THREE.Vector3(hw, 0, hd),
-    new THREE.Vector3(-hw, 0, hd),
-    new THREE.Vector3(-hw, 0, -hd),
-  ];
+  const scaleX = hw * 2;
+  const scaleZ = hd * 2;
   for (let i = 0; i <= n; i += 1) {
     const y = -length / 2 + (length * i) / n;
-    const geom = new THREE.BufferGeometry().setFromPoints(pts.map((p) => new THREE.Vector3(p.x, y, p.z)));
-    group.add(new THREE.Line(geom, shared.tieMat));
+    const line = new THREE.Line(shared.unitRingGeom, shared.tieMat);
+    line.scale.set(scaleX, 1, scaleZ);
+    line.position.set(0, y, 0);
+    group.add(line);
   }
 }
 

@@ -173,9 +173,11 @@ export const AppLayout: React.FC = () => {
         ) : null}
 
         <div className="flex-1 flex overflow-hidden relative">
-          {/* Futuristic video-like ambience (canvas + animated grid) behind content */}
+          {/* Futuristic video-like ambience (canvas + animated grid) behind content; suspended during 3D/CAD views for low RAM/GPU */}
           <div className="absolute inset-0 z-0 bg-gradient-to-br from-white via-ui-background to-sky-50/60">
-            <FuturisticBackdrop className="absolute inset-0 w-full h-full opacity-40" />
+            {activeView !== '3d-model' && activeView !== 'etabs-studio' && activeView !== 'floor-plans' && activeView !== 'architectural-plan' && (
+              <FuturisticBackdrop className="absolute inset-0 w-full h-full opacity-40" />
+            )}
             <div
               className="absolute inset-0 opacity-[0.05]"
               style={{

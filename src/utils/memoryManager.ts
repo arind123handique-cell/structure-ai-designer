@@ -85,7 +85,7 @@ export function disposeThreeObject(obj: THREE.Object3D | null | undefined): void
   if (!obj) return;
 
   obj.traverse((child: any) => {
-    if (child.geometry) {
+    if (child.geometry && !child.geometry.userData?.isShared) {
       child.geometry.dispose();
     }
     if (child.material) {
