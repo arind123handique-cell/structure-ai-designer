@@ -122,6 +122,37 @@ export interface StoryDriftRecord {
   status: 'PASS' | 'FAIL' | 'WARNING';
 }
 
+export interface MemberLoad {
+  id?: string;
+  memberId: number;
+  loadPattern: string; // 'DEAD' | 'LIVE' | 'SDL' | 'WALL' | 'EQX' | 'EQZ'
+  type: 'UNIFORM' | 'POINT' | 'TRAPEZOIDAL';
+  w1: number; // Magnitude in kN/m (UDL) or kN (Point)
+  w2?: number; // End magnitude for trapezoidal
+  d1?: number; // Distance from start node (m)
+  d2?: number; // Distance for end (m)
+  direction: 'GLOBAL_Y' | 'LOCAL_Y' | 'GLOBAL_X' | 'GLOBAL_Z';
+}
+
+export interface ShellLoad {
+  id?: string;
+  plateId?: number;
+  levelY: number;
+  loadPattern: string; // 'DEAD' | 'LIVE' | 'SDL'
+  pressure: number; // kN/m²
+  distributionType: 'TWO_WAY' | 'ONE_WAY_X' | 'ONE_WAY_Z';
+}
+
+export interface MemberModifier {
+  memberId: number;
+  axialArea: number; // 1.0 default
+  shearY: number; // 1.0 default
+  shearZ: number; // 1.0 default
+  torsionJ: number; // 0.20 cracked default
+  momentIyy: number; // 0.35 beam / 0.70 col
+  momentIzz: number; // 0.35 beam / 0.70 col
+}
+
 export interface NormalizedStructuralModel {
   nodes: Map<number, Node3D>;
   members: Map<number, Member3D>;
@@ -129,8 +160,25 @@ export interface NormalizedStructuralModel {
   supports: Map<number, Support3D>;
   loadCases: Map<number, LoadCase>;
   loadCombinations: Map<number, LoadCombination>;
+  memberLoads?: Map<number, MemberLoad[]>;
+  shellLoads?: ShellLoad[];
+  /**
+   * Explicit external-load metadata captured from a real STAAD input model
+   * (.STD/.ANL). When present, the FEM solver applies the actual STAAD loads
+   * (concrete self-weight at the material density + explicit member UDLs)
+   * instead of generic heuristics, which is what makes re-analysis match STAAD.
+   */
+  extLoads?: {
+    source: 'STAAD' | 'APP';
+    concreteDensity?: number; // kN/m3
+    concreteE?: number; // kN/m2
+    selfweightFactor?: number; // signed, e.g. -1 (downward)
+    selfweightAxis?: 'Y' | 'Z';
+  };
+  memberModifiers?: Map<number, MemberModifier>;
   reactions: JointReaction[]; // grouped by node and load case
   memberForces: MemberForceRecord[];
+  nodeDisplacements?: Map<number, { [loadCaseId: number]: [number, number, number, number, number, number] }>; // [ux, uy, uz, rx, ry, rz] in m / rad
   designSummaries?: Map<number, MemberDesignSummary>;
   storyDrifts: StoryDriftRecord[];
   boundingBox: {

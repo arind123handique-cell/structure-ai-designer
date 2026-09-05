@@ -10,6 +10,8 @@ import {
   MemberDesignSummary,
   StoryDriftRecord,
   NormalizedStructuralModel,
+  MemberLoad,
+  ShellLoad,
 } from './types';
 import { StructuralClassification } from '@/types';
 
@@ -24,7 +26,10 @@ export class ModelNormalizer {
     reactions: JointReaction[],
     memberForces: MemberForceRecord[],
     storyDrifts: StoryDriftRecord[],
-    designSummaries?: Map<number, MemberDesignSummary>
+    designSummaries?: Map<number, MemberDesignSummary>,
+    memberLoads?: Map<number, MemberLoad[]>,
+    shellLoads?: ShellLoad[],
+    extLoads?: NormalizedStructuralModel['extLoads']
   ): NormalizedStructuralModel {
     const members = new Map<number, Member3D>();
 
@@ -149,6 +154,9 @@ export class ModelNormalizer {
       memberForces,
       designSummaries,
       storyDrifts,
+      memberLoads,
+      shellLoads,
+      extLoads,
       boundingBox: {
         minX,
         maxX,

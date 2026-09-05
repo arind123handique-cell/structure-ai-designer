@@ -22,15 +22,14 @@ const DB_VERSION = 1;
 function sanitizeForFirestore(value: unknown): unknown {
   if (value === null || value === undefined) return value;
   if (Array.isArray(value)) {
-    // Check if any element is itself an array → convert to object
-    if (value.length > 0 && Array.isArray(value[0])) {
+    const hasNested = value.some((el) => Array.isArray(el));
+    if (hasNested) {
       const obj: Record<string, unknown> = {};
       for (let i = 0; i < value.length; i++) {
         obj[String(i)] = sanitizeForFirestore(value[i]);
       }
       return obj;
     }
-    // Flat array — recurse into each element
     return value.map(sanitizeForFirestore);
   }
   if (typeof value === 'object') {
@@ -75,13 +74,23 @@ function restoreFromFirestore(value: unknown): unknown {
 }
 
 export class ProjectStorage {
-  private static dbPromise: Promise<IDBPDatabase<StructureAIDB>> = openDB<StructureAIDB>(DB_NAME, DB_VERSION, {
-    upgrade(db) {
-      if (!db.objectStoreNames.contains('projects')) {
-        db.createObjectStore('projects', { keyPath: 'metadata.id' });
+  private static dbPromise: Promise<IDBPDatabase<StructureAIDB>> | null = null;
+
+  private static getDB(): Promise<IDBPDatabase<StructureAIDB>> {
+    if (!this.dbPromise) {
+      if (typeof indexedDB === 'undefined') {
+        return Promise.reject(new Error('indexedDB is not defined in this environment'));
       }
-    },
-  });
+      this.dbPromise = openDB<StructureAIDB>(DB_NAME, DB_VERSION, {
+        upgrade(db) {
+          if (!db.objectStoreNames.contains('projects')) {
+            db.createObjectStore('projects', { keyPath: 'metadata.id' });
+          }
+        },
+      });
+    }
+    return this.dbPromise;
+  }
 
   private static currentUid: string | null = null;
 
@@ -97,8 +106,13 @@ export class ProjectStorage {
       supports: Array.from(model.supports.entries()),
       loadCases: Array.from(model.loadCases.entries()),
       loadCombinations: Array.from(model.loadCombinations.entries()),
+      memberLoads: model.memberLoads ? Array.from(model.memberLoads.entries()) : undefined,
+      shellLoads: model.shellLoads,
+      extLoads: model.extLoads,
+      memberModifiers: model.memberModifiers ? Array.from(model.memberModifiers.entries()) : undefined,
       reactions: model.reactions,
       memberForces: model.memberForces,
+      nodeDisplacements: model.nodeDisplacements ? Array.from(model.nodeDisplacements.entries()) : undefined,
       designSummaries: model.designSummaries ? Array.from(model.designSummaries.entries()) : undefined,
       storyDrifts: model.storyDrifts,
       boundingBox: model.boundingBox,
@@ -114,8 +128,13 @@ export class ProjectStorage {
       supports: new Map(serialized.supports),
       loadCases: new Map(serialized.loadCases),
       loadCombinations: new Map(serialized.loadCombinations),
+      memberLoads: serialized.memberLoads ? new Map(serialized.memberLoads) : new Map(),
+      shellLoads: serialized.shellLoads || [],
+      extLoads: serialized.extLoads,
+      memberModifiers: serialized.memberModifiers ? new Map(serialized.memberModifiers) : new Map(),
       reactions: serialized.reactions,
       memberForces: serialized.memberForces,
+      nodeDisplacements: serialized.nodeDisplacements ? new Map(serialized.nodeDisplacements) : undefined,
       designSummaries: serialized.designSummaries ? new Map(serialized.designSummaries) : new Map(),
       storyDrifts: serialized.storyDrifts,
       boundingBox: serialized.boundingBox,
@@ -124,7 +143,7 @@ export class ProjectStorage {
   }
 
   public static async saveProject(project: StoredProject): Promise<void> {
-    const db = await this.dbPromise;
+    const db = await this.getDB();
     await db.put('projects', project);
     // Sync to cloud in background (fire-and-forget)
     if (this.currentUid) {
@@ -135,17 +154,17 @@ export class ProjectStorage {
   }
 
   public static async getProject(id: string): Promise<StoredProject | undefined> {
-    const db = await this.dbPromise;
+    const db = await this.getDB();
     return await db.get('projects', id);
   }
 
   public static async getAllProjects(): Promise<StoredProject[]> {
-    const db = await this.dbPromise;
+    const db = await this.getDB();
     return await db.getAll('projects');
   }
 
   public static async deleteProject(id: string): Promise<void> {
-    const db = await this.dbPromise;
+    const db = await this.getDB();
     await db.delete('projects', id);
     if (this.currentUid) {
       FirestoreProjectStorage.deleteProject(this.currentUid, id).catch((e) =>
@@ -159,7 +178,7 @@ export class ProjectStorage {
     if (!this.currentUid) return 0;
     try {
       const cloudProjects = await FirestoreProjectStorage.getAllProjects(this.currentUid);
-      const db = await this.dbPromise;
+      const db = await this.getDB();
       let merged = 0;
       for (const cp of cloudProjects) {
         const local = await db.get('projects', cp.metadata.id);

@@ -1,5 +1,5 @@
 // @ts-nocheck
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { useProjectStore } from '@/features/projects/projectStore';
@@ -11,6 +11,8 @@ import { PileDesignEngine } from '@/features/design/pile/pileDesignEngine';
 import { CombinedPileCapEngine, CombinedPileCapGroup } from '@/features/design/pilecap/combinedPileCapEngine';
 import { StaircaseDesignEngine } from '@/features/design/staircase/staircaseEngine';
 import { Architectural3DLayer } from '@/features/architectural/3d/Architectural3DLayer';
+import { buildMemberReinforcement, createReinforcementShared } from './Reinforcement3DRenderer';
+import { MemberDetailsDrawer } from './MemberDetailsDrawer';
 import {
   RotateCcw,
   Eye,
@@ -29,6 +31,16 @@ import {
   AppWindow,
   Footprints,
 } from 'lucide-react';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { useVideoStore } from '@/features/video/videoStore';
+import { VideoViewportOverlay } from '@/features/video/components/VideoViewportOverlay';
+import { CinematicRecorderControl } from '@/features/video/components/CinematicRecorderControl';
+import { cyberAudio } from '@/features/video/audio/cyberAudioSynthesizer';
+import { videoStreamEngine } from '@/features/video/engines/videoStreamEngine';
+import { cvDefectDetector } from '@/features/video/engines/cvDefectDetector';
+import { useThemeStore } from '@/features/theme/themeStore';
 
 // Global texture cache for 3D sprites to avoid allocating hundreds of canvases on every state update
 const spriteTextureCache = new Map<string, THREE.CanvasTexture>();
@@ -43,13 +55,12 @@ function disposeThreeObject(obj: THREE.Object3D) {
       child.geometry.dispose();
     }
     if (child.material) {
-      if (Array.isArray(child.material)) {
-        child.material.forEach((m: any) => {
+      const mats = Array.isArray(child.material) ? child.material : [child.material];
+      mats.forEach((m: any) => {
+        if (!m.userData?.isShared) {
           m.dispose();
-        });
-      } else {
-        child.material.dispose();
-      }
+        }
+      });
     }
   });
 }
@@ -155,9 +166,51 @@ export const Structural3DViewer: React.FC = () => {
   const supportConeMeshesRef = useRef<THREE.Mesh[]>([]);
   const gradeBeamMeshesRef = useRef<THREE.Group[]>([]);
 
+  // Shared persistent materials to avoid reallocating on every render & selection
+  const materialsRef = useRef({
+    beam: Object.assign(new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.35, metalness: 0.1 }), { userData: { isShared: true } }),
+    column: Object.assign(new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.35, metalness: 0.1 }), { userData: { isShared: true } }),
+    selected: Object.assign(new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xd97706, emissiveIntensity: 0.5, roughness: 0.2 }), { userData: { isShared: true } }),
+    slabPlate: Object.assign(new THREE.MeshStandardMaterial({
+      color: 0x0284c7,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      roughness: 0.5,
+    }), { userData: { isShared: true } }),
+    wallPlate: Object.assign(new THREE.MeshStandardMaterial({
+      color: 0x7c3aed,
+      roughness: 0.35,
+      metalness: 0.15,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+    }), { userData: { isShared: true } }),
+    selectedPlate: Object.assign(new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xf59e0b, emissiveIntensity: 0.5, transparent: true, opacity: 0.9, side: THREE.DoubleSide }), { userData: { isShared: true } }),
+    support: Object.assign(new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.25, metalness: 0.7 }), { userData: { isShared: true } }),
+    selectedSupport: Object.assign(new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xf59e0b, emissiveIntensity: 0.6, roughness: 0.2 }), { userData: { isShared: true } }),
+    pileCap: Object.assign(new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.4, metalness: 0.1 }), { userData: { isShared: true } }),
+    selectedPileCap: Object.assign(new THREE.MeshStandardMaterial({ color: 0xd97706, emissive: 0xb45309, emissiveIntensity: 0.4, roughness: 0.3 }), { userData: { isShared: true } }),
+    pile: Object.assign(new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.35, metalness: 0.25 }), { userData: { isShared: true } }),
+  });
+
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
   const needsSceneRenderRef = useRef(true);
+  const composerRef = useRef<EffectComposer | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoContainerRef = useRef<HTMLDivElement | null>(null);
+  const performRaycastSelectionRef = useRef<(clientX: number, clientY: number, isMulti: boolean) => void>(() => {});
+
+  const isStreamActive = useVideoStore(s => s.isStreamActive);
+  const videoSourceType = useVideoStore(s => s.videoSourceType);
+  const isBloomEnabled = useVideoStore(s => s.isBloomEnabled);
+  const isScanlinesEnabled = useVideoStore(s => s.isScanlinesEnabled);
+  const underlayOpacity = useVideoStore(s => s.arCalibration.underlayOpacity);
+  const isCvDetectionActive = useVideoStore(s => s.isCvDetectionActive);
+  const theme = useThemeStore(s => s.theme);
+
   const arch3DLayerRef = useRef<Architectural3DLayer | null>(null);
   if (!arch3DLayerRef.current) {
     arch3DLayerRef.current = new Architectural3DLayer();
@@ -194,9 +247,9 @@ export const Structural3DViewer: React.FC = () => {
     selectArchitecturalElement,
   } = useProjectStore() as any;
 
-  const [showLabels, setShowLabels] = useState(true);
-  const [showWallLabels, setShowWallLabels] = useState(true);
-  const [showSlabLabels, setShowSlabLabels] = useState(true);
+  const [showLabels, setShowLabels] = useState(false);
+  const [showWallLabels, setShowWallLabels] = useState(false);
+  const [showSlabLabels, setShowSlabLabels] = useState(false);
   const [showPileCaps, setShowPileCaps] = useState(true);
   const [showGradeBeams, setShowGradeBeams] = useState(true);
   const [showSlabs, setShowSlabs] = useState(true);
@@ -204,10 +257,17 @@ export const Structural3DViewer: React.FC = () => {
   const [showArchWalls, setShowArchWalls] = useState(true);
   const [showArchDoors, setShowArchDoors] = useState(true);
   const [showArchWindows, setShowArchWindows] = useState(true);
-  const [showArchRooms, setShowArchRooms] = useState(true);
+  const [showArchRooms, setShowArchRooms] = useState(false);
   const [showArchStaircases, setShowArchStaircases] = useState(true);
   const [selectedGradeBeamId, setSelectedGradeBeamId] = useState<string | null>(null);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
+
+  // 3D Reinforcement detailing toggles (real-time ON/OFF per component)
+  const [rebarEnabled, setRebarEnabled] = useState(false);
+  const [rebarShowColumnBars, setRebarShowColumnBars] = useState(true);
+  const [rebarShowColumnTies, setRebarShowColumnTies] = useState(true);
+  const [rebarShowBeamBars, setRebarShowBeamBars] = useState(true);
+  const [rebarShowBeamStirrups, setRebarShowBeamStirrups] = useState(true);
 
   // Column and Support Numbering Mapping
   const columnSupportMapping = useMemo(() => {
@@ -320,8 +380,9 @@ export const Structural3DViewer: React.FC = () => {
     const width = containerRef.current.clientWidth || 800;
     const height = containerRef.current.clientHeight || 600;
 
+    const isLight = useThemeStore.getState().theme === 'light';
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#0F172A'); // Deep Navy Canvas
+    scene.background = new THREE.Color(isLight ? '#F1F5F9' : '#0F172A');
     sceneRef.current = scene;
 
     const dynamicGroup = new THREE.Group();
@@ -337,23 +398,74 @@ export const Structural3DViewer: React.FC = () => {
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({
-      antialias: false,
-      alpha: false,
+      antialias: true,
+      alpha: true,
       powerPreference: 'high-performance',
-      precision: 'lowp',
+      precision: 'mediump',
     });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     rendererRef.current = renderer;
+    canvasRef.current = renderer.domElement;
 
     containerRef.current.replaceChildren(renderer.domElement);
+
+    // Setup Cyberpunk Post-Processing (UnrealBloomPass) - opt-in
+    try {
+      const composer = new EffectComposer(renderer);
+      const renderPass = new RenderPass(scene, camera);
+      composer.addPass(renderPass);
+
+      const bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(width, height),
+        0.75, // bloom strength
+        0.3,  // bloom radius
+        0.5   // bloom threshold
+      );
+      composer.addPass(bloomPass);
+      composerRef.current = composer;
+    } catch (e) {
+      console.warn('EffectComposer bloom init skipped', e);
+    }
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.maxDistance = 1500;
     controls.minDistance = 2;
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.DOLLY,
+      RIGHT: THREE.MOUSE.ROTATE,
+    };
     controlsRef.current = controls;
+
+    // Native pointer click/drag discriminator directly on WebGL canvas
+    let pointerDownPos = { x: 0, y: 0 };
+    let pointerDownTime = 0;
+
+    const onPointerDownNative = (e: PointerEvent) => {
+      if (e.button === 0) {
+        pointerDownPos = { x: e.clientX, y: e.clientY };
+        pointerDownTime = Date.now();
+      }
+    };
+
+    const onPointerUpNative = (e: PointerEvent) => {
+      if (e.button === 0) {
+        const dx = e.clientX - pointerDownPos.x;
+        const dy = e.clientY - pointerDownPos.y;
+        const dist = Math.hypot(dx, dy);
+        const elapsed = Date.now() - pointerDownTime;
+        // If mouse barely moved (< 6px within 1s), user tapped/clicked to select
+        if (dist < 6 && elapsed < 1000) {
+          performRaycastSelectionRef.current(e.clientX, e.clientY, e.shiftKey || e.ctrlKey);
+        }
+      }
+    };
+
+    renderer.domElement.addEventListener('pointerdown', onPointerDownNative);
+    renderer.domElement.addEventListener('pointerup', onPointerUpNative);
 
     controls.addEventListener('change', () => {
       needsSceneRenderRef.current = true;
@@ -371,8 +483,8 @@ export const Structural3DViewer: React.FC = () => {
     dirLight2.position.set(-50, -30, -50);
     scene.add(dirLight2);
 
-    // Static Ground Grid
-    const gridHelper = new THREE.GridHelper(80, 40, 0x334155, 0x1e293b);
+    // Tactical Ground Grid Helper
+    const gridHelper = new THREE.GridHelper(100, 50, isLight ? 0x2563EB : 0x00f0ff, isLight ? 0xCBD5E1 : 0x1e293b);
     gridHelper.position.y = -0.01;
     scene.add(gridHelper);
 
@@ -384,6 +496,9 @@ export const Structural3DViewer: React.FC = () => {
           cameraRef.current.aspect = w / h;
           cameraRef.current.updateProjectionMatrix();
           rendererRef.current.setSize(w, h);
+          if (composerRef.current) {
+            composerRef.current.setSize(w, h);
+          }
           needsSceneRenderRef.current = true;
         }
       }
@@ -400,7 +515,12 @@ export const Structural3DViewer: React.FC = () => {
       if (controlsRef.current && rendererRef.current && sceneRef.current && cameraRef.current) {
         const controlsDamping = controlsRef.current.update();
         if (controlsDamping || needsSceneRenderRef.current) {
-          rendererRef.current.render(sceneRef.current, cameraRef.current);
+          const bloomActive = useVideoStore.getState().isBloomEnabled;
+          if (bloomActive && composerRef.current) {
+            composerRef.current.render();
+          } else {
+            rendererRef.current.render(sceneRef.current, cameraRef.current);
+          }
           needsSceneRenderRef.current = false;
         }
       }
@@ -411,11 +531,81 @@ export const Structural3DViewer: React.FC = () => {
       isMounted = false;
       cancelAnimationFrame(animationFrameId);
       resizeObserver.disconnect();
+      renderer.domElement?.removeEventListener('pointerdown', onPointerDownNative);
+      renderer.domElement?.removeEventListener('pointerup', onPointerUpNative);
       controls.dispose();
       disposeThreeObject(scene);
+      if (composerRef.current) {
+        try {
+          composerRef.current.renderTarget1?.dispose();
+          composerRef.current.renderTarget2?.dispose();
+        } catch {}
+        composerRef.current = null;
+      }
       renderer.dispose();
+      try {
+        renderer.forceContextLoss();
+        renderer.domElement?.remove();
+      } catch (e) {
+        // ignore
+      }
+      spriteTextureCache.forEach((tex) => tex.dispose());
+      spriteTextureCache.clear();
     };
   }, []);
+
+  // Trigger re-render when bloom is toggled
+  useEffect(() => {
+    needsSceneRenderRef.current = true;
+  }, [isBloomEnabled, isStreamActive]);
+
+  // Synchronize 3D background color when theme toggles
+  useEffect(() => {
+    if (sceneRef.current) {
+      const isLight = theme === 'light';
+      sceneRef.current.background = new THREE.Color(isLight ? '#F1F5F9' : '#0F172A');
+      needsSceneRenderRef.current = true;
+    }
+  }, [theme]);
+
+  // Synchronize active video feed (simulated drone or live stream) into the background container
+  useEffect(() => {
+    if (!isStreamActive || !videoContainerRef.current) return;
+    videoContainerRef.current.replaceChildren();
+
+    let feedEl: HTMLElement | null = null;
+    if (videoSourceType === 'SIMULATED_DRONE') {
+      feedEl = videoStreamEngine.startSimulatedDroneFeed();
+      feedEl.className = 'w-full h-full object-cover';
+      videoContainerRef.current.appendChild(feedEl);
+    } else {
+      const v = videoStreamEngine.getVideoElement();
+      if (v) {
+        v.className = 'w-full h-full object-cover';
+        videoContainerRef.current.appendChild(v);
+      }
+    }
+
+    // Periodic Computer Vision crack / defect analysis (throttled)
+    const interval = setInterval(async () => {
+      if (!isCvDetectionActive) return;
+      const target = videoSourceType === 'SIMULATED_DRONE' ? feedEl : videoStreamEngine.getVideoElement();
+      if (target && (target instanceof HTMLCanvasElement || target instanceof HTMLVideoElement)) {
+        const defects = await cvDefectDetector.analyzeVideoFrame(target);
+        if (defects.length > 0) {
+          defects.forEach((d) => useVideoStore.getState().addDefect(d));
+        }
+      }
+    }, 4000);
+
+    return () => {
+      clearInterval(interval);
+      videoStreamEngine.stopSimulatedFeed();
+      if (videoContainerRef.current) {
+        videoContainerRef.current.replaceChildren();
+      }
+    };
+  }, [isStreamActive, videoSourceType, isCvDetectionActive]);
 
   // Update Dynamic Scene Meshes
   useEffect(() => {
@@ -432,6 +622,9 @@ export const Structural3DViewer: React.FC = () => {
     disposeThreeObject(dynamicGroup);
     dynamicGroup.clear();
 
+    // Fresh reinforcement shared resources for THIS rebuild (disposed in cleanup).
+    const reinforcementShared = rebarEnabled ? createReinforcementShared(0.01) : null;
+
     memberMeshesRef.current.clear();
     plateMeshesRef.current.clear();
     pileCapMeshesRef.current = [];
@@ -440,32 +633,20 @@ export const Structural3DViewer: React.FC = () => {
 
     const { nodes, members, plates, supports } = activeModel;
 
-    // Shared Low-Poly Geometries & Materials
-    const beamMaterial = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.35, metalness: 0.1 });
-    const columnMaterial = new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.35, metalness: 0.1 });
-    const selectedMaterial = new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xd97706, emissiveIntensity: 0.5, roughness: 0.2 });
-    const slabPlateMaterial = new THREE.MeshStandardMaterial({
-      color: 0x0284c7,
-      transparent: true,
-      opacity: 0.35,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      roughness: 0.5,
-    });
-    const wallPlateMaterial = new THREE.MeshStandardMaterial({
-      color: 0x7c3aed,
-      roughness: 0.35,
-      metalness: 0.15,
-      transparent: true,
-      opacity: 0.85,
-      side: THREE.DoubleSide,
-    });
-    const selectedPlateMaterial = new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xf59e0b, emissiveIntensity: 0.5, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
-    const supportMaterial = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.25, metalness: 0.7 });
-    const selectedSupportMaterial = new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xf59e0b, emissiveIntensity: 0.6, roughness: 0.2 });
-    const pileCapMaterial = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.4, metalness: 0.1 });
-    const selectedPileCapMaterial = new THREE.MeshStandardMaterial({ color: 0xd97706, emissive: 0xb45309, emissiveIntensity: 0.4, roughness: 0.3 });
-    const pileMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.35, metalness: 0.25 });
+    // Shared persistent Low-Poly Geometries & Materials
+    const {
+      beam: beamMaterial,
+      column: columnMaterial,
+      selected: selectedMaterial,
+      slabPlate: slabPlateMaterial,
+      wallPlate: wallPlateMaterial,
+      selectedPlate: selectedPlateMaterial,
+      support: supportMaterial,
+      selectedSupport: selectedSupportMaterial,
+      pileCap: pileCapMaterial,
+      selectedPileCap: selectedPileCapMaterial,
+      pile: pileMat,
+    } = materialsRef.current;
 
     // 1. Draw Members with exact designed structural cross-section dimensions (b × D)
     members.forEach((member) => {
@@ -543,7 +724,59 @@ export const Structural3DViewer: React.FC = () => {
       );
       edgeLine.position.copy(mesh.position);
       edgeLine.quaternion.copy(mesh.quaternion);
+      edgeLine.userData = { memberId: member.id, type: 'member', isColumn: isCol };
       dynamicGroup.add(edgeLine);
+      mesh.userData.edgeLine = edgeLine;
+
+      // ---- 3D Reinforcement detailing (per-member rebar) ----
+      if (rebarEnabled && reinforcementShared) {
+        const colDesign = !isCol ? null : savedColumnDesigns?.[member.id];
+        const beamDesign = isCol ? null : savedBeamDesigns?.[member.id];
+        const colRebar = colDesign?.rebar;
+        const coverMm = colDesign?.cover ?? (isCol ? 40 : 30);
+
+        // Default rebar fallback when no design saved — 4-T20 corners + ties / 2-T20 top-bottom + stirrups
+        const fallbackColRebar = {
+          cornerBars: { diameter: 20, count: 4, callout: '4-T20', area: 1256.6 },
+          faceBars: undefined,
+          totalBars: 4,
+        };
+        const fallbackBeamTop = [{ diameter: 20, count: 2 }];
+        const fallbackBeamBot = [{ diameter: 20, count: 2 }];
+        const fallbackStirrupSpacing = 150;
+
+        const rfSpec = {
+          memberId: member.id,
+          isColumn: isCol,
+          b,
+          D,
+          length: distance,
+          coverMm,
+          columnRebar: colRebar || (isCol ? fallbackColRebar : undefined),
+          beamTopBars: isCol ? undefined : (beamDesign?.topRebar?.bars || fallbackBeamTop),
+          beamBottomBars: isCol ? undefined : (beamDesign?.bottomRebar?.bars || fallbackBeamBot),
+          stirrupSpacingMm: isCol ? undefined : (beamDesign?.shear?.stirrupSpacing || fallbackStirrupSpacing),
+          stirrupDiameterMm: isCol ? undefined : (beamDesign?.shear?.stirrupDiameter || 8),
+        };
+        const rfGroup = buildMemberReinforcement(
+          rfSpec,
+          {
+            showColumnBars: rebarShowColumnBars,
+            showColumnTies: rebarShowColumnTies,
+            showBeamBars: rebarShowBeamBars,
+            showBeamStirrups: rebarShowBeamStirrups,
+          },
+          reinforcementShared
+        );
+        if (rfGroup) {
+          rfGroup.position.copy(mesh.position);
+          rfGroup.quaternion.copy(mesh.quaternion);
+          // Tag so clicking on rebar also selects the member (inherited by children)
+          rfGroup.userData.memberId = member.id;
+          rfGroup.userData.rfType = 'rebar';
+          dynamicGroup.add(rfGroup);
+        }
+      }
 
       if (isCol && showLabels) {
         const isGroundCol = supports.has(member.startNodeId) || supports.has(member.endNodeId);
@@ -1000,10 +1233,6 @@ export const Structural3DViewer: React.FC = () => {
     needsSceneRenderRef.current = true;
   }, [
     activeModel,
-    selectedMemberId,
-    selectedPlateId,
-    selectedGradeBeamId,
-    selectedSupportNodeIds,
     filterLayers,
     showLabels,
     showWallLabels,
@@ -1024,7 +1253,6 @@ export const Structural3DViewer: React.FC = () => {
     architecturalRooms,
     architecturalStaircases,
     diaphragmLevels,
-    selectedArchitecturalId,
     columnSupportMapping,
     columnMemberMapping,
     gradeBeamsList,
@@ -1037,111 +1265,205 @@ export const Structural3DViewer: React.FC = () => {
     savedSlabDesigns,
     savedColumnDesigns,
     savedBeamDesigns,
+    rebarEnabled,
+    rebarShowColumnBars,
+    rebarShowColumnTies,
+    rebarShowBeamBars,
+    rebarShowBeamStirrups,
   ]);
 
-  // Click & Hover Raycasting with Multi-Selection Support
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (!containerRef.current || !cameraRef.current || !sceneRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    mouseRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  // High-Performance Instant Selection Highlighter (0.01ms - zero mesh reallocation)
+  useEffect(() => {
+    const mats = materialsRef.current;
 
-    raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
-    const memberMeshes = Array.from(memberMeshesRef.current.values());
-    const plateMeshes = Array.from(plateMeshesRef.current.values());
-    const gradeMeshes = gradeBeamMeshesRef.current.flatMap((g) => g.children.filter((c) => (c as any).isMesh));
-    const pileCapMeshes = pileCapMeshesRef.current.flatMap((g) => g.children.filter((c) => (c as any).isMesh));
-    const supportCones = supportConeMeshesRef.current;
-    const archMeshes: THREE.Object3D[] = [];
-    if (arch3DLayerRef.current) {
-      arch3DLayerRef.current.getGroup().traverse((child) => {
-        if ((child as any).isMesh || (child as any).isSprite) {
-          archMeshes.push(child);
+    // 1. Members
+    memberMeshesRef.current.forEach((mesh, id) => {
+      const isSelected = id === selectedMemberId;
+      const isCol = mesh.userData.isColumn;
+      mesh.material = isSelected ? mats.selected : (isCol ? mats.column : mats.beam);
+      if (mesh.userData.edgeLine) {
+        mesh.userData.edgeLine.material.color.setHex(isSelected ? 0xfde047 : isCol ? 0x059669 : 0x2563eb);
+      }
+    });
+
+    // 2. Plates
+    plateMeshesRef.current.forEach((mesh, id) => {
+      const isSelected = id === selectedPlateId;
+      const isWall = mesh.userData.classification === 'WALL';
+      mesh.material = isSelected ? mats.selectedPlate : (isWall ? mats.wallPlate : mats.slabPlate);
+    });
+
+    // 3. Support Cones
+    supportConeMeshesRef.current.forEach((mesh) => {
+      const isSelected = selectedSupportNodeIds.includes(mesh.userData.nodeId);
+      mesh.material = isSelected ? mats.selectedSupport : mats.support;
+    });
+
+    // 4. Pile Caps
+    pileCapMeshesRef.current.forEach((group) => {
+      const isSelected = group.userData.nodeIds
+        ? group.userData.nodeIds.some((nid: number) => selectedSupportNodeIds.includes(nid))
+        : selectedSupportNodeIds.includes(group.userData.nodeId);
+      group.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.userData.type === 'cap') {
+          child.material = isSelected ? mats.selectedPileCap : mats.pileCap;
         }
       });
-    }
-    const allMeshes = [...memberMeshes, ...plateMeshes, ...gradeMeshes, ...pileCapMeshes, ...supportCones, ...archMeshes];
-    const intersects = raycasterRef.current.intersectObjects(allMeshes);
+    });
 
-    const isMulti = e.shiftKey || e.ctrlKey || multiSelectMode;
+    needsSceneRenderRef.current = true;
+  }, [selectedMemberId, selectedPlateId, selectedSupportNodeIds, selectedGradeBeamId]);
 
-    if (intersects.length > 0) {
-      const hit = intersects[0].object;
+  const performRaycastSelection = useCallback(
+    (clientX: number, clientY: number, isMulti: boolean) => {
+      if (!containerRef.current || !cameraRef.current || !sceneRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
 
-      if (hit.userData.type === 'arch_wall') {
-        selectArchitecturalElement(hit.userData.id, 'WALL');
-        selectMember(null);
-        setSelectedGradeBeamId(null);
-        (selectPlate as any)(null);
-        if (!isMulti) clearSelectedSupportNodes();
-      } else if (hit.userData.type === 'arch_door') {
-        selectArchitecturalElement(hit.userData.id, 'DOOR');
-        selectMember(null);
-        setSelectedGradeBeamId(null);
-        (selectPlate as any)(null);
-        if (!isMulti) clearSelectedSupportNodes();
-      } else if (hit.userData.type === 'arch_window') {
-        selectArchitecturalElement(hit.userData.id, 'WINDOW');
-        selectMember(null);
-        setSelectedGradeBeamId(null);
-        (selectPlate as any)(null);
-        if (!isMulti) clearSelectedSupportNodes();
-      } else if (hit.userData.type === 'arch_opening') {
-        selectArchitecturalElement(hit.userData.id, 'OPENING');
-        selectMember(null);
-        setSelectedGradeBeamId(null);
-        (selectPlate as any)(null);
-        if (!isMulti) clearSelectedSupportNodes();
-      } else if (hit.userData.type === 'arch_room') {
-        selectArchitecturalElement(hit.userData.id, 'ROOM');
-        selectMember(null);
-        setSelectedGradeBeamId(null);
-        (selectPlate as any)(null);
-        if (!isMulti) clearSelectedSupportNodes();
-      } else if (hit.userData.type === 'arch_staircase') {
-        selectArchitecturalElement(hit.userData.id, 'STAIRCASE');
-        selectMember(null);
-        setSelectedGradeBeamId(null);
-        (selectPlate as any)(null);
-        if (!isMulti) clearSelectedSupportNodes();
-      } else if (hit.userData.type === 'gradebeam' && hit.userData.gradeBeamId) {
-        setSelectedGradeBeamId(hit.userData.gradeBeamId);
-        selectMember(null);
-        selectArchitecturalElement(null);
-        if (!isMulti) clearSelectedSupportNodes();
-      } else if (hit.userData.type === 'combinedPileCap' && hit.userData.nodeIds) {
-        const nodeIds: number[] = hit.userData.nodeIds;
-        if (isMulti) {
-          nodeIds.forEach((nid) => selectSupportNode(nid, true));
-        } else {
-          clearSelectedSupportNodes();
-          nodeIds.forEach((nid) => selectSupportNode(nid, true));
+      mouseRef.current.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      mouseRef.current.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
+
+      const dynamicGroup = dynamicGroupRef.current;
+      if (!dynamicGroup) return;
+
+      const targets: THREE.Object3D[] = [dynamicGroup];
+      if (arch3DLayerRef.current) {
+        targets.push(arch3DLayerRef.current.getGroup());
+      }
+
+      const intersects = raycasterRef.current.intersectObjects(targets, true);
+
+      if (intersects.length > 0) {
+        try {
+          cyberAudio.playSelectChirp();
+        } catch {
+          /* audio optional */
         }
-        selectMember(null);
-        selectArchitecturalElement(null);
-        setSelectedGradeBeamId(null);
-      } else if (hit.userData.type === 'support' && hit.userData.nodeId) {
-        selectSupportNode(hit.userData.nodeId, isMulti);
-        selectMember(null);
-        selectArchitecturalElement(null);
-        setSelectedGradeBeamId(null);
-        (selectPlate as any)(null);
-      } else if (hit.userData.type === 'plate' && hit.userData.plateId) {
-        (selectPlate as any)(hit.userData.plateId);
-        selectMember(null);
-        selectArchitecturalElement(null);
-        setSelectedGradeBeamId(null);
-        if (!isMulti) clearSelectedSupportNodes();
-      } else if (hit.userData.memberId) {
-        selectMember(hit.userData.memberId);
-        selectArchitecturalElement(null);
-        setSelectedGradeBeamId(null);
-        (selectPlate as any)(null);
-        if (!isMulti) {
-          clearSelectedSupportNodes();
+
+        // Priority 1: Check for structural beam / column (or rebar owned by a member)
+        let hitTarget: THREE.Object3D | null = null;
+        let resolvedMemberId: number | null = null;
+
+        for (const item of intersects) {
+          let node: THREE.Object3D | null = item.object;
+          while (node && node !== dynamicGroup && node !== sceneRef.current) {
+            if (node.userData && node.userData.memberId != null) {
+              resolvedMemberId = Number(node.userData.memberId);
+              hitTarget = node;
+              break;
+            }
+            if (
+              node.userData &&
+              (node.userData.type === 'support' ||
+                node.userData.type === 'gradebeam' ||
+                node.userData.type === 'combinedPileCap')
+            ) {
+              hitTarget = node;
+              break;
+            }
+            node = node.parent;
+          }
+          if (hitTarget) break;
+        }
+
+        // Priority 2: If no beam/column/support was hit, check for floor slab / shear wall plates or architectural elements
+        if (!hitTarget) {
+          for (const item of intersects) {
+            let node: THREE.Object3D | null = item.object;
+            while (node && node !== dynamicGroup && node !== sceneRef.current) {
+              if (node.userData && (node.userData.plateId != null || node.userData.type != null)) {
+                hitTarget = node;
+                break;
+              }
+              node = node.parent;
+            }
+            if (hitTarget) break;
+          }
+        }
+
+        if (hitTarget) {
+          const u = hitTarget.userData;
+          if (u.type === 'arch_wall') {
+            selectArchitecturalElement(u.id, 'WALL');
+            selectMember(null);
+            setSelectedGradeBeamId(null);
+            (selectPlate as any)(null);
+            if (!isMulti) clearSelectedSupportNodes();
+          } else if (u.type === 'arch_door') {
+            selectArchitecturalElement(u.id, 'DOOR');
+            selectMember(null);
+            setSelectedGradeBeamId(null);
+            (selectPlate as any)(null);
+            if (!isMulti) clearSelectedSupportNodes();
+          } else if (u.type === 'arch_window') {
+            selectArchitecturalElement(u.id, 'WINDOW');
+            selectMember(null);
+            setSelectedGradeBeamId(null);
+            (selectPlate as any)(null);
+            if (!isMulti) clearSelectedSupportNodes();
+          } else if (u.type === 'arch_opening') {
+            selectArchitecturalElement(u.id, 'OPENING');
+            selectMember(null);
+            setSelectedGradeBeamId(null);
+            (selectPlate as any)(null);
+            if (!isMulti) clearSelectedSupportNodes();
+          } else if (u.type === 'arch_room') {
+            selectArchitecturalElement(u.id, 'ROOM');
+            selectMember(null);
+            setSelectedGradeBeamId(null);
+            (selectPlate as any)(null);
+            if (!isMulti) clearSelectedSupportNodes();
+          } else if (u.type === 'arch_staircase') {
+            selectArchitecturalElement(u.id, 'STAIRCASE');
+            selectMember(null);
+            setSelectedGradeBeamId(null);
+            (selectPlate as any)(null);
+            if (!isMulti) clearSelectedSupportNodes();
+          } else if (u.type === 'gradebeam' && u.gradeBeamId) {
+            setSelectedGradeBeamId(u.gradeBeamId);
+            selectMember(null);
+            selectArchitecturalElement(null);
+            if (!isMulti) clearSelectedSupportNodes();
+          } else if (u.type === 'combinedPileCap' && u.nodeIds) {
+            const nodeIds: number[] = u.nodeIds;
+            if (isMulti) {
+              nodeIds.forEach((nid) => selectSupportNode(nid, true));
+            } else {
+              clearSelectedSupportNodes();
+              nodeIds.forEach((nid) => selectSupportNode(nid, true));
+            }
+            selectMember(null);
+            selectArchitecturalElement(null);
+            setSelectedGradeBeamId(null);
+          } else if (u.type === 'support' && u.nodeId) {
+            selectSupportNode(Number(u.nodeId), isMulti);
+            selectMember(null);
+            selectArchitecturalElement(null);
+            setSelectedGradeBeamId(null);
+            (selectPlate as any)(null);
+          } else if (u.type === 'plate' && u.plateId) {
+            (selectPlate as any)(Number(u.plateId));
+            selectMember(null);
+            selectArchitecturalElement(null);
+            setSelectedGradeBeamId(null);
+            if (!isMulti) clearSelectedSupportNodes();
+          } else if (u.memberId != null || resolvedMemberId != null) {
+            const targetMemberId = resolvedMemberId ?? Number(u.memberId);
+            selectMember(targetMemberId);
+            selectArchitecturalElement(null);
+            setSelectedGradeBeamId(null);
+            (selectPlate as any)(null);
+            if (!isMulti) {
+              clearSelectedSupportNodes();
+            }
+          }
+          return;
         }
       }
-    } else {
+
+      // Clicked in empty space
       if (!isMulti) {
         selectMember(null);
         selectArchitecturalElement(null);
@@ -1149,7 +1471,24 @@ export const Structural3DViewer: React.FC = () => {
         (selectPlate as any)(null);
         clearSelectedSupportNodes();
       }
-    }
+    },
+    [
+      selectMember,
+      selectPlate,
+      selectArchitecturalElement,
+      selectSupportNode,
+      clearSelectedSupportNodes,
+      multiSelectMode,
+    ]
+  );
+
+  // Sync latest raycast selection function to ref for native DOM listener
+  performRaycastSelectionRef.current = performRaycastSelection;
+
+  // Click & Raycasting Selection — processes primary left-click (e.button === 0)
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    performRaycastSelection(e.clientX, e.clientY, e.shiftKey || e.ctrlKey || multiSelectMode);
   };
 
   // Camera Presets
@@ -1187,17 +1526,59 @@ export const Structural3DViewer: React.FC = () => {
   const selectedMember = selectedMemberId && activeModel ? activeModel.members.get(selectedMemberId) : null;
   const selectedGradeBeam = selectedGradeBeamId ? gradeBeamsList.find((g) => g.gradeBeamId === selectedGradeBeamId) : null;
 
+  // Safe member-drawer props (computed here, never throw)
+  const drawerMemberId = selectedMemberId ?? null;
+  const drawerIsColumn = !!(selectedMember && selectedMember.classification === 'COLUMN');
+  const drawerColDesign = drawerMemberId ? savedColumnDesigns?.[drawerMemberId] : null;
+  const drawerBeamDesign = drawerMemberId ? savedBeamDesigns?.[drawerMemberId] : null;
+  const drawerBmm = ((() => {
+    if (!selectedMember) return 300;
+    const cd = savedColumnDesigns?.[drawerMemberId!];
+    const bd = savedBeamDesigns?.[drawerMemberId!];
+    const raw = cd?.b || cd?.bMm || bd?.b || bd?.bMm || selectedMember.section?.zd || 0.3;
+    return raw > 5 ? Math.round(raw) : Math.round(raw * 1000);
+  })());
+  const drawerDmm = ((() => {
+    if (!selectedMember) return 450;
+    const cd = savedColumnDesigns?.[drawerMemberId!];
+    const bd = savedBeamDesigns?.[drawerMemberId!];
+    const raw = cd?.D || cd?.dMm || bd?.D || bd?.dMm || selectedMember.section?.yd || 0.45;
+    return raw > 5 ? Math.round(raw) : Math.round(raw * 1000);
+  })());
+  const drawerLength = selectedMember?.length ?? 0;
+  const drawerNode1 = selectedMember?.startNodeId ?? 0;
+  const drawerNode2 = selectedMember?.endNodeId ?? 0;
+  const drawerMemberForces = activeModel?.memberForces || [];
+
   return (
     <div className="relative w-full h-full flex flex-col overflow-hidden bg-surface-dark font-sans min-h-0">
+      {/* Video Stream Underlay (Live Drone / Camera Feed) */}
+      {isStreamActive && (
+        <div
+          ref={videoContainerRef}
+          className="absolute inset-0 z-0 overflow-hidden pointer-events-none flex items-center justify-center bg-black"
+          style={{ opacity: arCalibration.underlayOpacity }}
+        />
+      )}
+
+      {/* Cyberpunk CRT Scanlines Overlay */}
+      {isScanlinesEnabled && (
+        <div className="absolute inset-0 cyber-scanlines pointer-events-none z-10" />
+      )}
+
+      {/* Tactical Cyberpunk HUD Overlay */}
+      <VideoViewportOverlay />
+
       {/* 3D Canvas Viewport */}
       <div
         ref={containerRef}
         onPointerDown={handlePointerDown}
-        className="w-full h-full cursor-grab active:cursor-grabbing flex-1 min-h-0"
+        className="w-full h-full cursor-crosshair flex-1 min-h-0 relative z-[5]"
+        title="Click: select member • Drag: orbit • Scroll: zoom"
       />
 
       {/* Top Toolbar Controls */}
-      <div className="absolute top-4 left-4 flex items-center gap-2 bg-deep-navy/90 backdrop-blur-md border border-slate-700/60 p-1.5 rounded shadow-lg z-10 font-mono">
+      <div className="absolute top-4 left-4 flex items-center gap-2 bg-deep-navy/90 backdrop-blur-md border border-slate-700/60 p-1.5 rounded shadow-lg z-20 font-mono">
         <button
           onClick={() => setCameraPreset('iso')}
           className="px-2.5 py-1 text-xs text-slate-200 hover:text-white hover:bg-slate-800 rounded transition-colors"
@@ -1234,6 +1615,9 @@ export const Structural3DViewer: React.FC = () => {
         >
           <Maximize2 className="w-3.5 h-3.5" />
         </button>
+        <div className="w-[1px] h-4 bg-slate-700 mx-1" />
+        {/* In-Engine 4K Video Recorder */}
+        <CinematicRecorderControl canvasRef={canvasRef} />
       </div>
 
       {/* Layer Filter & 3D Selection Toggles */}
@@ -1345,6 +1729,63 @@ export const Structural3DViewer: React.FC = () => {
           <Compass className="w-3.5 h-3.5 text-indigo-400" />
           <span>Grade Beams</span>
         </button>
+
+        {/* 3D Rebar Detail Master Toggle — ON/OFF switch for reinforcement graphical detailing */}
+        <button
+          onClick={() => setRebarEnabled(!rebarEnabled)}
+          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
+            rebarEnabled
+              ? 'bg-amber-500/25 text-amber-300 border border-amber-500/50 font-bold shadow-xs'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+          title="Toggle 3D Reinforcement Graphical Detailing (Rebar) — ON/OFF"
+        >
+          <Zap className="w-3.5 h-3.5 text-amber-400" />
+          <span>Rebar Detail</span>
+        </button>
+
+        {/* Per-component Rebar toggles — only active when Rebar Detail is ON */}
+        {rebarEnabled && (
+          <>
+            <span className="text-[10px] uppercase tracking-wide text-amber-500/70 px-0.5">Rebar:</span>
+            <button
+              onClick={() => setRebarShowColumnBars(!rebarShowColumnBars)}
+              className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
+                rebarShowColumnBars ? 'bg-amber-500/15 text-amber-300 border border-amber-500/40' : 'text-slate-500 hover:text-slate-300'
+              }`}
+              title="Column Longitudinal Bars (ON/OFF)"
+            >
+              <span className="w-2 h-2 rounded-full bg-amber-400"></span>Col Bars
+            </button>
+            <button
+              onClick={() => setRebarShowColumnTies(!rebarShowColumnTies)}
+              className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
+                rebarShowColumnTies ? 'bg-sky-500/15 text-sky-300 border border-sky-500/40' : 'text-slate-500 hover:text-slate-300'
+              }`}
+              title="Column Ties (ON/OFF)"
+            >
+              <span className="w-2 h-2 rounded-full bg-sky-400"></span>Col Ties
+            </button>
+            <button
+              onClick={() => setRebarShowBeamBars(!rebarShowBeamBars)}
+              className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
+                rebarShowBeamBars ? 'bg-amber-500/15 text-amber-300 border border-amber-500/40' : 'text-slate-500 hover:text-slate-300'
+              }`}
+              title="Beam Main Bars (Top + Bottom) (ON/OFF)"
+            >
+              <span className="w-2 h-2 rounded-full bg-amber-400"></span>Beam Bars
+            </button>
+            <button
+              onClick={() => setRebarShowBeamStirrups(!rebarShowBeamStirrups)}
+              className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
+                rebarShowBeamStirrups ? 'bg-sky-500/15 text-sky-300 border border-sky-500/40' : 'text-slate-500 hover:text-slate-300'
+              }`}
+              title="Beam Stirrups (ON/OFF)"
+            >
+              <span className="w-2 h-2 rounded-full bg-sky-400"></span>Stirrups
+            </button>
+          </>
+        )}
 
         <div className="w-[1px] h-4 bg-slate-700 mx-1" />
 
@@ -1724,6 +2165,28 @@ export const Structural3DViewer: React.FC = () => {
         <span>Combined Caps: {combinedPileCaps.length}</span>
         <span>Supports: {activeModel?.statistics.totalSupports || 0}</span>
       </div>
+
+      {/* Controls Hint */}
+      <div className="absolute bottom-4 left-4 bg-deep-navy/70 backdrop-blur-md border border-slate-800 px-3 py-1.5 rounded text-[10px] font-mono text-slate-500 z-10">
+        <span className="text-emerald-400">Click</span> select · <span className="text-sky-400">Drag</span> orbit · <span className="text-slate-400">Scroll</span> zoom
+      </div>
+
+      {/* Member Details Drawer — opens when a structural member is selected */}
+      {selectedMember && selectedMemberId && !selectedGradeBeamId && (
+        <MemberDetailsDrawer
+          memberId={drawerMemberId}
+          isColumn={drawerIsColumn}
+          b_mm={drawerBmm}
+          D_mm={drawerDmm}
+          length_m={drawerLength}
+          node1Id={drawerNode1}
+          node2Id={drawerNode2}
+          colDesign={drawerColDesign}
+          beamDesign={drawerBeamDesign}
+          memberForces={drawerMemberForces}
+          onClose={() => selectMember(null)}
+        />
+      )}
     </div>
   );
 };

@@ -33,3 +33,22 @@ export function exportToCsv(rows: Record<string, any>[], filename: string): void
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Export structural model as downloadable Bentley STAAD.Pro .STD command file
+ */
+export function exportToStd(model: any, filename: string, jobInfo?: any): void {
+  import('@/features/anl/stdCommandEngine').then(({ StdCommandEngine }) => {
+    const stdContent = StdCommandEngine.generateStd(model, jobInfo);
+    const blob = new Blob([stdContent], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename.endsWith('.STD') ? filename : `${filename}.STD`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  });
+}
+

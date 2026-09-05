@@ -4,6 +4,7 @@ import { ExcelWorkbookExporter } from './excelExport';
 import { PDFReportGenerator } from './pdfReportGenerator';
 import { CalculationPdfService } from '@/features/calculations/calculationPdfService';
 import { ConcreteVolumeEngine, ConcreteComponentVolume } from '@/features/calculations/concreteVolumeEngine';
+import { BoqEngine } from '@/features/calculations/boqEngine';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
 import { ArchitecturalTakeoffEngine } from '@/features/architectural/engines/architecturalTakeoffEngine';
 import { FloorPlanEngine } from '@/features/drawings/floorPlanEngine';
@@ -42,7 +43,7 @@ export const ReportsView: React.FC = () => {
     architecturalOpenings,
     architecturalRooms,
   } = useProjectStore();
-  const [concreteViewMode, setConcreteViewMode] = useState<'BY_COMPONENT' | 'BY_FLOOR' | 'ITEMIZED'>('BY_COMPONENT');
+  const [concreteViewMode, setConcreteViewMode] = useState<'BY_COMPONENT' | 'BY_FLOOR' | 'ITEMIZED' | 'MEASUREMENT_SHEET'>('BY_COMPONENT');
   const [expandedComponentId, setExpandedComponentId] = useState<string | null>(null);
 
   if (!activeProject || !activeModel) {
@@ -98,6 +99,29 @@ export const ReportsView: React.FC = () => {
       dataset
     );
   }, [activeModel, activeProject, dataset]);
+
+  const boqEstimate = useMemo(() => {
+    return BoqEngine.generateBuildingBoq(activeModel, undefined, activeProject.metadata.name);
+  }, [activeModel, activeProject]);
+
+  const handleExportBoqMeasurementCsv = () => {
+    const csvRows = boqEstimate.measurementSheet.map((m) => ({
+      ItemNo: m.itemNo,
+      Description: m.description,
+      Category: m.sourceCategory,
+      Nos: m.nos,
+      Length_m: m.lengthM,
+      Breadth_m: m.breadthM,
+      HeightOrDepth_m: m.heightOrDepthM,
+      Quantity: m.quantity,
+      Unit: m.unit,
+      UnitRate_INR: m.unitRateInr,
+      TotalAmount_INR: m.totalAmountInr,
+      CodeRef: m.codeReference || '',
+      FormulaNote: m.formulaNote || '',
+    }));
+    exportToCsv(csvRows, `${activeProject.metadata.code || 'PRJ'}_BOQ_Measurement_Sheet_LBH.csv`);
+  };
 
   const handleDownloadExcel = () => {
     ExcelWorkbookExporter.downloadWorkbook(dataset as any);
@@ -330,16 +354,25 @@ export const ReportsView: React.FC = () => {
                 >
                   Itemized Members
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setConcreteViewMode('MEASUREMENT_SHEET')}
+                  className={`px-2.5 py-1 rounded transition-colors ${
+                    concreteViewMode === 'MEASUREMENT_SHEET' ? 'bg-secondary-brand text-white font-bold' : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  L × B × H Measurement Sheet
+                </button>
               </div>
 
               <button
                 type="button"
-                onClick={handleExportConcreteCsv}
+                onClick={concreteViewMode === 'MEASUREMENT_SHEET' ? handleExportBoqMeasurementCsv : handleExportConcreteCsv}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded text-xs font-mono font-semibold transition-colors"
-                title="Export detailed Concrete Volume CSV"
+                title={concreteViewMode === 'MEASUREMENT_SHEET' ? 'Export BOQ Measurement Sheet CSV' : 'Export detailed Concrete Volume CSV'}
               >
                 <Download className="w-3.5 h-3.5" />
-                CSV
+                {concreteViewMode === 'MEASUREMENT_SHEET' ? 'BOQ CSV' : 'CSV'}
               </button>
             </div>
           </div>
@@ -584,6 +617,68 @@ export const ReportsView: React.FC = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* VIEW 4: CIVIL ENGINEERING L × B × H MEASUREMENT SHEET (STAAD / BOQ) */}
+          {concreteViewMode === 'MEASUREMENT_SHEET' && (
+            <div className="overflow-x-auto font-mono text-xs">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-800 border-b border-ui-border font-bold">
+                    <th className="p-2.5">ITEM #</th>
+                    <th className="p-2.5 min-w-[280px]">DESCRIPTION OF ITEM &amp; CODE CLAUSE</th>
+                    <th className="p-2.5 text-center">CATEGORY</th>
+                    <th className="p-2.5 text-center">NOS</th>
+                    <th className="p-2.5 text-right">L (m)</th>
+                    <th className="p-2.5 text-right">B (m)</th>
+                    <th className="p-2.5 text-right">H/D (m)</th>
+                    <th className="p-2.5 text-right text-sky-700">QUANTITY</th>
+                    <th className="p-2.5 text-center">UNIT</th>
+                    <th className="p-2.5 text-right">RATE (₹)</th>
+                    <th className="p-2.5 text-right text-emerald-700 font-bold">AMOUNT (₹)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {boqEstimate.measurementSheet.map((row, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-2.5 font-bold text-slate-700">{row.itemNo}</td>
+                      <td className="p-2.5">
+                        <div className="font-semibold text-slate-900">{row.description}</div>
+                        {row.codeReference && (
+                          <span className="text-[10px] text-slate-500">{row.codeReference}</span>
+                        )}
+                        {row.formulaNote && (
+                          <span className="text-[10px] text-indigo-600 block">{row.formulaNote}</span>
+                        )}
+                      </td>
+                      <td className="p-2.5 text-center">
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600">
+                          {row.sourceCategory}
+                        </span>
+                      </td>
+                      <td className="p-2.5 text-center font-bold text-slate-800">{row.nos}</td>
+                      <td className="p-2.5 text-right">{row.lengthM.toFixed(2)}</td>
+                      <td className="p-2.5 text-right">{row.breadthM.toFixed(2)}</td>
+                      <td className="p-2.5 text-right">{row.heightOrDepthM.toFixed(2)}</td>
+                      <td className="p-2.5 text-right font-bold text-sky-800">{row.quantity.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
+                      <td className="p-2.5 text-center font-semibold text-slate-600">{row.unit}</td>
+                      <td className="p-2.5 text-right text-slate-600">₹{row.unitRateInr.toLocaleString('en-IN')}</td>
+                      <td className="p-2.5 text-right font-bold text-emerald-800">₹{row.totalAmountInr.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-slate-900 text-white font-bold text-xs">
+                    <td colSpan={10} className="p-3 text-right uppercase tracking-wider">
+                      GRAND TOTAL ESTIMATED COST (CPWD / PWD DSR SCHEDULE):
+                    </td>
+                    <td className="p-3 text-right text-emerald-400 text-sm">
+                      ₹{boqEstimate.grandTotalAmountInr.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
             </div>
           )}
         </div>

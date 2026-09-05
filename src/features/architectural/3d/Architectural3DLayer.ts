@@ -812,5 +812,7 @@ export class Architectural3DLayer {
   public dispose() {
     disposeHierarchy(this.group);
     this.group.clear();
+    badgeTextureCache.forEach((tex) => tex.dispose());
+    badgeTextureCache.clear();
   }
 }

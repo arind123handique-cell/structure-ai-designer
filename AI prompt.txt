@@ -1,0 +1,2397 @@
+# MASTER PROMPT — ETABS-STYLE WINDOW ARCHITECTURE FOR EXISTING STRUCTURAL ENGINEERING WEB APP
+
+## ROLE
+
+You are a senior structural-engineering software architect, UI/UX engineer, BIM engineer, and full-stack developer.
+
+You are modifying an EXISTING structural engineering web application.
+
+DO NOT rebuild the application from scratch.
+
+DO NOT remove existing working functionality.
+
+DO NOT replace working calculation engines merely to change the UI.
+
+First inspect the entire existing codebase, architecture, routes, components, calculation engines, state management, APIs, file parsers, database/storage logic, IFC processing, STAAD ANL processing, design modules, takeoff modules, BOQ modules, and existing UI.
+
+Then implement the changes described below while preserving all existing functionality.
+
+---
+
+# PRIMARY OBJECTIVE
+
+Transform the existing application into a professional ETABS-inspired structural engineering interface.
+
+The application must follow this interaction model:
+
+```
+SELECT OBJECT
+      ↓
+OPEN DEDICATED WINDOW
+      ↓
+EDIT / ASSIGN / REVIEW
+      ↓
+APPLY
+      ↓
+UPDATE MODEL
+      ↓
+REFRESH RESULTS
+```
+
+IMPORTANT:
+
+EVERY major property, assignment, definition, calculation, result, and design operation must have its OWN dedicated window/modal/dialog.
+
+Do NOT create one giant universal Properties panel.
+
+Do NOT overload the right sidebar with every possible property.
+
+The main structural viewport must remain clean.
+
+---
+
+# CORE UX PRINCIPLE
+
+Use the following hierarchy:
+
+MAIN APPLICATION
+↓
+MODEL VIEW
+↓
+OBJECT SELECTION
+↓
+OBJECT ACTION MENU
+↓
+DEDICATED WINDOW
+↓
+PROPERTY / ASSIGNMENT / CALCULATION
+↓
+APPLY / OK
+↓
+MODEL UPDATE
+
+Every engineering operation must be traceable.
+
+Every calculated value should have a way to inspect:
+
+* input
+* governing load case
+* governing load combination
+* formula
+* code clause
+* intermediate calculation
+* final result
+* pass/fail status
+
+Never display a design result as an unexplained number.
+
+---
+
+# 1. DO NOT BREAK EXISTING APPLICATION
+
+Before making changes:
+
+1. Inspect package configuration.
+2. Inspect project structure.
+3. Identify frontend framework.
+4. Identify backend framework.
+5. Identify state-management architecture.
+6. Identify API architecture.
+7. Identify database/storage.
+8. Identify 3D viewer.
+9. Identify structural model schema.
+10. Identify STAAD ANL parser.
+11. Identify STAAD STD parser if present.
+12. Identify IFC parser.
+13. Identify quantity takeoff engine.
+14. Identify BOQ/estimate engine.
+15. Identify beam design.
+16. Identify column design.
+17. Identify slab design.
+18. Identify wall design.
+19. Identify foundation design.
+20. Identify report generation.
+21. Identify existing routes.
+22. Identify existing reusable UI components.
+23. Identify existing calculation utilities.
+24. Identify existing tests.
+
+Create an internal architecture map before modifying code.
+
+Do not duplicate existing functionality.
+
+Reuse existing services and calculation engines wherever possible.
+
+---
+
+# 2. APPLICATION STRUCTURE
+
+Create the following major application navigation:
+
+PROJECT
+MODEL
+DEFINE
+ASSIGN
+LOADS
+ANALYZE
+DESIGN
+RESULTS
+FOUNDATION
+BIM / IFC
+TAKEOFF
+BOQ / ESTIMATE
+DRAWINGS
+REPORTS
+AUDIT
+
+Recommended navigation:
+
+```
+🏠 Project
+🧱 Model
+📐 Define
+🔗 Assign
+↓ Loads
+⚡ Analyze
+🏗 Design
+📊 Results
+🏢 Foundation
+🧩 BIM / IFC
+📦 Quantity Takeoff
+₹ BOQ / Estimate
+📋 Drawings
+📄 Reports
+🔍 Audit
+```
+
+---
+
+# 3. MAIN APPLICATION LAYOUT
+
+Create a professional structural engineering workspace.
+
+Layout:
+
+┌──────────────────────────────────────────────────────────────────────┐
+│ FILE | EDIT | VIEW | DEFINE | DRAW | ASSIGN | LOAD | ANALYZE | DESIGN│
+├──────────────┬───────────────────────────────────┬───────────────────┤
+│              │                                   │                   │
+│ MODEL TREE   │                                   │ OBJECT ACTIONS /  │
+│              │          3D STRUCTURAL VIEW       │ INSPECTOR         │
+│ Project      │                                   │                   │
+│ Stories      │                                   │ Selected Object   │
+│ Grids        │                                   │                   │
+│ Nodes        │                                   │ Quick Actions     │
+│ Beams        │                                   │                   │
+│ Columns      │                                   │                   │
+│ Slabs        │                                   │                   │
+│ Walls        │                                   │                   │
+│ Loads        │                                   │                   │
+│              │                                   │                   │
+├──────────────┴───────────────────────────────────┴───────────────────┤
+│ STATUS | UNITS | STORY | SELECTION | ANALYSIS | WARNINGS | VERSION  │
+└──────────────────────────────────────────────────────────────────────┘
+
+The right-side inspector is NOT the place to expose every editable property.
+
+It should primarily provide:
+
+* object identification
+* summary
+* quick actions
+* buttons that open dedicated windows
+
+---
+
+# 4. GLOBAL WINDOW SYSTEM
+
+Create a reusable Window/Dialog framework.
+
+Every dedicated engineering operation should use the same window architecture.
+
+Window structure:
+
+┌──────────────────────────────────────────────┐
+│ WINDOW TITLE                           ×     │
+├──────────────────────────────────────────────┤
+│ Context / Selected Objects                   │
+├──────────────────────────────────────────────┤
+│                                              │
+│ Main content                                 │
+│                                              │
+├──────────────────────────────────────────────┤
+│ Validation / warning area                    │
+├──────────────────────────────────────────────┤
+│ [Cancel] [Apply] [OK]                        │
+└──────────────────────────────────────────────┘
+
+Requirements:
+
+* draggable where appropriate
+* resizable where appropriate
+* keyboard accessible
+* ESC closes when safe
+* unsaved-change warning
+* validation before Apply
+* clear error messages
+* Apply does not necessarily close
+* OK applies and closes
+* Cancel discards changes
+* Reset available where appropriate
+* units always visible
+* engineering values must show units
+* invalid values must be highlighted
+* warnings must explain the reason
+* never silently change engineering values
+
+Support multiple windows where appropriate.
+
+Example:
+
+Beam Properties
++
+Assign Load
++
+Calculation Detail
+
+should be able to coexist without destroying state.
+
+---
+
+# 5. WINDOW REGISTRY
+
+Create a centralized window registry rather than hardcoding every modal.
+
+Example logical structure:
+
+WINDOW_REGISTRY
+
+MODEL:
+project
+storyData
+gridSystem
+coordinateSystem
+materialProperties
+frameSection
+slabSection
+wallSection
+diaphragm
+foundationProperty
+
+ASSIGN:
+frameSectionAssignment
+materialAssignment
+supportAssignment
+releaseAssignment
+localAxisAssignment
+diaphragmAssignment
+endOffsetAssignment
+massAssignment
+loadAssignment
+
+LOAD:
+loadPattern
+loadCase
+loadCombination
+framePointLoad
+frameDistributedLoad
+areaLoad
+wallLoad
+windLoad
+seismicLoad
+massSource
+
+ANALYSIS:
+analysisSettings
+modalCase
+responseSpectrum
+pDelta
+solver
+runAnalysis
+analysisLog
+
+RESULTS:
+memberForces
+jointDisplacement
+reactions
+storyDrift
+storyShear
+modalResults
+deformedShape
+
+DESIGN:
+beamDesign
+columnDesign
+slabDesign
+wallDesign
+footingDesign
+pileDesign
+pileCapDesign
+
+REPORT:
+designSummary
+calculationReport
+quantityReport
+boqReport
+dprReport
+
+---
+
+# 6. NEW PROJECT WINDOW
+
+Create:
+
+NEW PROJECT
+
+Fields:
+
+Project Name
+Project Number
+Client
+Project Location
+Engineer
+Designer
+Checker
+Description
+
+Design Code:
+
+Concrete:
+IS 456
+
+Seismic:
+IS 1893
+
+Ductile Detailing:
+IS 13920
+
+Loads:
+IS 875
+
+Steel:
+IS 800
+
+Foundation:
+IS 2911
+IS 1904
+
+Unit System:
+
+kN-m
+kN-mm
+N-mm
+tonne-m
+kgf-m
+
+---
+
+# 7. STORY DATA WINDOW
+
+Dedicated window:
+
+DEFINE → STORY DATA
+
+Columns:
+
+Story
+Height
+Elevation
+Master Story
+Similar To
+Diaphragm
+Story Type
+
+Features:
+
+* Add story
+* Delete story
+* Duplicate story
+* Equal story heights
+* Edit elevation
+* Set master story
+* Set similar stories
+
+Preview building elevation.
+
+Validate:
+
+* duplicate elevations
+* negative/invalid heights
+* inconsistent story sequence
+
+---
+
+# 8. GRID SYSTEM WINDOW
+
+Dedicated window:
+
+DEFINE → GRID SYSTEM
+
+Separate tabs:
+
+X GRID
+Y GRID
+RADIAL GRID
+CUSTOM GRID
+
+Features:
+
+* Add
+* Delete
+* Rename
+* Equal spacing
+* Import DXF
+* Offset grid
+* Rotate grid
+* visibility controls
+
+Graphical preview.
+
+---
+
+# 9. MATERIAL PROPERTY WINDOW
+
+Dedicated window.
+
+Categories:
+
+CONCRETE
+REBAR
+STRUCTURAL STEEL
+MASONRY
+CUSTOM MATERIAL
+
+Concrete fields:
+
+Name
+Grade
+Density
+Elastic Modulus
+Poisson Ratio
+Thermal Coefficient
+Characteristic Strength
+
+Auto-calculate code-based values where appropriate.
+
+Allow user override.
+
+Always indicate:
+
+AUTO
+or
+USER DEFINED
+
+Never silently overwrite user-defined values.
+
+---
+
+# 10. FRAME SECTION PROPERTY WINDOW
+
+Dedicated window.
+
+Types:
+
+Rectangular
+Circular
+T
+L
+I
+Channel
+RHS
+SHS
+Custom
+
+For RC:
+
+Width
+Depth
+Material
+Cover
+Effective depth
+Area
+Ix
+Iy
+J
+Shear Areas
+
+Buttons:
+
+CREATE
+DUPLICATE
+EDIT
+DELETE
+CALCULATE PROPERTIES
+
+Show graphical section preview.
+
+---
+
+# 11. SLAB PROPERTY WINDOW
+
+Dedicated window.
+
+Fields:
+
+Name
+Thickness
+Material
+Cover
+Type
+
+Types:
+
+Membrane
+Shell Thin
+Shell Thick
+
+Design:
+
+One-way
+Two-way
+Flat slab
+
+Display section preview.
+
+---
+
+# 12. WALL PROPERTY WINDOW
+
+Dedicated window.
+
+Fields:
+
+Wall Name
+Thickness
+Material
+Cover
+Pier Design
+Spandrel Design
+Boundary Element Settings
+
+Show wall elevation preview.
+
+---
+
+# 13. FOUNDATION PROPERTY WINDOW
+
+Dedicated window.
+
+Types:
+
+Isolated Footing
+Combined Footing
+Strip Footing
+Raft
+Pile
+Pile Cap
+Pedestal
+
+Do not combine all foundation inputs into one huge form.
+
+Each foundation type should have its own dedicated property window.
+
+---
+
+# 14. OBJECT SELECTION SYSTEM
+
+Clicking an object must highlight it.
+
+Selection must support:
+
+* single selection
+* multi-selection
+* box selection
+* story selection
+* type selection
+* similar-object selection
+* select by property
+* select by ID
+* select by design status
+
+Display:
+
+Selected: 1 Beam
+
+or
+
+Selected: 24 Columns
+
+---
+
+# 15. OBJECT CONTEXT MENU
+
+Right-click object.
+
+For BEAM:
+
+```
+Edit Geometry
+Assign Section
+Assign Material
+Assign Loads
+Assign Releases
+Assign Local Axis
+Assign Diaphragm
+Show Forces
+Show Displacement
+Design Beam
+Show Reinforcement
+Show Calculation
+Duplicate
+Delete
+```
+
+For COLUMN:
+
+```
+Edit Geometry
+Assign Section
+Assign Material
+Assign Supports
+Assign Releases
+Assign Loads
+Assign Local Axis
+Design Column
+Show PMM
+Show Reinforcement
+Show Calculation
+```
+
+For SLAB:
+
+```
+Edit Geometry
+Assign Section
+Assign Loads
+Assign Diaphragm
+Design Slab
+Show Mx
+Show My
+Show Reinforcement
+```
+
+For WALL:
+
+```
+Edit Geometry
+Assign Section
+Assign Pier
+Assign Spandrel
+Assign Loads
+Design Wall
+Show Forces
+Show Reinforcement
+```
+
+---
+
+# 16. ASSIGN SECTION WINDOW
+
+Dedicated window.
+
+Display:
+
+Selected Objects
+
+Example:
+
+Beam:
+B125, B126, B127
+
+Section:
+
+[B300X500]
+
+Buttons:
+
+Assign
+Create New
+Edit
+Clear Assignment
+
+Show graphical section preview.
+
+Apply to all selected objects.
+
+---
+
+# 17. ASSIGN MATERIAL WINDOW
+
+Dedicated window.
+
+Selected Objects
+
+Material:
+
+[M30]
+
+Option:
+
+Apply to selected
+Apply to similar
+Apply to entire story
+
+Show before/after.
+
+---
+
+# 18. ASSIGN SUPPORT WINDOW
+
+Dedicated window.
+
+Support types:
+
+Fixed
+Pinned
+Roller
+Custom
+
+DOF controls:
+
+UX
+UY
+UZ
+RX
+RY
+RZ
+
+Each DOF must be visually clear.
+
+Allow spring stiffness where applicable.
+
+---
+
+# 19. ASSIGN RELEASE WINDOW
+
+Dedicated window.
+
+Start:
+
+FX
+FY
+FZ
+MX
+MY
+MZ
+
+End:
+
+FX
+FY
+FZ
+MX
+MY
+MZ
+
+Include warning for potentially unstable releases.
+
+---
+
+# 20. ASSIGN LOCAL AXIS WINDOW
+
+Dedicated window.
+
+Options:
+
+0°
+90°
+180°
+270°
+Custom
+
+Show local axis preview.
+
+---
+
+# 21. ASSIGN DIAPHRAGM WINDOW
+
+Dedicated window.
+
+Options:
+
+Rigid
+Semi-Rigid
+None
+
+Diaphragm name:
+
+D1
+D2
+etc.
+
+Show selected floor objects.
+
+---
+
+# 22. LOAD PATTERN WINDOW
+
+Dedicated window.
+
+Fields:
+
+Name
+Load Type
+Self Weight Multiplier
+
+Types:
+
+Dead
+Live
+Wind
+Seismic
+Roof Live
+Temperature
+Other
+
+---
+
+# 23. LOAD CASE WINDOW
+
+Dedicated window.
+
+Tabs:
+
+STATIC
+MODAL
+RESPONSE SPECTRUM
+P-DELTA
+NONLINEAR
+
+Every load case must have independently editable parameters.
+
+---
+
+# 24. LOAD COMBINATION WINDOW
+
+Dedicated window.
+
+Support:
+
+Auto Generate
+Manual
+
+Types:
+
+ULS
+SLS
+Seismic
+Wind
+Envelope
+
+Show equation.
+
+Example:
+
+1.2(DL + LL + EQX)
+
+Do not hide factors.
+
+Allow editing.
+
+Validate duplicate combinations.
+
+---
+
+# 25. FRAME POINT LOAD WINDOW
+
+Dedicated window.
+
+Fields:
+
+Load Pattern
+Direction
+Distance from Start
+Load Magnitude
+
+FX
+FY
+FZ
+MX
+MY
+MZ
+
+Show member preview.
+
+---
+
+# 26. FRAME DISTRIBUTED LOAD WINDOW
+
+Dedicated window.
+
+Types:
+
+Uniform
+Trapezoidal
+
+Fields:
+
+Start
+End
+Magnitude
+Direction
+
+Display:
+
+L
+B
+H where applicable.
+
+Allow automatic wall-load calculation.
+
+---
+
+# 27. WALL LOAD CALCULATOR WINDOW
+
+Dedicated window.
+
+Inputs:
+
+Wall Thickness
+Wall Height
+Wall Density
+Plaster Thickness
+Plaster Density
+Opening Deduction
+
+Automatically calculate:
+
+Masonry Load
+Plaster Load
+Opening Deduction
+Net Wall Load
+
+Show:
+
+kN/m
+
+Button:
+
+ASSIGN TO SELECTED BEAMS
+
+---
+
+# 28. AREA LOAD WINDOW
+
+Dedicated window.
+
+Inputs:
+
+Load Pattern
+Magnitude
+Direction
+Distribution Type
+
+Allow:
+
+Uniform
+One-way
+Two-way
+
+---
+
+# 29. SEISMIC LOAD WINDOW
+
+Dedicated window.
+
+For IS 1893.
+
+Parameters:
+
+Zone Factor
+Importance Factor
+Response Reduction Factor
+Soil Type
+Damping
+Fundamental Period
+Accidental Eccentricity
+
+Clearly distinguish:
+
+CODE CALCULATED
+USER DEFINED
+
+---
+
+# 30. MASS SOURCE WINDOW
+
+Dedicated window.
+
+Allow:
+
+Self Weight
+Dead Load
+Floor Finish
+Wall Load
+Other Dead Loads
+Live Load Percentage
+Roof Live Load Percentage
+
+Show calculated:
+
+TOTAL MASS
+TOTAL SEISMIC WEIGHT
+
+Also show story-wise mass.
+
+---
+
+# 31. ANALYSIS SETTINGS WINDOW
+
+Dedicated window.
+
+Options:
+
+Linear Static
+Modal
+Response Spectrum
+P-Delta
+Nonlinear if supported
+
+Solver:
+
+Sparse
+Direct
+Iterative
+
+Settings:
+
+Number of modes
+Mass participation target
+Convergence tolerance
+Maximum iterations
+
+---
+
+# 32. RUN ANALYSIS WINDOW
+
+Dedicated window.
+
+Show progress:
+
+MODEL CHECK
+CONNECTIVITY
+STIFFNESS
+LOAD CASES
+MODAL ANALYSIS
+STATIC ANALYSIS
+RESPONSE SPECTRUM
+P-DELTA
+
+Each item has:
+
+Pending
+Running
+Complete
+Warning
+Failed
+
+Never hide errors.
+
+---
+
+# 33. ANALYSIS ERROR WINDOW
+
+When an error occurs, show:
+
+ERROR ID
+Object
+Story
+Cause
+Possible Solution
+
+Example:
+
+NODE N235 unstable in UX.
+
+Possible causes:
+
+* disconnected member
+* missing support
+* release
+* zero stiffness
+* invalid section
+
+Buttons:
+
+LOCATE
+SELECT
+ZOOM
+OPEN PROPERTY
+IGNORE ONLY IF VALID
+
+Do not automatically ignore engineering warnings.
+
+---
+
+# 34. MEMBER FORCE WINDOW
+
+Dedicated results window.
+
+Show:
+
+Load Case
+Combination
+Member
+
+P
+V2
+V3
+T
+M2
+M3
+
+Maximum
+Minimum
+Absolute
+
+Allow:
+
+Envelope
+Specific combination
+
+---
+
+# 35. JOINT DISPLACEMENT WINDOW
+
+Dedicated window.
+
+UX
+UY
+UZ
+RX
+RY
+RZ
+
+Maximum
+Minimum
+Combination
+
+---
+
+# 36. REACTION WINDOW
+
+Dedicated window.
+
+FX
+FY
+FZ
+MX
+MY
+MZ
+
+Maximum compression
+Maximum uplift
+Maximum moment
+
+Export table.
+
+---
+
+# 37. STORY RESPONSE WINDOW
+
+Dedicated window.
+
+Tabs:
+
+Story Displacement
+Story Drift
+Story Shear
+Story Overturning
+Story Stiffness
+Story Mass
+
+Provide table + graph.
+
+---
+
+# 38. MODAL RESULTS WINDOW
+
+Dedicated window.
+
+Columns:
+
+Mode
+Period
+Frequency
+UX
+UY
+UZ
+RX
+RY
+RZ
+Cumulative UX
+Cumulative UY
+
+Highlight inadequate mass participation.
+
+---
+
+# 39. DEFORMED SHAPE WINDOW
+
+Dedicated window.
+
+Options:
+
+Original
+Deformed
+Original + Deformed
+Animation
+
+Scale:
+
+1x
+10x
+50x
+Auto
+
+Load case selector.
+
+---
+
+# 40. BEAM DESIGN WINDOW
+
+Dedicated window.
+
+Show:
+
+Member ID
+Story
+Section
+Material
+
+Forces:
+
+Mu+
+Mu-
+Vu
+Tu
+
+Design inputs.
+
+Results:
+
+Required Ast
+Provided Ast
+Top Reinforcement
+Bottom Reinforcement
+Stirrups
+Development Length
+Deflection
+
+Status:
+
+PASS
+WARNING
+FAIL
+
+---
+
+# 41. BEAM DETAILED CALCULATION WINDOW
+
+This is mandatory.
+
+Display:
+
+Effective depth
+Neutral axis
+Limiting neutral axis
+Mu limiting
+Required Ast
+Minimum Ast
+Maximum Ast
+Shear stress
+Concrete shear capacity
+Stirrup calculation
+Spacing limits
+Development length
+Deflection check
+
+Include applicable IS code clause references.
+
+Every calculation step must be traceable to actual implementation logic.
+
+---
+
+# 42. COLUMN DESIGN WINDOW
+
+Dedicated window.
+
+Inputs:
+
+Pu
+Mux
+Muy
+
+Show:
+
+Minimum eccentricity
+Slenderness
+Axial capacity
+Moment capacity
+Interaction ratio
+
+Reinforcement:
+
+Number of bars
+Diameter
+Steel area
+Percentage
+Tie diameter
+Tie spacing
+
+---
+
+# 43. COLUMN PMM WINDOW
+
+Dedicated graphical window.
+
+Show:
+
+P-Mx-My interaction surface.
+
+Allow:
+
+2D P-Mx
+2D P-My
+3D PMM
+
+Display actual design point.
+
+Show interaction ratio.
+
+---
+
+# 44. COLUMN DETAILED CALCULATION WINDOW
+
+Show every step.
+
+Inputs
+Loads
+Combination
+Material
+Section
+Effective length
+Slenderness
+Eccentricity
+Interaction calculation
+Reinforcement
+Tie requirements
+Ductile detailing
+
+---
+
+# 45. SLAB DESIGN WINDOW
+
+Dedicated window.
+
+Modes:
+
+Panel
+Strip
+Finite Element
+
+Results:
+
+Mx+
+Mx-
+My+
+My-
+
+Required reinforcement.
+
+Show:
+
+Top
+Bottom
+X direction
+Y direction
+
+Display reinforcement overlay in viewport.
+
+---
+
+# 46. WALL DESIGN WINDOW
+
+Dedicated window.
+
+Show:
+
+Axial force
+Shear
+Mx
+My
+
+Required vertical steel
+Required horizontal steel
+Boundary element requirement
+Boundary reinforcement
+
+Show wall reinforcement diagram.
+
+---
+
+# 47. FOUNDATION DESIGN WINDOWS
+
+Do NOT create one foundation window.
+
+Create:
+
+FOOTING DESIGN
+PILE DESIGN
+PILE CAP DESIGN
+RAFT DESIGN
+PEDESTAL DESIGN
+
+Each has separate inputs, calculations and results.
+
+---
+
+# 48. FOOTING DESIGN WINDOW
+
+Show:
+
+Column reaction
+Soil bearing capacity
+Footing size
+Pressure
+One-way shear
+Punching shear
+Bending
+Development length
+Reinforcement
+
+Provide plan and section preview.
+
+---
+
+# 49. PILE DESIGN WINDOW
+
+Show:
+
+Pile diameter
+Pile length
+Capacity
+Axial load
+Lateral load
+Moment
+
+Check:
+
+Compression
+Uplift
+Lateral
+Structural capacity
+
+---
+
+# 50. PILE CAP DESIGN WINDOW
+
+Show:
+
+Column load
+Pile arrangement
+Pile reactions
+Punching
+One-way shear
+Bending
+Strut-and-tie where applicable
+Reinforcement
+Development length
+
+Show graphical pile arrangement.
+
+---
+
+# 51. DESIGN SUMMARY WINDOW
+
+Show:
+
+BEAMS
+PASS
+WARNING
+FAIL
+
+COLUMNS
+PASS
+WARNING
+FAIL
+
+SLABS
+PASS
+WARNING
+FAIL
+
+WALLS
+PASS
+WARNING
+FAIL
+
+FOUNDATIONS
+PASS
+WARNING
+FAIL
+
+Every row must be clickable.
+
+Clicking a failed item:
+
+SELECT OBJECT
+ZOOM OBJECT
+OPEN DESIGN WINDOW
+
+---
+
+# 52. STRUCTURAL AUDITOR
+
+Create a dedicated AUDIT WINDOW.
+
+Categories:
+
+Geometry
+Connectivity
+Materials
+Sections
+Loads
+Mass
+Seismic
+Analysis
+Drift
+Beams
+Columns
+Slabs
+Walls
+Foundation
+Reinforcement
+
+Examples:
+
+"Beam B25 has excessive utilization."
+
+"Column C14 reinforcement exceeds practical limit."
+
+"Story 2 drift exceeds permitted limit."
+
+"Mass source contains no live load."
+
+"Modal mass participation is insufficient."
+
+"Disconnected node detected."
+
+"Member has unusual release configuration."
+
+"Footing has uplift."
+
+Every warning must contain:
+
+Severity
+Object
+Reason
+Suggested action
+Locate button
+
+Do not hide warnings.
+
+---
+
+# 53. IFC / BIM WINDOW
+
+Dedicated IFC IMPORT window.
+
+Show detected:
+
+Columns
+Beams
+Slabs
+Walls
+Doors
+Windows
+Stairs
+Roofs
+Spaces
+
+Allow:
+
+Import Structural Model
+Import Architectural Model
+Import Quantities
+Import Both
+
+Map IFC classes to application objects.
+
+---
+
+# 54. QUANTITY TAKEOFF WINDOW
+
+Dedicated module.
+
+Categories:
+
+Concrete
+Reinforcement
+Formwork
+Brickwork
+Blockwork
+Plaster
+Flooring
+Doors
+Windows
+Painting
+Roofing
+Sanitary
+Electrical
+
+Each quantity must support:
+
+L
+B
+H
+Nos
+Area
+Volume
+Weight
+
+Provide detailed L×B×H calculation.
+
+Example:
+
+Beam B1
+L = 4.50 m
+B = 0.30 m
+H = 0.50 m
+Nos = 1
+Concrete = 0.675 m³
+
+---
+
+# 55. BOQ WINDOW
+
+Dedicated window.
+
+Columns:
+
+Item
+Description
+Unit
+BOQ Qty
+Executed Qty
+Rate
+Amount
+Variation
+Status
+
+Support:
+
+Original BOQ
+Supplementary Items
+Extra Items
+Deleted Items
+Zero Quantity Items
+
+Preserve existing BOQ logic.
+
+---
+
+# 56. ESTIMATE WINDOW
+
+Dedicated window.
+
+Show:
+
+Quantity
+Rate
+Amount
+Sub-total
+GST if applicable
+Contingency
+Grand Total
+
+Allow rate source.
+
+Never overwrite original rate data without user confirmation.
+
+---
+
+# 57. DRAWING WINDOW
+
+Dedicated window.
+
+Options:
+
+Column Layout
+Beam Layout
+Slab Layout
+Footing Layout
+Pile Layout
+Pile Cap Layout
+Schedules
+Sections
+Details
+
+Allow:
+
+PDF
+DXF
+DWG where supported
+
+---
+
+# 58. REPORT WINDOW
+
+Dedicated report generator.
+
+Sections:
+
+Project Information
+Design Basis
+Codes
+Materials
+Geometry
+Loads
+Load Combinations
+Seismic Parameters
+Analysis
+Modal Results
+Story Drift
+Beam Design
+Column Design
+Slab Design
+Wall Design
+Foundation Design
+Quantity Takeoff
+BOQ
+Audit
+Warnings
+
+Allow individual section selection.
+
+---
+
+# 59. ENGINEERING TRACEABILITY
+
+Every important engineering result must have:
+
+RESULT
+↓
+SOURCE OBJECT
+↓
+GOVERNING LOAD CASE
+↓
+GOVERNING COMBINATION
+↓
+INPUTS
+↓
+FORMULA
+↓
+CODE CLAUSE
+↓
+INTERMEDIATE VALUES
+↓
+FINAL RESULT
+
+Example:
+
+Column C12
+
+Interaction Ratio = 0.82
+
+Click:
+
+SHOW CALCULATION
+
+The application should explain how 0.82 was obtained.
+
+---
+
+# 60. UNITS
+
+Create centralized unit management.
+
+Every engineering quantity must store an internal SI/base representation.
+
+UI can display:
+
+kN
+N
+kNm
+kN/m
+kN/m²
+mm
+m
+MPa
+tonne
+
+Changing display units must NOT change the underlying engineering value.
+
+---
+
+# 61. VALIDATION
+
+Every dedicated window must validate input.
+
+Examples:
+
+Negative thickness → ERROR
+
+Zero concrete grade → ERROR
+
+Invalid section → ERROR
+
+Unsupported release → WARNING
+
+Excessive reinforcement → WARNING
+
+Insufficient reinforcement → FAIL
+
+Missing material → ERROR
+
+Missing section → ERROR
+
+Disconnected object → WARNING/ERROR according to severity.
+
+---
+
+# 62. DATA MODEL
+
+Do not create duplicated engineering data structures.
+
+Use a centralized structural model.
+
+Logical structure:
+
+PROJECT
+├── STORIES
+├── GRIDS
+├── NODES
+├── FRAME MEMBERS
+├── SLABS
+├── WALLS
+├── MATERIALS
+├── SECTIONS
+├── LOAD PATTERNS
+├── LOAD CASES
+├── LOAD COMBINATIONS
+├── ASSIGNMENTS
+├── ANALYSIS RESULTS
+├── DESIGN RESULTS
+├── FOUNDATION
+├── IFC
+├── TAKEOFF
+├── BOQ
+└── REPORTS
+
+Assignments should reference definitions rather than duplicate them.
+
+---
+
+# 63. UNDO / REDO
+
+Every assignment and property modification must be undoable.
+
+Examples:
+
+Assign Section
+Assign Load
+Delete Member
+Move Member
+Change Material
+Change Story Height
+Change Reinforcement
+
+Provide:
+
+CTRL+Z
+CTRL+Y
+
+---
+
+# 64. CHANGE HISTORY
+
+Create optional engineering change history.
+
+Example:
+
+12:31
+Beam B25 section changed:
+
+B250×450
+→
+B300×500
+
+12:33
+Beam B25 wall load changed:
+
+10.2 kN/m
+→
+12.4 kN/m
+
+This is extremely useful for engineering audits.
+
+---
+
+# 65. PERFORMANCE
+
+Do not make every window reload the entire structural model.
+
+Use:
+
+* centralized state
+* selective updates
+* memoization
+* lazy loading
+* virtualized tables
+* cached calculation results
+* incremental rendering
+
+The 3D viewport must remain responsive for large models.
+
+Do not recalculate the entire structure when changing an unrelated UI property.
+
+---
+
+# 66. 3D VIEWER
+
+The viewer must support:
+
+PLAN
+ELEVATION
+3D
+AXONOMETRIC
+
+Display modes:
+
+Wireframe
+Extruded
+Solid
+Transparent
+Loads
+Reinforcement
+Results
+Deformed Shape
+
+Selection highlighting.
+
+Hover identification.
+
+Object labels.
+
+Grid visibility.
+
+Story visibility.
+
+Load visibility.
+
+Result contours.
+
+---
+
+# 67. VIEW CONTROLS
+
+Provide:
+
+Fit Model
+Zoom
+Pan
+Rotate
+Top
+Bottom
+Front
+Back
+Left
+Right
+3D
+
+Selection:
+
+Select
+Window Select
+Crossing Select
+Select Similar
+Select Story
+Select All
+
+---
+
+# 68. COLOR / STATUS SYSTEM
+
+Use a consistent semantic system.
+
+PASS
+WARNING
+FAIL
+SELECTED
+HIDDEN
+DISABLED
+UNASSIGNED
+
+Do not rely only on colors.
+
+Always provide text/icon indicators for accessibility.
+
+---
+
+# 69. RESPONSIVE DESIGN
+
+Desktop-first.
+
+Minimum target:
+
+1280 × 720
+
+Optimized target:
+
+1920 × 1080
+
+Do not make the engineering workspace behave like a mobile application.
+
+For smaller screens, collapse:
+
+Model Tree
+Inspector
+Toolbars
+
+but keep engineering functionality available.
+
+---
+
+# 70. IMPORTED STAAD ANL WORKFLOW
+
+Existing STAAD ANL functionality must remain intact.
+
+Improve it to:
+
+IMPORT ANL
+↓
+PARSE
+↓
+VALIDATE
+↓
+STRUCTURAL MODEL
+↓
+DISPLAY
+↓
+RESULTS
+
+Show parser summary:
+
+Nodes
+Members
+Supports
+Loads
+Load Cases
+Member Forces
+Displacements
+Reactions
+Warnings
+
+Do not discard unrecognized information silently.
+
+---
+
+# 71. IFC WORKFLOW
+
+IFC:
+
+IMPORT
+↓
+VALIDATE
+↓
+CLASSIFY
+↓
+MAP
+↓
+STRUCTURAL MODEL
+↓
+TAKEOFF
+
+Preserve IFC GUIDs.
+
+Every imported element should retain its source IFC identifier.
+
+---
+
+# 72. TAKEOFF TRACEABILITY
+
+Every quantity must be traceable:
+
+BOQ ITEM
+↓
+TAKEOFF ITEM
+↓
+IFC OBJECT
+↓
+GEOMETRY
+↓
+L × B × H
+↓
+QUANTITY
+
+Example:
+
+Concrete C25
+← Beam B25
+← IFC GUID XXXXX
+← L=4.5
+← B=.3
+← H=.5
+← Qty=.675 m³
+
+---
+
+# 73. NO FAKE ENGINEERING RESULTS
+
+This is critical.
+
+Never invent:
+
+* member forces
+* reactions
+* seismic results
+* reinforcement
+* code checks
+* quantities
+* analysis results
+
+If calculation data is unavailable, explicitly show:
+
+NOT CALCULATED
+
+or
+
+INPUT REQUIRED
+
+Do not show fabricated PASS results.
+
+---
+
+# 74. CODE IMPLEMENTATION
+
+When modifying design calculations:
+
+DO NOT rewrite working formulas without checking the existing implementation.
+
+Where a code requirement is implemented, isolate it in a testable function.
+
+Example:
+
+calculateBeamFlexure()
+calculateBeamShear()
+calculateColumnPMM()
+calculateSlabReinforcement()
+calculateFootingPunching()
+calculatePileCapacity()
+
+Keep code-specific logic separate from UI.
+
+---
+
+# 75. TESTING
+
+Before completing implementation:
+
+Test:
+
+* new project
+* story creation
+* grid creation
+* material creation
+* section creation
+* member selection
+* multi-selection
+* section assignment
+* material assignment
+* support assignment
+* release assignment
+* load assignment
+* load combination
+* analysis
+* result viewing
+* beam design
+* column design
+* slab design
+* foundation design
+* IFC import
+* takeoff
+* BOQ
+* report generation
+* undo/redo
+
+Do not mark the task complete if an existing feature is broken.
+
+---
+
+# 76. UI QUALITY
+
+The application should feel like professional engineering software.
+
+Avoid:
+
+* excessive rounded cards
+* giant empty dashboards
+* oversized buttons
+* unnecessary animations
+* excessive gradients
+* decorative UI that reduces workspace
+* giant property forms
+* nested scrolling wherever avoidable
+
+Prefer:
+
+* compact engineering tables
+* clear hierarchy
+* dense but readable layouts
+* professional typography
+* consistent dialogs
+* clear units
+* clear warnings
+* keyboard shortcuts
+* precise numeric input
+* strong selection feedback
+
+---
+
+# 77. FINAL USER EXPERIENCE
+
+The workflow should feel like:
+
+1. Open project.
+2. Model appears.
+3. Select beam.
+4. Right-click.
+5. Choose Assign Section.
+6. Dedicated Assign Section window opens.
+7. Select B300×500.
+8. Apply.
+9. Close.
+10. Select same beam.
+11. Assign Load.
+12. Dedicated load window opens.
+13. Enter wall load.
+14. Apply.
+15. Run analysis.
+16. Select beam.
+17. Open Beam Design window.
+18. View design status.
+19. Open Detailed Calculation.
+20. Inspect every calculation.
+21. Open Reinforcement.
+22. Review detailing.
+23. Export report.
+
+The same pattern must apply to columns, slabs, walls, foundations, loads, results and takeoff.
+
+---
+
+# 78. IMPLEMENTATION STRATEGY
+
+Do this in phases.
+
+PHASE 1:
+Inspect existing codebase and identify architecture.
+
+PHASE 2:
+Create reusable window/dialog framework.
+
+PHASE 3:
+Implement model definition windows.
+
+PHASE 4:
+Implement assignment windows.
+
+PHASE 5:
+Implement load windows.
+
+PHASE 6:
+Implement analysis windows.
+
+PHASE 7:
+Implement results windows.
+
+PHASE 8:
+Implement design windows.
+
+PHASE 9:
+Implement foundation windows.
+
+PHASE 10:
+Implement audit.
+
+PHASE 11:
+Integrate IFC/takeoff/BOQ.
+
+PHASE 12:
+Reports and drawings.
+
+PHASE 13:
+Testing and regression testing.
+
+Do not attempt to replace all existing functionality simultaneously.
+
+---
+
+# 79. CRITICAL REQUIREMENT
+
+Before changing any file:
+
+UNDERSTAND THE EXISTING CODE.
+
+Before replacing any component:
+
+CHECK WHETHER IT IS USED ELSEWHERE.
+
+Before changing a calculation:
+
+CHECK EXISTING INPUT/OUTPUT CONTRACTS.
+
+Before changing a data structure:
+
+CHECK ALL DEPENDENCIES.
+
+Before removing anything:
+
+CONFIRM IT IS UNUSED.
+
+Preserve backwards compatibility wherever practical.
+
+---
+
+# 80. DELIVERABLE
+
+Implement the above architecture in the existing application.
+
+Do not merely create mockups.
+
+Do not create placeholder buttons that do nothing.
+
+All existing working functions must continue working.
+
+New windows must be connected to the actual application state.
+
+Assignments must update the actual structural model.
+
+Design windows must use actual calculation results.
+
+Results windows must use actual analysis results.
+
+IFC quantities must use actual IFC geometry.
+
+BOQ quantities must use actual takeoff results.
+
+Reports must use actual project data.
+
+At completion provide:
+
+1. Updated application.
+2. List of modified files.
+3. List of newly created components.
+4. List of new windows.
+5. List of preserved existing functionality.
+6. Any unresolved issues.
+7. Any calculations that still require implementation.
+8. Test results.
+9. Recommended next development phase.
+
+MOST IMPORTANT:
+
+DO NOT BUILD A VISUAL ETABS CLONE.
+
+BUILD A PROFESSIONAL STRUCTURAL ENGINEERING WORKSPACE WITH ETABS-STYLE WORKFLOW AND DEDICATED WINDOWS FOR EVERY PROPERTY, ASSIGNMENT, LOAD, ANALYSIS, RESULT AND DESIGN OPERATION.

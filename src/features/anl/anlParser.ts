@@ -3,6 +3,7 @@ import { JointParser } from './sections/jointParser';
 import { MemberParser } from './sections/memberParser';
 import { PropertyParser } from './sections/propertyParser';
 import { LoadParser } from './sections/loadParser';
+import { LoadInputParser } from './sections/loadInputParser';
 import { ReactionParser } from './sections/reactionParser';
 import { StoryDriftParser } from './sections/storyDriftParser';
 import { ForceParser } from './sections/forceParser';
@@ -122,6 +123,10 @@ export class ANLParser {
     const storyDrifts = StoryDriftParser.parse(rawLines);
     const { forces, designSummaries, warnings: rawWarnings } = ForceParser.parse(rawLines);
 
+    // 3b. Parse explicit STAAD input loads (SELFWEIGHT / MEMBER LOAD / FLOOR LOAD)
+    //     so the in-app FEM re-analysis applies the SAME loads STAAD used.
+    const loadInput = LoadInputParser.parse(tokenizedLines);
+
     // 4. Validate Structural Model
     // First convert rawMembers to temporary Member3D map for validation
     const tempMembers = new Map<number, Member3D>();
@@ -172,7 +177,16 @@ export class ANLParser {
       reactions,
       forces,
       storyDrifts,
-      designSummaries
+      designSummaries,
+      loadInput.hasExplicitDeadLoad ? loadInput.memberLoads : undefined,
+      loadInput.shellLoads,
+      {
+        source: 'STAAD',
+        concreteDensity: loadInput.concreteDensity,
+        concreteE: loadInput.concreteE,
+        selfweightFactor: loadInput.selfweightFactor,
+        selfweightAxis: loadInput.selfweightAxis,
+      }
     );
 
     return {

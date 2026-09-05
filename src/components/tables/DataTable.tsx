@@ -83,8 +83,8 @@ export function DataTable<T extends Record<string, any>>({
   return (
     <div className="flex flex-col h-full bg-surface-card border border-ui-border rounded-md shadow-sm overflow-hidden font-sans">
       {/* Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 bg-slate-50/80 border-b border-ui-border">
-        {title && <h3 className="font-mono text-sm font-semibold text-deep-navy">{title}</h3>}
+      <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 bg-slate-900/40 border-b border-ui-border">
+        {title && <h3 className="font-mono text-sm font-semibold fx-neon-soft text-on-surface">{title}</h3>}
 
         <div className="flex items-center gap-2 flex-1 max-w-md">
           <div className="relative w-full">
@@ -97,7 +97,7 @@ export function DataTable<T extends Record<string, any>>({
                 setCurrentPage(1);
               }}
               placeholder={searchPlaceholder}
-              className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-ui-border rounded font-mono focus:outline-none focus:border-secondary-brand focus:ring-1 focus:ring-secondary-brand transition-colors"
+              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-900/60 border border-ui-border rounded font-mono focus:outline-none focus:border-secondary-brand focus:ring-1 focus:ring-secondary-brand transition-colors text-on-surface"
             />
           </div>
         </div>
@@ -105,7 +105,7 @@ export function DataTable<T extends Record<string, any>>({
         {onExportCsv && (
           <button
             onClick={onExportCsv}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-slate-700 bg-white hover:bg-slate-100 border border-ui-border rounded transition-colors shadow-sm"
+            className="fx-ghost-btn flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono rounded transition-colors"
           >
             <Download className="w-3.5 h-3.5" />
             Export CSV
@@ -116,7 +116,7 @@ export function DataTable<T extends Record<string, any>>({
       {/* Table Content */}
       <div className="flex-1 overflow-auto">
         <table className="w-full text-left border-collapse font-mono text-xs text-on-surface">
-          <thead className="sticky top-0 bg-slate-100 border-b border-ui-border text-slate-600 font-semibold z-10">
+          <thead className="sticky top-0 bg-slate-900/70 border-b border-ui-border text-cyan-200/90 font-semibold z-10">
             <tr>
               {columns.map((col, idx) => (
                 <th
@@ -125,7 +125,7 @@ export function DataTable<T extends Record<string, any>>({
                   style={{ width: col.width }}
                   className={`py-2 px-3 tracking-wider ${
                     col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'
-                  } ${col.sortable ? 'cursor-pointer hover:bg-slate-200/70 select-none' : ''}`}
+                  } ${col.sortable ? 'cursor-pointer hover:bg-slate-800/60 select-none' : ''}`}
                 >
                   <div className={`flex items-center gap-1 ${col.align === 'right' ? 'justify-end' : ''}`}>
                     <span>{col.header}</span>
@@ -147,7 +147,7 @@ export function DataTable<T extends Record<string, any>>({
                 <tr
                   key={rIdx}
                   onClick={() => onRowClick && onRowClick(row)}
-                  className={`hover:bg-slate-50 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
+                  className={`hover:bg-slate-800/40 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
                 >
                   {columns.map((col, cIdx) => (
                     <td
@@ -167,7 +167,7 @@ export function DataTable<T extends Record<string, any>>({
       </div>
 
       {/* Pagination Footer */}
-      <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-t border-ui-border text-xs text-slate-500 font-mono">
+      <div className="flex items-center justify-between px-4 py-2 bg-slate-900/40 border-t border-ui-border text-xs text-slate-400 font-mono">
         <span>
           Showing {paginatedData.length > 0 ? (currentPage - 1) * pageSize + 1 : 0} to{' '}
           {Math.min(currentPage * pageSize, sortedData.length)} of {sortedData.length} entries
@@ -176,17 +176,17 @@ export function DataTable<T extends Record<string, any>>({
           <button
             onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
             disabled={currentPage === 1}
-            className="p-1 rounded border border-ui-border bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="p-1 rounded border border-ui-border bg-slate-800 text-slate-200 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <span className="font-semibold text-slate-700">
+          <span className="font-semibold text-on-surface">
             {currentPage} / {totalPages}
           </span>
           <button
             onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
             disabled={currentPage === totalPages}
-            className="p-1 rounded border border-ui-border bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="p-1 rounded border border-ui-border bg-slate-800 text-slate-200 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <ChevronRight className="w-4 h-4" />
           </button>

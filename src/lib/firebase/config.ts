@@ -1,6 +1,10 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore, enableMultiTabIndexedDbPersistence } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyDUD9M74Mg87j7JvVFSdTl0jao9EGSil_4',
@@ -15,13 +19,14 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
-export const db = getFirestore(app);
 
-// Enable offline persistence (IndexedDB-backed)
-enableMultiTabIndexedDbPersistence(db).catch((err) => {
-  if (err.code === 'failed-precondition') {
-    console.warn('Firestore offline persistence unavailable: multiple tabs open');
-  } else if (err.code === 'unimplemented') {
-    console.warn('Firestore offline persistence not supported by this browser');
-  }
-});
+// Initialize Firestore with modern persistent multi-tab cache (replaces deprecated enableMultiTabIndexedDbPersistence)
+export const db =
+  typeof indexedDB !== 'undefined'
+    ? initializeFirestore(app, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      })
+    : initializeFirestore(app, {});
+

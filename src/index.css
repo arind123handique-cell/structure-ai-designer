@@ -2,6 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+:root, .theme-light {
+  --ui-background: #F8FAFC;
+  --ui-border: #E2E8F0;
+  --ui-surface-high: #FFFFFF;
+  --deep-navy: #0F172A;
+  --surface-dark: #FFFFFF;
+  --surface-card: #FFFFFF;
+  --primary: #0F172A;
+  --on-surface: #0F172A;
+  --on-surface-variant: #475569;
+  --3d-bg: #F1F5F9;
+}
+
+.theme-dark {
+  --ui-background: #070B14;
+  --ui-border: #1E2740;
+  --ui-surface-high: #121B30;
+  --deep-navy: #0B132B;
+  --surface-dark: #0B132B;
+  --surface-card: #0F1930;
+  --primary: #E5EAF3;
+  --on-surface: #E5EAF3;
+  --on-surface-variant: #9AA5B8;
+  --3d-bg: #0F172A;
+}
+
 @layer base {
   body {
     @apply bg-ui-background text-on-surface font-sans;
@@ -25,4 +51,487 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+/* ============================================================
+   STRUCTURE AI — FUTURISTIC HUD DESIGN SYSTEM
+   Animated "video-like" ambience built entirely from CSS + canvas.
+   No external assets. Applies across Login, Layout, Dashboard.
+   ============================================================ */
+
+@layer components {
+  /* ---- Animated moving-gradient shimmer (ambient "video") ---- */
+  .fx-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .fx-shimmer::before {
+    content: '';
+    position: absolute;
+    inset: -150% -60%;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      rgba(49, 107, 243, 0.10) 40deg,
+      rgba(16, 185, 129, 0.10) 80deg,
+      transparent 130deg
+    );
+    animation: fx-shimmer-rotate 18s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes fx-shimmer-rotate {
+    to { transform: rotate(360deg); }
+  }
+
+  /* ---- Glassmorphism panel ---- */
+  .fx-glass {
+    background: rgba(255, 255, 255, 0.66);
+    backdrop-filter: blur(18px) saturate(160%);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow:
+      0 12px 40px rgba(15, 23, 42, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  }
+  .fx-glass-strong {
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(22px) saturate(180%);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow:
+      0 20px 60px rgba(15, 23, 42, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  }
+  .fx-glass-dark {
+    background: rgba(15, 25, 48, 0.72);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    box-shadow:
+      0 20px 60px rgba(0, 0, 0, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+
+  /* ---- Neon glow text ---- */
+  .fx-neon {
+    background: linear-gradient(120deg, #0051d5, #16b981 60%, #06b6d4);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 0 6px rgba(49, 107, 243, 0.35));
+  }
+  .fx-neon-soft {
+    text-shadow: 0 0 14px rgba(49, 107, 243, 0.45);
+  }
+
+  /* ---- Glowing accent button ---- */
+  .fx-glow-btn {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(135deg, #0051d5 0%, #316bf3 55%, #06b6d4 100%);
+    color: #fff;
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.15) inset,
+      0 8px 24px -6px rgba(49, 107, 243, 0.65);
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+  }
+  .fx-glow-btn:hover {
+    filter: brightness(1.08);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.2) inset,
+      0 0 28px -4px rgba(49, 107, 243, 0.85);
+  }
+  .fx-glow-btn:active {
+    transform: scale(0.97);
+  }
+  .fx-glow-btn::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -150%;
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+    transform: skewX(-20deg);
+    animation: fx-sweep 3.2s ease-in-out infinite;
+  }
+  @keyframes fx-sweep {
+    0% { left: -150%; }
+    55% { left: 160%; }
+    100% { left: 160%; }
+  }
+
+  /* ---- Subtle outline/ghost button ---- */
+  .fx-ghost-btn {
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(49, 107, 243, 0.35);
+    color: #1550b8;
+    box-shadow: 0 4px 14px -4px rgba(15, 23, 42, 0.15);
+    transition: all 0.18s ease;
+  }
+  .fx-ghost-btn:hover {
+    background: rgba(255, 255, 255, 0.8);
+    box-shadow: 0 4px 20px -4px rgba(49, 107, 243, 0.45);
+    border-color: rgba(49, 107, 243, 0.6);
+  }
+
+  /* ---- Blueprint grid background (CSS-only video floor) ---- */
+  .fx-grid-bg {
+    background-color: #0b132b;
+    background-image:
+      linear-gradient(rgba(49, 107, 243, 0.16) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(49, 107, 243, 0.16) 1px, transparent 1px),
+      linear-gradient(rgba(49, 107, 243, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(49, 107, 243, 0.06) 1px, transparent 1px);
+    background-size: 80px 80px, 80px 80px, 20px 20px, 20px 20px;
+    animation: fx-grid-pan 16s linear infinite;
+  }
+  @keyframes fx-grid-pan {
+    from { background-position: 0 0, 0 0, 0 0, 0 0; }
+    to   { background-position: 80px 80px, 80px 80px, 20px 20px, 20px 20px; }
+  }
+
+  /* ---- Scanning line that travels down the panel (CRT/HUD) ---- */
+  .fx-scanlines::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.04) 0px,
+      rgba(255, 255, 255, 0.04) 1px,
+      transparent 1px,
+      transparent 4px
+    );
+  }
+  .fx-scanner::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(6, 182, 212, 0.7), transparent);
+    animation: fx-scan 4.5s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes fx-scan {
+    0%, 100% { top: -2%; opacity: 0; }
+    12% { opacity: 1; }
+    88% { opacity: 1; }
+    50% { top: 100%; }
+  }
+
+  /* ---- Floating HUD tag chip ---- */
+  .fx-tag {
+    font-family: "JetBrains Mono", monospace;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-size: 10px;
+    border: 1px solid rgba(49, 107, 243, 0.4);
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: #1550b8;
+    padding: 3px 8px;
+    border-radius: 6px;
+    box-shadow: 0 2px 10px -2px rgba(49, 107, 243, 0.3);
+  }
+
+  /* ---- Pulsing status dot ---- */
+  .fx-dot {
+    animation: fx-pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes fx-pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.6); }
+    50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(6, 182, 212, 0); }
+  }
+
+  /* ---- Corner brackets around a HUD frame ---- */
+  .fx-frame {
+    position: relative;
+  }
+  .fx-frame::before,
+  .fx-frame::after {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(49, 107, 243, 0.7);
+  }
+  .fx-frame::before { top: 8px; left: 8px; border-right: none; border-bottom: none; }
+  .fx-frame::after   { bottom: 8px; right: 8px; border-left: none; border-top: none; }
+}
+
+/* ============================================================
+   STRUCTURE AI — GLOBAL DARK CYBER THEME
+   Applied via `theme-dark` on the app root. Converts the large
+   number of light, hardcoded Tailwind utilities to a coherent
+   dark HUD palette so every surface reads as futuristic.
+   ============================================================ */
+@layer components {
+  .theme-dark .bg-white { background-color: #0F1930 !important; }
+  .theme-dark .bg-slate-50 { background-color: #0D1526 !important; }
+  .theme-dark .bg-slate-100 { background-color: #131E38 !important; }
+  .theme-dark .bg-slate-200 { background-color: #1E2840 !important; }
+  .theme-dark .bg-slate-300 { background-color: #243049 !important; }
+  .theme-dark .bg-slate-700, .theme-dark .bg-slate-800 { background-color: #0B132B !important; }
+  .theme-dark .bg-emerald-50 { background-color: rgba(16, 185, 129, 0.10) !important; }
+  .theme-dark .bg-amber-50 { background-color: rgba(245, 158, 11, 0.10) !important; }
+  .theme-dark .bg-rose-50 { background-color: rgba(244, 63, 94, 0.10) !important; }
+  .theme-dark .bg-red-50 { background-color: rgba(248, 113, 113, 0.10) !important; }
+  .theme-dark .bg-sky-50 { background-color: rgba(14, 165, 233, 0.10) !important; }
+  .theme-dark .bg-indigo-50 { background-color: rgba(99, 102, 241, 0.10) !important; }
+  .theme-dark .bg-blue-50 { background-color: rgba(59, 130, 246, 0.12) !important; }
+  .theme-dark .bg-violet-50 { background-color: rgba(139, 92, 246, 0.10) !important; }
+
+  /* Text: flip dark-on-light to light-on-dark */
+  .theme-dark .text-deep-navy { color: #E5EAF3 !important; }
+  .theme-dark .text-slate-900 { color: #EDF2FA !important; }
+  .theme-dark .text-slate-800 { color: #D7DFEA !important; }
+  .theme-dark .text-slate-700 { color: #B9C3D6 !important; }
+  .theme-dark .text-slate-600 { color: #9AA5B8 !important; }
+  .theme-dark .text-slate-500 { color: #7C8798 !important; }
+  .theme-dark .text-slate-400 { color: #64748B !important; }
+  .theme-dark .text-slate-300 { color: #94A3B8 !important; }
+  .theme-dark .text-slate-200 { color: #CBD5E1 !important; }
+
+  /* Borders */
+  .theme-dark .border-slate-100, .theme-dark .border-slate-200,
+  .theme-dark .border-slate-300 { border-color: #1E2740 !important; }
+  .theme-dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) { border-color: #1E2740 !important; }
+
+  /* Inputs: keep darker so they read as fields */
+  .theme-dark input, .theme-dark select, .theme-dark textarea {
+    background-color: #0A1120 !important;
+    color: #E5EAF3 !important;
+    border-color: #26324A !important;
+  }
+  .theme-dark input::placeholder, .theme-dark textarea::placeholder { color: #5B6678 !important; }
+
+  /* Neon-glowing primary interactive elements */
+  .theme-dark .hover\:bg-slate-100:hover, .theme-dark .hover\:bg-slate-50:hover {
+    background-color: #182440 !important;
+  }
+  .theme-dark .hover\:bg-white:hover { background-color: #182440 !important; }
+
+  /* ============================================================
+     STRUCTURE AI — EXECUTIVE STUDIO THEME (DARK SIDEBAR + LIGHT WORKSPACE)
+     Clean, high-contrast, modern engineering interface matching
+     the official reference UI.
+     ============================================================ */
+  .theme-light header {
+    background-color: rgba(255, 255, 255, 0.98) !important;
+    border-color: #E2E8F0 !important;
+    color: #0F172A !important;
+  }
+  .theme-light header h1,
+  .theme-light header h2,
+  .theme-light header .text-deep-navy {
+    color: #0F172A !important;
+  }
+  .theme-light header .bg-surface-card\/80 {
+    background-color: rgba(255, 255, 255, 0.96) !important;
+    border-color: #E2E8F0 !important;
+  }
+
+  /* Light Theme Tables & Cards */
+  .theme-light .bg-surface-card {
+    background-color: #FFFFFF !important;
+    border-color: #E2E8F0 !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+  }
+  .theme-light .bg-slate-900\/40,
+  .theme-light .bg-slate-900\/60,
+  .theme-light .bg-slate-900\/70,
+  .theme-light .bg-slate-950 {
+    background-color: #F8FAFC !important;
+    border-color: #E2E8F0 !important;
+    color: #1E293B !important;
+  }
+  .theme-light thead {
+    background-color: #F1F5F9 !important;
+    color: #0F172A !important;
+    border-color: #E2E8F0 !important;
+  }
+  .theme-light thead th {
+    color: #334155 !important;
+  }
+  .theme-light thead .text-cyan-200\/90,
+  .theme-light thead .text-cyan-400 {
+    color: #0369A1 !important;
+  }
+  .theme-light table tbody tr:hover {
+    background-color: #F8FAFC !important;
+  }
+  .theme-light input,
+  .theme-light select,
+  .theme-light textarea {
+    background-color: #FFFFFF !important;
+    color: #0F172A !important;
+    border-color: #CBD5E1 !important;
+  }
+  .theme-light input::placeholder,
+  .theme-light textarea::placeholder {
+    color: #94A3B8 !important;
+  }
+  .theme-light .fx-glass-dark {
+    background: rgba(255, 255, 255, 0.95) !important;
+    border-color: #E2E8F0 !important;
+    color: #1E293B !important;
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.08) !important;
+  }
+  .theme-light .fx-frame::before,
+  .theme-light .fx-frame::after {
+    border-color: rgba(59, 130, 246, 0.45) !important;
+  }
+  .theme-light .fx-tag {
+    background-color: #F1F5F9 !important;
+    color: #0369A1 !important;
+    border-color: #BAE6FD !important;
+  }
+  .theme-light .cyber-hud-card {
+    background: #FFFFFF !important;
+    border-color: #E2E8F0 !important;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04) !important;
+  }
+  .theme-light .cyber-scanlines {
+    background: none !important;
+  }
+
+  /* ============================================================
+     CYBERPUNK HUD — ADVANCED SCI-FI UTILITIES
+     ============================================================ */
+
+  /* Polygonal Chamfered Cards */
+  .cyber-chamfer {
+    clip-path: polygon(
+      0 8px, 8px 0,
+      calc(100% - 8px) 0, 100% 8px,
+      100% calc(100% - 8px), calc(100% - 8px) 100%,
+      8px 100%, 0 calc(100% - 8px)
+    );
+  }
+  .cyber-chamfer-lg {
+    clip-path: polygon(
+      0 14px, 14px 0,
+      calc(100% - 14px) 0, 100% 14px,
+      100% calc(100% - 14px), calc(100% - 14px) 100%,
+      14px 100%, 0 calc(100% - 14px)
+    );
+  }
+
+  /* Glassmorphic Cyber Card with Neon Border */
+  .cyber-hud-card {
+    background: rgba(11, 19, 43, 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(0, 240, 255, 0.22);
+    box-shadow: 0 8px 32px rgba(3, 7, 18, 0.6), inset 0 0 12px rgba(0, 240, 255, 0.04);
+  }
+  .cyber-hud-card:hover {
+    border-color: rgba(0, 240, 255, 0.45);
+    box-shadow: 0 8px 32px rgba(3, 7, 18, 0.7), 0 0 16px rgba(0, 240, 255, 0.15), inset 0 0 12px rgba(0, 240, 255, 0.08);
+  }
+
+  /* Tactical Targeting Reticle Corners */
+  .cyber-reticle {
+    position: relative;
+  }
+  .cyber-reticle::before,
+  .cyber-reticle::after {
+    content: '';
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid #00f0ff;
+    pointer-events: none;
+  }
+  .cyber-reticle::before {
+    top: -2px;
+    left: -2px;
+    border-right: none;
+    border-bottom: none;
+  }
+  .cyber-reticle::after {
+    bottom: -2px;
+    right: -2px;
+    border-left: none;
+    border-top: none;
+  }
+
+  /* CRT Interlaced Scanline Texture */
+  .cyber-scanlines {
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(0, 240, 255, 0.02) 0px,
+      rgba(0, 240, 255, 0.02) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    pointer-events: none;
+  }
+
+  /* High-Tech Monospace Telemetry Badges */
+  .cyber-badge-cyan {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #00f0ff;
+    background: rgba(0, 240, 255, 0.08);
+    border: 1px solid rgba(0, 240, 255, 0.35);
+    padding: 2px 6px;
+    border-radius: 2px;
+    text-shadow: 0 0 8px rgba(0, 240, 255, 0.5);
+  }
+  .cyber-badge-matrix {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #39ff14;
+    background: rgba(57, 255, 20, 0.08);
+    border: 1px solid rgba(57, 255, 20, 0.35);
+    padding: 2px 6px;
+    border-radius: 2px;
+    text-shadow: 0 0 8px rgba(57, 255, 20, 0.5);
+  }
+  .cyber-badge-crimson {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #ff0055;
+    background: rgba(255, 0, 85, 0.08);
+    border: 1px solid rgba(255, 0, 85, 0.35);
+    padding: 2px 6px;
+    border-radius: 2px;
+    text-shadow: 0 0 8px rgba(255, 0, 85, 0.5);
+  }
+  .cyber-badge-amber {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #ffb703;
+    background: rgba(255, 183, 3, 0.08);
+    border: 1px solid rgba(255, 183, 3, 0.35);
+    padding: 2px 6px;
+    border-radius: 2px;
+    text-shadow: 0 0 8px rgba(255, 183, 3, 0.5);
+  }
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .fx-shimmer::before,
+  .fx-grid-bg,
+  .fx-glow-btn::after,
+  .fx-scanner::before,
+  .fx-dot {
+    animation: none !important;
+  }
 }

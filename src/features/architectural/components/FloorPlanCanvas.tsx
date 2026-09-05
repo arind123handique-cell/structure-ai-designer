@@ -1322,26 +1322,36 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     dragStaircaseOffsetRef.current = null;
   };
 
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    if (!canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+  // Non-passive wheel event listener to eliminate "Unable to preventDefault inside passive event listener invocation"
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
-    const newZoom = Math.max(8, Math.min(250, viewState.zoom * zoomFactor));
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
 
-    // Zoom centered on cursor
-    const newPanX = mouseX - (mouseX - viewState.panX) * (newZoom / viewState.zoom);
-    const newPanY = mouseY - (mouseY - viewState.panY) * (newZoom / viewState.zoom);
+      const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
 
-    setViewState({
-      panX: newPanX,
-      panY: newPanY,
-      zoom: newZoom,
-    });
-  };
+      setViewState((prev) => {
+        const newZoom = Math.max(8, Math.min(250, prev.zoom * zoomFactor));
+        const newPanX = mouseX - (mouseX - prev.panX) * (newZoom / prev.zoom);
+        const newPanY = mouseY - (mouseY - prev.panY) * (newZoom / prev.zoom);
+        return {
+          panX: newPanX,
+          panY: newPanY,
+          zoom: newZoom,
+        };
+      });
+    };
+
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      canvas.removeEventListener('wheel', onWheel);
+    };
+  }, []);
 
   // Keyboard Shortcuts & Arrow Key Nudge Moving
   useEffect(() => {
@@ -1412,7 +1422,6 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onWheel={handleWheel}
         className="w-full h-full cursor-crosshair block"
       />
 

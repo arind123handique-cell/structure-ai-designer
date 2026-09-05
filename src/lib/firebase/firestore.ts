@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './config';
 import { StoredProject } from '@/features/projects/types';
+import { sanitizeForFirestore, restoreFromFirestore } from './firestoreSanitize';
 
 const PROJECTS_COLLECTION = 'projects';
 const SHARED_COLLECTION = 'sharedProjects';
@@ -25,63 +26,6 @@ function userProjectDoc(uid: string, projectId: string) {
 
 function sharedProjectDoc(token: string) {
   return doc(db, SHARED_COLLECTION, token);
-}
-
-/**
- * Recursively sanitize data for Firestore: nested arrays are not supported.
- * - Array of Arrays → convert outer array to object with numeric-string keys
- * - Flat arrays of primitives are kept
- * - Objects are recursively sanitized
- */
-function sanitizeForFirestore(value: unknown): unknown {
-  if (value === null || value === undefined) return value;
-  if (Array.isArray(value)) {
-    if (value.length > 0 && Array.isArray(value[0])) {
-      const obj: Record<string, unknown> = {};
-      for (let i = 0; i < value.length; i++) {
-        obj[String(i)] = sanitizeForFirestore(value[i]);
-      }
-      return obj;
-    }
-    return value.map(sanitizeForFirestore).filter((v) => v !== undefined);
-  }
-  if (typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (v === undefined) continue; // Firestore rejects undefined field values
-      out[k] = sanitizeForFirestore(v);
-    }
-    return out;
-  }
-  return value;
-}
-
-/**
- * Reverse the sanitization: convert object-with-numeric-keys back to arrays.
- */
-function restoreFromFirestore(value: unknown): unknown {
-  if (value === null || value === undefined) return value;
-  if (Array.isArray(value)) {
-    return value.map(restoreFromFirestore);
-  }
-  if (typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
-    const keys = Object.keys(obj);
-    if (keys.length > 0 && keys.every((k) => /^\d+$/.test(k))) {
-      const maxIdx = Math.max(...keys.map(Number));
-      const arr: unknown[] = new Array(maxIdx + 1);
-      for (const k of keys) {
-        arr[Number(k)] = restoreFromFirestore(obj[k]);
-      }
-      return arr;
-    }
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(obj)) {
-      out[k] = restoreFromFirestore(v);
-    }
-    return out;
-  }
-  return value;
 }
 
 export class FirestoreProjectStorage {

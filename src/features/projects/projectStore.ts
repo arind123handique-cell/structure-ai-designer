@@ -2,10 +2,26 @@ import { create } from 'zustand';
 import { StoredProject } from './types';
 import { ProjectStorage } from './projectStorage';
 import { ANLParser } from '../anl/anlParser';
-import { NormalizedStructuralModel, Member3D, Node3D } from '../model/types';
+import {
+  NormalizedStructuralModel,
+  Member3D,
+  Node3D,
+  Support3D,
+  CrossSection,
+  MemberLoad,
+  ShellLoad,
+  MemberModifier,
+  LoadCase,
+  LoadCombination,
+} from '../model/types';
 import { ProjectMetadata, DesignParameters } from '@/types';
 import { EngineeringWarning } from '../warnings/types';
 import { ColumnDesignEngine } from '../design/column/columnDesignEngine';
+import { BeamDesignEngine } from '../design/beam/beamDesignEngine';
+import { MemberDesignSummary } from '../model/types';
+import { FemSolver3D } from '../calculations/femSolver3D';
+import { runFemAnalysisAsync } from '../calculations/femWorkerClient';
+import { SeismicEngine } from '../calculations/seismicEngine';
 import {
   ArchitecturalWall,
   ArchitecturalDoor,
@@ -22,6 +38,7 @@ import { ArchitecturalGeometryEngine } from '../architectural/engines/architectu
 
 export type ViewTab =
   | 'dashboard'
+  | 'etabs-studio'
   | '3d-model'
   | 'member-forces'
   | 'joint-reactions'
@@ -68,6 +85,8 @@ export interface ProjectState {
   activeView: ViewTab;
   filterLayers: FilterLayerState;
   isImportModalOpen: boolean;
+  isNewProjectModalOpen: boolean;
+  setNewProjectModalOpen: (open: boolean) => void;
   isLoading: boolean;
 
   // Foundation Pile & Pile Cap States
@@ -98,6 +117,7 @@ export interface ProjectState {
   // Actions
   initializeStore: () => Promise<void>;
   createProject: (metadata: Partial<ProjectMetadata>) => Promise<StoredProject>;
+  updateProjectMetadata: (metadata: Partial<ProjectMetadata>) => Promise<void>;
   openProject: (id: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   deleteInactiveProjects: () => Promise<void>;
@@ -124,6 +144,7 @@ export interface ProjectState {
   updateDesignSettings: (settings: Partial<DesignParameters>) => Promise<void>;
   updateMemberSection: (memberId: number, yd: number, zd: number, name?: string) => Promise<void>;
   updateMemberMaterial: (memberId: number, materialName: string) => Promise<void>;
+  assignMemberLocalAxis: (memberIds: number[], betaAngle: number) => Promise<void>;
   batchUpdateSections: (updates: { memberId: number; yd: number; zd: number; name?: string }[]) => Promise<void>;
   updatePlateThickness: (plateId: number, thicknessMeters: number) => Promise<void>;
   batchUpdatePlateThicknesses: (updates: { plateId: number; thicknessMeters: number }[]) => Promise<void>;
@@ -206,6 +227,42 @@ export interface ProjectState {
   savePileDesigns: (types: any[]) => Promise<void>;
   saveSlabDesigns: (designs: Map<string, any> | Record<string, any>, overrides?: Record<string, any>) => Promise<void>;
   saveStaircaseDesigns: (designs: any, geometry?: any, landingEntry?: any) => Promise<void>;
+
+  // Standalone ETABS & 3D FEM Analysis Actions
+  runFemAnalysis: () => Promise<void>;
+  runSeismicAnalysis: (params?: Partial<any>) => Promise<any>;
+  runAllDesignChecks: () => Promise<number>;
+  generateBuildingGrid: (
+    baysX?: number,
+    baysZ?: number,
+    widthX?: number,
+    widthZ?: number,
+    stories?: number,
+    storyH?: number
+  ) => Promise<void>;
+  addStructuralNode: (x: number, y: number, z: number, isSupport?: boolean) => Promise<number>;
+  addStructuralMember: (
+    startNodeId: number,
+    endNodeId: number,
+    section?: Partial<CrossSection>,
+    classification?: 'COLUMN' | 'BEAM'
+  ) => Promise<number>;
+  addStructuralPlate: (
+    nodeIds: number[],
+    classification?: 'SLAB' | 'WALL',
+    thickness?: number,
+    materialName?: string
+  ) => Promise<number>;
+  deleteStructuralElements: (nodeIds?: number[], memberIds?: number[]) => Promise<void>;
+  assignMemberSection: (memberIds: number[], section: Partial<CrossSection>) => Promise<void>;
+  assignSupportRestraint: (nodeIds: number[], type: 'FIXED' | 'PINNED' | 'ROLLER') => Promise<void>;
+  assignFrameLoads: (memberIds: number[], load: MemberLoad) => Promise<void>;
+  deleteMemberLoads: (memberIds: number[]) => Promise<void>;
+  assignShellLoads: (levelY: number, load: ShellLoad) => Promise<void>;
+  assignMemberModifiers: (memberIds: number[], modifiers: Partial<MemberModifier>) => Promise<void>;
+  replicateStory: (sourceElevationY: number, targetElevationsY: number[]) => Promise<void>;
+  updateLoadPatterns: (patterns: LoadCase[]) => Promise<void>;
+  updateLoadCombinations: (combos: LoadCombination[]) => Promise<void>;
 }
 
 const DEFAULT_DESIGN_SETTINGS: DesignParameters = {
@@ -253,8 +310,8 @@ export const DEFAULT_ARCHITECTURAL_SETTINGS: ArchitecturalSettings = {
     majorInterval: 4,
     adaptive: true,
   },
-  showDimensions: true,
-  showRoomLabels: true,
+  showDimensions: false,
+  showRoomLabels: false,
   showStructuralUnderlay: true,
   showPreviousFloorUnderlay: false,
   previousFloorOpacity: 0.35,
@@ -262,7 +319,7 @@ export const DEFAULT_ARCHITECTURAL_SETTINGS: ArchitecturalSettings = {
 
 let architecturalUndoStack: any[] = [];
 let architecturalRedoStack: any[] = [];
-const MAX_UNDO_STACK = 50;
+const MAX_UNDO_STACK = 15;
 
 function pushArchUndo(action: any) {
   architecturalUndoStack.push(action);
@@ -287,6 +344,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     showMemberLabels: false,
   },
   isImportModalOpen: false,
+  isNewProjectModalOpen: false,
+  setNewProjectModalOpen: (isNewProjectModalOpen) => set({ isNewProjectModalOpen }),
   isLoading: false,
 
   // Architectural Floor Plan Initial State
@@ -467,6 +526,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return storedProject;
   },
 
+  updateProjectMetadata: async (metadata) => {
+    const current = get().activeProject;
+    if (!current) return;
+
+    const updatedProject: StoredProject = {
+      ...current,
+      metadata: {
+        ...current.metadata,
+        ...metadata,
+        updatedAt: new Date().toISOString(),
+      },
+    };
+
+    await ProjectStorage.saveProject(updatedProject);
+    const updatedList = await ProjectStorage.getAllProjects();
+    set({
+      activeProject: updatedProject,
+      projects: updatedList,
+    });
+  },
+
   openProject: async (id) => {
     set({ isLoading: true });
     try {
@@ -562,21 +642,40 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   importANL: async (fileName, content, customMetadata) => {
     set({ isLoading: true });
     try {
-      const parseResult = ANLParser.parse(content);
+      let modelToUse: NormalizedStructuralModel;
+      let warningsToUse: any[] = [];
+      let staadVersion = 'STAAD.Pro CONNECT Edition';
+      let engineer = customMetadata?.engineer || 'Lead Structural Engineer';
+      let date = new Date().toISOString().split('T')[0];
+
+      if (fileName.toLowerCase().endsWith('.ifc')) {
+        const { IfcStructuralEngine } = await import('@/features/architectural/engines/ifcStructuralEngine');
+        const bim = IfcStructuralEngine.parseIfc(content);
+        modelToUse = IfcStructuralEngine.interpretToStructuralModel(bim);
+        staadVersion = 'IFC 2x3 / Revit BIM Integration';
+      } else {
+        const parseResult = ANLParser.parse(content);
+        modelToUse = parseResult.model;
+        warningsToUse = parseResult.warnings;
+        staadVersion = parseResult.staadVersion || staadVersion;
+        engineer = parseResult.engineer || engineer;
+        date = parseResult.date || date;
+      }
+
       const id = customMetadata?.id || `prj_${Date.now()}`;
 
       const metadata: ProjectMetadata = {
         id,
-        name: customMetadata?.name || fileName.replace(/\.(anl|std)$/i, '') || 'Imported STAAD Model',
-        code: customMetadata?.code || `STAAD-${Math.floor(1000 + Math.random() * 9000)}`,
+        name: customMetadata?.name || fileName.replace(/\.(anl|std|ifc)$/i, '') || 'Imported Model',
+        code: customMetadata?.code || `STR-${Math.floor(1000 + Math.random() * 9000)}`,
         client: customMetadata?.client || 'Engineering Client',
-        engineer: parseResult.engineer || customMetadata?.engineer || 'Lead Structural Engineer',
+        engineer,
         location: customMetadata?.location || 'Sector 12, Phase II',
-        date: parseResult.date || new Date().toISOString().split('T')[0],
-        description: `Imported from ${fileName} with ${parseResult.model.nodes.size} nodes and ${parseResult.model.members.size} members.`,
+        date,
+        description: `Imported from ${fileName} with ${modelToUse.nodes.size} nodes and ${modelToUse.members.size} members.`,
         anlFileName: fileName,
         anlFileSize: content.length,
-        staadVersion: parseResult.staadVersion,
+        staadVersion,
         designSettings: { ...DEFAULT_DESIGN_SETTINGS, ...customMetadata?.designSettings },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -584,8 +683,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
       const storedProject: StoredProject = {
         metadata,
-        model: ProjectStorage.serializeModel(parseResult.model),
-        warnings: parseResult.warnings,
+        model: ProjectStorage.serializeModel(modelToUse),
+        warnings: warningsToUse,
         rawAnlContent: content,
       };
 
@@ -595,7 +694,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({
         projects: updated,
         activeProject: storedProject,
-        activeModel: parseResult.model,
+        activeModel: modelToUse,
         selectedMemberId: null,
         selectedNodeId: null,
         isImportModalOpen: false,
@@ -849,6 +948,34 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     const newMembers = new Map(currentModel.members);
     newMembers.set(memberId, updatedMember);
+
+    const updatedModel: NormalizedStructuralModel = {
+      ...currentModel,
+      members: newMembers,
+    };
+
+    const updatedProject: StoredProject = {
+      ...currentProj,
+      model: ProjectStorage.serializeModel(updatedModel),
+      metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+    };
+
+    await ProjectStorage.saveProject(updatedProject);
+    set({ activeModel: updatedModel, activeProject: updatedProject });
+  },
+
+  assignMemberLocalAxis: async (memberIds, betaAngle) => {
+    const currentModel = get().activeModel;
+    const currentProj = get().activeProject;
+    if (!currentModel || !currentProj) return;
+
+    const newMembers = new Map(currentModel.members);
+    for (const memberId of memberIds) {
+      const member = newMembers.get(memberId);
+      if (member) {
+        newMembers.set(memberId, { ...member, betaAngle });
+      }
+    }
 
     const updatedModel: NormalizedStructuralModel = {
       ...currentModel,
@@ -2415,6 +2542,1167 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       };
       await ProjectStorage.saveProject(updatedProject);
       set({ activeProject: updatedProject });
+    }
+  },
+
+  runFemAnalysis: async () => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel) return;
+
+    set({ isLoading: true });
+    // Yield to the event loop so the browser can paint the running loading screen
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    try {
+      const femResult = await runFemAnalysisAsync(activeModel, {
+        concreteE: activeProject?.metadata.designSettings?.concreteGrade === 'M30' ? 27386000 : 25000000,
+        concreteDensity: 25,
+      });
+
+      // Compute factored Load Combination forces by superposing per-load-case results.
+      // (The FEM solver processes raw load cases; combination results are derived here.)
+      let comboCases = femResult.memberForces;
+      let comboReactions = femResult.reactions;
+      let comboDrifts = femResult.storyDrifts;
+      const comboDisplacements: Map<number, { [lcId: number]: [number, number, number, number, number, number] }> = new Map(
+        Array.from(femResult.nodeDisplacements.entries()).map(([nid, m]) => [nid, { ...m }])
+      );
+      if (activeModel.loadCombinations && activeModel.loadCombinations.size > 0) {
+        const comboForces: { [memberId: number]: { [lcId: number]: { sectionLocation: number; axial: number; vy: number; vz: number; torsion: number; my: number; mz: number }[] } } = {};
+        const comboReacts: { [lcId: number]: { [nodeId: number]: { fx: number; fy: number; fz: number; mx: number; my: number; mz: number } } } = {};
+
+        // Group per-load-case records by loadCaseId
+        const caseForces = new Map<number, typeof femResult.memberForces>();
+        for (const mf of femResult.memberForces) {
+          const arr = caseForces.get(mf.loadCaseId) || [];
+          arr.push(mf);
+          caseForces.set(mf.loadCaseId, arr);
+        }
+        const caseReacts = new Map<number, typeof femResult.reactions>();
+        for (const r of femResult.reactions) {
+          const arr = caseReacts.get(r.loadCaseId) || [];
+          arr.push(r);
+          caseReacts.set(r.loadCaseId, arr);
+        }
+
+        for (const [cid, combo] of activeModel.loadCombinations.entries()) {
+          // --- Member forces ---
+          const perLoc: { [memberId: number]: { [locIndex: number]: { axial: number; vy: number; vz: number; torsion: number; my: number; mz: number } } } = {};
+          for (const factor of combo.factors) {
+            const cases = caseForces.get(factor.loadCaseId) || [];
+            for (const mf of cases) {
+              const cur = perLoc[mf.memberId] || {};
+              const idx = mf.sectionLocation;
+              const acc = cur[idx] || { axial: 0, vy: 0, vz: 0, torsion: 0, my: 0, mz: 0 };
+              acc.axial += factor.factor * (mf.axial || 0);
+              acc.vy += factor.factor * (mf.vy || 0);
+              acc.vz += factor.factor * (mf.vz || 0);
+              acc.torsion += factor.factor * (mf.torsion || 0);
+              acc.my += factor.factor * (mf.my || 0);
+              acc.mz += factor.factor * (mf.mz || 0);
+              cur[idx] = acc;
+              perLoc[mf.memberId] = cur;
+            }
+          }
+          for (const [memberId, locs] of Object.entries(perLoc)) {
+            for (const [locKey, f] of Object.entries(locs)) {
+              comboForces[Number(memberId)] = comboForces[Number(memberId)] || {};
+              comboForces[Number(memberId)][cid] = comboForces[Number(memberId)][cid] || [];
+              comboForces[Number(memberId)][cid].push({
+                sectionLocation: parseFloat(locKey) || 0,
+                axial: parseFloat(f.axial.toFixed(2)),
+                vy: parseFloat(f.vy.toFixed(2)),
+                vz: parseFloat(f.vz.toFixed(2)),
+                torsion: parseFloat(f.torsion.toFixed(2)),
+                my: parseFloat(f.my.toFixed(2)),
+                mz: parseFloat(f.mz.toFixed(2)),
+              });
+            }
+          }
+
+          // --- Reactions ---
+          const perNode: { [nodeId: number]: { fx: number; fy: number; fz: number; mx: number; my: number; mz: number } } = {};
+          for (const factor of combo.factors) {
+            for (const r of caseReacts.get(factor.loadCaseId) || []) {
+              const acc = perNode[r.nodeId] || { fx: 0, fy: 0, fz: 0, mx: 0, my: 0, mz: 0 };
+              acc.fx += factor.factor * (r.fx || 0);
+              acc.fy += factor.factor * (r.fy || 0);
+              acc.fz += factor.factor * (r.fz || 0);
+              acc.mx += factor.factor * (r.mx || 0);
+              acc.my += factor.factor * (r.my || 0);
+              acc.mz += factor.factor * (r.mz || 0);
+              perNode[r.nodeId] = acc;
+            }
+          }
+          comboReacts[cid] = perNode;
+        }
+
+        // --- Linear superposition of nodal displacements for each combination ---
+        for (const [cid, combo] of activeModel.loadCombinations.entries()) {
+          for (const [nodeId, caseMap] of femResult.nodeDisplacements.entries()) {
+            const acc: [number, number, number, number, number, number] = [0, 0, 0, 0, 0, 0];
+            for (const factor of combo.factors) {
+              const d = caseMap[factor.loadCaseId];
+              if (!d) continue;
+              for (let k = 0; k < 6; k++) acc[k] += factor.factor * d[k];
+            }
+            const existing = comboDisplacements.get(nodeId) || {};
+            existing[cid] = acc.map((v) => parseFloat(v.toFixed(6))) as [number, number, number, number, number, number];
+            comboDisplacements.set(nodeId, existing);
+          }
+        }
+
+        // Append combination member force records (O(N) direct mapping, zero searching)
+        const extraForces: typeof femResult.memberForces = [];
+        for (const [memberId, lcs] of Object.entries(comboForces)) {
+          for (const [lcId, list] of Object.entries(lcs)) {
+            let stationIdx = 0;
+            for (const f of list) {
+              extraForces.push({
+                memberId: Number(memberId),
+                loadCaseId: Number(lcId),
+                sectionLocation: f.sectionLocation ?? (stationIdx * 0.25),
+                axial: f.axial,
+                vy: f.vy,
+                vz: f.vz,
+                torsion: f.torsion,
+                my: f.my,
+                mz: f.mz,
+              });
+              stationIdx++;
+            }
+          }
+        }
+        comboCases = [...femResult.memberForces, ...extraForces];
+
+        // Append combination reaction records
+        const extraReacts: typeof femResult.reactions = [];
+        for (const [lcId, nodes] of Object.entries(comboReacts)) {
+          for (const [nodeId, r] of Object.entries(nodes)) {
+            extraReacts.push({
+              nodeId: Number(nodeId),
+              loadCaseId: Number(lcId),
+              fx: parseFloat(r.fx.toFixed(2)),
+              fy: parseFloat(r.fy.toFixed(2)),
+              fz: parseFloat(r.fz.toFixed(2)),
+              mx: parseFloat(r.mx.toFixed(2)),
+              my: parseFloat(r.my.toFixed(2)),
+              mz: parseFloat(r.mz.toFixed(2)),
+            });
+          }
+        }
+        comboReactions = [...femResult.reactions, ...extraReacts];
+      }
+
+      const updatedModel: NormalizedStructuralModel = {
+        ...activeModel,
+        reactions: comboReactions,
+        memberForces: comboCases,
+        storyDrifts: comboDrifts,
+        nodeDisplacements: comboDisplacements,
+      };
+
+      set({ activeModel: updatedModel, isLoading: false });
+
+      if (activeProject) {
+        const updatedProject: StoredProject = {
+          ...activeProject,
+          model: ProjectStorage.serializeModel(updatedModel),
+          metadata: {
+            ...activeProject.metadata,
+            updatedAt: new Date().toISOString(),
+          },
+        };
+        await ProjectStorage.saveProject(updatedProject);
+        set({ activeProject: updatedProject });
+      }
+    } catch (e) {
+      console.error('FEM analysis failed:', e);
+      set({ isLoading: false });
+    }
+  },
+
+  runSeismicAnalysis: async (params?: Partial<any>) => {
+    const { activeModel, activeProject, assignFrameLoads } = get();
+    if (!activeModel || activeModel.members.size === 0) return null;
+
+    // 1. Compute IS 1893:2016 equivalent-static seismic parameters from the real model
+    const summary = SeismicEngine.computeEquivalentStaticSeismic(activeModel, params);
+
+    // 2. Convert per-storey lateral forces into nodal EQX / EQZ frame loads.
+    //    Each storey force is distributed to the beam/column joints at that elevation.
+    if (summary.storeys.length > 0) {
+      // Collect storey lateral forces keyed by elevation
+      const storeyForces = summary.storeys.map((s) => ({
+        elevationY: s.elevationY,
+        qx: s.lateralForceQxKn,
+        qz: s.lateralForceQzKn,
+        nJoints: 1,
+      }));
+
+      // Distribute evenly across the joints at each elevation for EQX
+      for (const sf of storeyForces) {
+        const joints = Array.from(activeModel.nodes.values()).filter(
+          (n) => Math.abs(n.y - sf.elevationY) < 0.1
+        );
+        if (joints.length === 0) continue;
+        const perJointX = sf.qx / joints.length;
+        for (const j of joints) {
+          // EQX applies lateral load in X on this joint -> represented as equal and
+          // opposite nodal forces on the member ends of the two adjacent columns
+          const membersHere = Array.from(activeModel.members.values()).filter(
+            (m) =>
+              (m.startNodeId === j.id || m.endNodeId === j.id) &&
+              activeModel.nodes.get(m.startNodeId) &&
+              (
+                Math.abs(activeModel.nodes.get(m.startNodeId)!.y - sf.elevationY) < 0.1 ||
+                Math.abs(activeModel.nodes.get(m.endNodeId)!.y - sf.elevationY) < 0.1
+              )
+          );
+          if (membersHere.length === 0) continue;
+          // Assign a point/lateral load to the column member carrying X-lateral force
+          await assignFrameLoads([membersHere[0].id], {
+            memberId: 0,
+            loadPattern: 'EQX',
+            type: 'POINT',
+            w1: perJointX,
+            d1: 0.5,
+            direction: 'GLOBAL_X',
+          });
+        }
+      }
+    }
+
+    // 3. Rerun FEM so the EQ loads are analysed together with DL/LL
+    await get().runFemAnalysis();
+
+    return summary;
+  },
+
+  runAllDesignChecks: async () => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel || !activeProject || activeModel.members.size === 0) return 0;
+
+    const fck = activeProject.metadata.designSettings.concreteGrade === 'M30' ? 30 : 25;
+    const fy = activeProject.metadata.designSettings.steelGrade === 'Fe500D' ? 500 : 500;
+    const cover = activeProject.metadata.designSettings.clearCoverColumn || 40;
+
+    const summaryMap = new Map<number, MemberDesignSummary>();
+
+    for (const member of activeModel.members.values()) {
+      const forces = (activeModel.memberForces || []).filter((f) => f.memberId === member.id);
+      if (forces.length === 0) continue;
+
+      let maxPu = 0, maxVy = 0, maxVz = 0, maxMz = 0, maxMy = 0, govLC = 1;
+      for (const f of forces) {
+        if (Math.abs(f.axial) > Math.abs(maxPu)) { maxPu = f.axial; govLC = f.loadCaseId; }
+        if (Math.abs(f.vy) > Math.abs(maxVy)) maxVy = f.vy;
+        if (Math.abs(f.vz) > Math.abs(maxVz)) maxVz = f.vz;
+        if (Math.abs(f.mz) > Math.abs(maxMz)) maxMz = f.mz;
+        if (Math.abs(f.my) > Math.abs(maxMy)) maxMy = f.my;
+      }
+
+      const b = Math.round((member.section.zd || 0.3) * 1000);
+      const D = Math.round((member.section.yd || 0.45) * 1000);
+
+      let status: MemberDesignSummary['status'] = 'PASS';
+      const notes: string[] = [];
+
+      if (member.classification === 'COLUMN') {
+        const res = ColumnDesignEngine.design({
+          memberId: member.id,
+          b,
+          D,
+          unsupportedHeight: member.length || 3.5,
+          fck,
+          fy,
+          cover,
+          Pu: Math.abs(maxPu) || 650,
+          Mux: Math.abs(maxMz),
+          Muy: Math.abs(maxMy),
+          governingLoadCase: govLC,
+          allowedDiameters: [12, 16, 20, 25],
+        });
+        status = res.status;
+        if (res.status === 'FAIL') notes.push(`Bi-axial corner case exceeded (IR ${res.biaxialCheck.interactionRatio.toFixed(2)}).`);
+      } else if (member.classification === 'BEAM') {
+        const res = BeamDesignEngine.design({
+          memberId: member.id,
+          b,
+          D,
+          spanLength: member.length || 4,
+          fck,
+          fy,
+          Mu_top: Math.abs(forces.reduce((M, f) => Math.max(M, Math.abs(f.mz)), 0)),
+          Mu_bottom: Math.abs(forces.reduce((M, f) => Math.max(M, Math.abs(f.mz)), 0)) * 0.6,
+          Vu: Math.max(Math.abs(maxVy), Math.abs(maxVz)),
+        });
+        status = res.flexureTop.status === 'FAIL' || res.flexureBottom.status === 'FAIL' || res.shear.status === 'FAIL' ? 'FAIL' : 'PASS';
+        if (status === 'FAIL') notes.push('Flexure / shear demand exceeded section capacity.');
+      }
+
+      summaryMap.set(member.id, {
+        memberId: member.id,
+        classification: member.classification,
+        sectionDimensions: `${D}×${b} mm`,
+        governingLoadCase: govLC,
+        maxAxial: parseFloat(Math.abs(maxPu).toFixed(1)),
+        maxShear: parseFloat(Math.max(Math.abs(maxVy), Math.abs(maxVz)).toFixed(1)),
+        maxMoment: parseFloat(Math.max(Math.abs(maxMz), Math.abs(maxMy)).toFixed(1)),
+        status,
+        notes,
+      });
+    }
+
+    // Update member designStatus and attach designSummaries to the model
+    const members = new Map(activeModel.members);
+    for (const [mid, sum] of summaryMap.entries()) {
+      const m = members.get(mid);
+      if (m) {
+        members.set(mid, { ...m, designStatus: sum.status === 'FAIL'
+          ? 'FAIL' : sum.status === 'WARNING' ? 'WARNING' : 'PASS' });
+      }
+    }
+
+    const updatedModel: NormalizedStructuralModel = {
+      ...activeModel,
+      members,
+      designSummaries: summaryMap,
+    };
+
+    set({ activeModel: updatedModel });
+
+    if (activeProject) {
+      const updatedProject: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+        metadata: { ...activeProject.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+
+    return summaryMap.size;
+  },
+
+  generateBuildingGrid: async (
+    baysX = 3,
+    baysZ = 2,
+    widthX = 4.5,
+    widthZ = 4.0,
+    stories = 3,
+    storyH = 3.2
+  ) => {
+    set({ isLoading: true });
+    try {
+      const nodes = new Map<number, Node3D>();
+      const members = new Map<number, Member3D>();
+      const supports = new Map<number, Support3D>();
+      const plates = new Map();
+
+      let nodeIdCounter = 1;
+      let memberIdCounter = 1;
+
+      // Coordinate map to Node ID: `${s}_${ix}_${iz}` -> nodeId
+      const gridNodeMap = new Map<string, number>();
+
+      for (let s = 0; s <= stories; s++) {
+        const y = parseFloat((s * storyH).toFixed(3));
+        for (let ix = 0; ix <= baysX; ix++) {
+          const x = parseFloat((ix * widthX).toFixed(3));
+          for (let iz = 0; iz <= baysZ; iz++) {
+            const z = parseFloat((iz * widthZ).toFixed(3));
+            const id = nodeIdCounter++;
+            const isSupport = s === 0;
+
+            nodes.set(id, { id, x, y, z, isSupport });
+            gridNodeMap.set(`${s}_${ix}_${iz}`, id);
+
+            if (isSupport) {
+              supports.set(id, {
+                nodeId: id,
+                type: 'FIXED',
+                releases: { fx: false, fy: false, fz: false, mx: false, my: false, mz: false },
+              });
+            }
+          }
+        }
+      }
+
+      // Create Columns (Vertical between stories)
+      for (let s = 0; s < stories; s++) {
+        for (let ix = 0; ix <= baysX; ix++) {
+          for (let iz = 0; iz <= baysZ; iz++) {
+            const startId = gridNodeMap.get(`${s}_${ix}_${iz}`)!;
+            const endId = gridNodeMap.get(`${s + 1}_${ix}_${iz}`)!;
+            const id = memberIdCounter++;
+
+            members.set(id, {
+              id,
+              startNodeId: startId,
+              endNodeId: endId,
+              length: storyH,
+              classification: 'COLUMN',
+              isAutoClassified: true,
+              section: { type: 'RECTANGULAR', yd: 0.45, zd: 0.45, name: 'C450x450' },
+              materialName: 'CONCRETE',
+              designStatus: 'NOT_DESIGNED',
+            });
+          }
+        }
+      }
+
+      // Create Beams (Horizontal at each elevated story s >= 1)
+      for (let s = 1; s <= stories; s++) {
+        // X-direction Beams
+        for (let ix = 0; ix < baysX; ix++) {
+          for (let iz = 0; iz <= baysZ; iz++) {
+            const startId = gridNodeMap.get(`${s}_${ix}_${iz}`)!;
+            const endId = gridNodeMap.get(`${s}_${ix + 1}_${iz}`)!;
+            const id = memberIdCounter++;
+
+            members.set(id, {
+              id,
+              startNodeId: startId,
+              endNodeId: endId,
+              length: widthX,
+              classification: 'BEAM',
+              isAutoClassified: true,
+              section: { type: 'RECTANGULAR', yd: 0.45, zd: 0.3, name: 'B300x450' },
+              materialName: 'CONCRETE',
+              designStatus: 'NOT_DESIGNED',
+            });
+          }
+        }
+
+        // Z-direction Beams
+        for (let ix = 0; ix <= baysX; ix++) {
+          for (let iz = 0; iz < baysZ; iz++) {
+            const startId = gridNodeMap.get(`${s}_${ix}_${iz}`)!;
+            const endId = gridNodeMap.get(`${s}_${ix}_${iz + 1}`)!;
+            const id = memberIdCounter++;
+
+            members.set(id, {
+              id,
+              startNodeId: startId,
+              endNodeId: endId,
+              length: widthZ,
+              classification: 'BEAM',
+              isAutoClassified: true,
+              section: { type: 'RECTANGULAR', yd: 0.45, zd: 0.3, name: 'B300x450' },
+              materialName: 'CONCRETE',
+              designStatus: 'NOT_DESIGNED',
+            });
+          }
+        }
+      }
+
+      const totalBeams = Array.from(members.values()).filter((m) => m.classification === 'BEAM').length;
+      const totalColumns = Array.from(members.values()).filter((m) => m.classification === 'COLUMN').length;
+
+      const newModel: NormalizedStructuralModel = {
+        nodes,
+        members,
+        plates,
+        supports,
+        loadCases: new Map([
+          [1, { id: 1, title: 'Dead Load (DL)', type: 'DEAD', isCombination: false }],
+          [2, { id: 2, title: 'Live Load (LL)', type: 'LIVE', isCombination: false }],
+          [3, { id: 3, title: 'Seismic Load X (EQX)', type: 'SEISMIC', direction: 'X', isCombination: false }],
+          [4, { id: 4, title: 'Seismic Load Z (EQZ)', type: 'SEISMIC', direction: 'Z', isCombination: false }],
+        ]),
+        loadCombinations: new Map([
+          [101, { id: 101, title: '1.5(DL + LL)', factors: [{ loadCaseId: 1, factor: 1.5 }, { loadCaseId: 2, factor: 1.5 }] }],
+          [102, { id: 102, title: '1.2(DL + LL + EQX)', factors: [{ loadCaseId: 1, factor: 1.2 }, { loadCaseId: 2, factor: 1.2 }, { loadCaseId: 3, factor: 1.2 }] }],
+        ]),
+        reactions: [],
+        memberForces: [],
+        storyDrifts: [],
+        boundingBox: {
+          minX: 0,
+          maxX: baysX * widthX,
+          minY: 0,
+          maxY: stories * storyH,
+          minZ: 0,
+          maxZ: baysZ * widthZ,
+        },
+        statistics: {
+          totalNodes: nodes.size,
+          totalMembers: members.size,
+          totalBeams,
+          totalColumns,
+          totalPlates: 0,
+          totalSupports: supports.size,
+          totalLoadCases: 4,
+          totalCombinations: 2,
+          maxElevation: stories * storyH,
+          baseElevation: 0,
+        },
+      };
+
+      // Run FEM solver on the newly generated structural building frame via Web Worker
+      const femResult = await runFemAnalysisAsync(newModel);
+      newModel.reactions = femResult.reactions;
+      newModel.memberForces = femResult.memberForces;
+      newModel.storyDrifts = femResult.storyDrifts;
+
+      const currentProj = get().activeProject;
+      let targetProj: StoredProject;
+      if (!currentProj) {
+        targetProj = {
+          metadata: {
+            id: `prj_${Date.now()}`,
+            name: `${baysX}x${baysZ} Bay G+${stories - 1} Building Model`,
+            code: `PRJ-${new Date().getFullYear()}-ETABS`,
+            client: 'Structure AI Client',
+            engineer: 'Structural Engineer',
+            location: 'Site Location',
+            date: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            description: 'Parametric Multi-Storey Building Model',
+            designSettings: DEFAULT_DESIGN_SETTINGS,
+          },
+          model: ProjectStorage.serializeModel(newModel),
+          warnings: [],
+        };
+      } else {
+        targetProj = {
+          ...currentProj,
+          model: ProjectStorage.serializeModel(newModel),
+          metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+        };
+      }
+
+      await ProjectStorage.saveProject(targetProj);
+      set({ activeModel: newModel, activeProject: targetProj, isLoading: false });
+    } catch (e) {
+      console.error('Failed to generate building grid:', e);
+      set({ isLoading: false });
+    }
+  },
+
+  addStructuralNode: async (x: number, y: number, z: number, isSupport = false) => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel) return -1;
+
+    const newId = Math.max(0, ...Array.from(activeModel.nodes.keys())) + 1;
+    const newNodes = new Map(activeModel.nodes);
+    newNodes.set(newId, { id: newId, x, y, z, isSupport });
+
+    const newSupports = new Map(activeModel.supports);
+    if (isSupport) {
+      newSupports.set(newId, {
+        nodeId: newId,
+        type: 'FIXED',
+        releases: { fx: false, fy: false, fz: false, mx: false, my: false, mz: false },
+      });
+    }
+
+    const updatedModel: NormalizedStructuralModel = {
+      ...activeModel,
+      nodes: newNodes,
+      supports: newSupports,
+      statistics: {
+        ...activeModel.statistics,
+        totalNodes: newNodes.size,
+        totalSupports: newSupports.size,
+      },
+    };
+
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+    return newId;
+  },
+
+  addStructuralMember: async (
+    startNodeId: number,
+    endNodeId: number,
+    section: Partial<CrossSection> = { type: 'RECTANGULAR', yd: 0.45, zd: 0.3 },
+    classification?: 'COLUMN' | 'BEAM'
+  ) => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel) return -1;
+
+    const start = activeModel.nodes.get(startNodeId);
+    const end = activeModel.nodes.get(endNodeId);
+    if (!start || !end) return -1;
+
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dz = end.z - start.z;
+    const length = parseFloat(Math.sqrt(dx * dx + dy * dy + dz * dz).toFixed(3));
+
+    const isCol = classification ? classification === 'COLUMN' : Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > Math.abs(dz);
+
+    const newId = Math.max(0, ...Array.from(activeModel.members.keys())) + 1;
+    const newMembers = new Map(activeModel.members);
+    newMembers.set(newId, {
+      id: newId,
+      startNodeId,
+      endNodeId,
+      length,
+      classification: isCol ? 'COLUMN' : 'BEAM',
+      isAutoClassified: true,
+      section: {
+        type: section.type || 'RECTANGULAR',
+        yd: section.yd || (isCol ? 0.45 : 0.45),
+        zd: section.zd || (isCol ? 0.45 : 0.3),
+        name: section.name || (isCol ? 'C450x450' : 'B300x450'),
+      },
+      materialName: 'CONCRETE',
+      designStatus: 'NOT_DESIGNED',
+    });
+
+    const totalBeams = Array.from(newMembers.values()).filter((m) => m.classification === 'BEAM').length;
+    const totalColumns = Array.from(newMembers.values()).filter((m) => m.classification === 'COLUMN').length;
+
+    const updatedModel: NormalizedStructuralModel = {
+      ...activeModel,
+      members: newMembers,
+      statistics: {
+        ...activeModel.statistics,
+        totalMembers: newMembers.size,
+        totalBeams,
+        totalColumns,
+      },
+    };
+
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+    return newId;
+  },
+
+  addStructuralPlate: async (
+    nodeIds: number[],
+    classification: 'SLAB' | 'WALL' = 'SLAB',
+    thickness?: number,
+    materialName = 'M25'
+  ) => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel || nodeIds.length < 3) return -1;
+
+    const existingNodes = nodeIds.filter((nid) => activeModel.nodes.has(nid));
+    if (existingNodes.length < 3) return -1;
+
+    const newId = Math.max(0, ...Array.from(activeModel.plates.keys())) + 1;
+    const newPlates = new Map(activeModel.plates);
+    newPlates.set(newId, {
+      id: newId,
+      nodeIds: existingNodes,
+      thickness: thickness ?? (classification === 'WALL' ? 0.23 : 0.125),
+      materialName,
+      classification,
+    });
+
+    const updatedModel: NormalizedStructuralModel = {
+      ...activeModel,
+      plates: newPlates,
+      statistics: {
+        ...activeModel.statistics,
+        totalPlates: newPlates.size,
+      },
+    };
+
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+    return newId;
+  },
+
+  deleteStructuralElements: async (nodeIds = [], memberIds = []) => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel) return;
+
+    const newNodes = new Map(activeModel.nodes);
+    const newMembers = new Map(activeModel.members);
+    const newSupports = new Map(activeModel.supports);
+    const newMemberLoads = new Map(activeModel.memberLoads || []);
+    const newMemberModifiers = new Map(activeModel.memberModifiers || []);
+
+    const toDelete = new Set<number>(memberIds);
+    memberIds.forEach((id) => newMembers.delete(id));
+    nodeIds.forEach((id) => {
+      newNodes.delete(id);
+      newSupports.delete(id);
+      // Remove any member connected to this deleted node
+      for (const [memId, mem] of newMembers.entries()) {
+        if (mem.startNodeId === id || mem.endNodeId === id) {
+          newMembers.delete(memId);
+          toDelete.add(memId);
+        }
+      }
+    });
+
+    // Clean up stale per-member references (loads, modifiers, forces, reactions)
+    toDelete.forEach((id) => {
+      newMemberLoads.delete(id);
+      newMemberModifiers.delete(id);
+    });
+    const memberForces = activeModel.memberForces.filter((mf) => !toDelete.has(mf.memberId));
+    const reactions = activeModel.reactions.filter((r) =>
+      !nodeIds.includes(r.nodeId) && !toDelete.has(r.nodeId)
+    );
+
+    const totalBeams = Array.from(newMembers.values()).filter((m) => m.classification === 'BEAM').length;
+    const totalColumns = Array.from(newMembers.values()).filter((m) => m.classification === 'COLUMN').length;
+
+    const updatedModel: NormalizedStructuralModel = {
+      ...activeModel,
+      nodes: newNodes,
+      members: newMembers,
+      supports: newSupports,
+      memberLoads: newMemberLoads,
+      memberModifiers: newMemberModifiers,
+      memberForces,
+      reactions,
+      statistics: {
+        ...activeModel.statistics,
+        totalNodes: newNodes.size,
+        totalMembers: newMembers.size,
+        totalBeams,
+        totalColumns,
+        totalSupports: newSupports.size,
+      },
+    };
+
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+  },
+
+  assignMemberSection: async (memberIds: number[], section: Partial<CrossSection>) => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel) return;
+
+    const newMembers = new Map(activeModel.members);
+    memberIds.forEach((id) => {
+      const mem = newMembers.get(id);
+      if (mem) {
+        newMembers.set(id, {
+          ...mem,
+          section: {
+            ...mem.section,
+            ...section,
+          },
+        });
+      }
+    });
+
+    const updatedModel = { ...activeModel, members: newMembers };
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+  },
+
+  assignSupportRestraint: async (nodeIds: number[], type: 'FIXED' | 'PINNED' | 'ROLLER') => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel) return;
+
+    const newSupports = new Map(activeModel.supports);
+    const newNodes = new Map(activeModel.nodes);
+
+    nodeIds.forEach((id) => {
+      const n = newNodes.get(id);
+      if (n) {
+        newNodes.set(id, { ...n, isSupport: true });
+        newSupports.set(id, {
+          nodeId: id,
+          type,
+          releases: {
+            // PINNED: translations fixed, rotations released
+            // ROLLER: additionally releases one horizontal translation (fx) so it can slide,
+            //         while still resisting vertical (fy) gravity and staying stable
+            fx: type === 'ROLLER',
+            fy: false,
+            fz: false,
+            mx: type === 'PINNED' || type === 'ROLLER',
+            my: type === 'PINNED' || type === 'ROLLER',
+            mz: type === 'PINNED' || type === 'ROLLER',
+          },
+        });
+      }
+    });
+
+    const updatedModel = { ...activeModel, nodes: newNodes, supports: newSupports };
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+  },
+
+  assignFrameLoads: async (memberIds: number[], load: MemberLoad) => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel) return;
+
+    const newMemberLoads = new Map(activeModel.memberLoads || []);
+    memberIds.forEach((id) => {
+      const existing = newMemberLoads.get(id) || [];
+      // Replace existing load of same pattern or append
+      const filtered = existing.filter((l) => l.loadPattern !== load.loadPattern);
+      newMemberLoads.set(id, [...filtered, { ...load, memberId: id, id: `load_${id}_${Date.now()}_${Math.random().toString(36).substring(2, 5)}` }]);
+    });
+
+    const updatedModel = { ...activeModel, memberLoads: newMemberLoads };
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+  },
+
+  deleteMemberLoads: async (memberIds: number[]) => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel) return;
+
+    const newMemberLoads = new Map(activeModel.memberLoads || []);
+    memberIds.forEach((id) => newMemberLoads.delete(id));
+
+    const updatedModel = { ...activeModel, memberLoads: newMemberLoads };
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+  },
+
+  assignShellLoads: async (levelY: number, load: ShellLoad) => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel) return;
+
+    const existingLoads = (activeModel.shellLoads || []).filter(
+      (sl) => !(Math.abs(sl.levelY - levelY) < 0.1 && sl.loadPattern === load.loadPattern)
+    );
+    const newShellLoads = [...existingLoads, { ...load, levelY, id: `sload_${levelY}_${Date.now()}` }];
+
+    const updatedModel = { ...activeModel, shellLoads: newShellLoads };
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+  },
+
+  assignMemberModifiers: async (memberIds: number[], modifiers: Partial<MemberModifier>) => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel) return;
+
+    const newModifiers = new Map(activeModel.memberModifiers || []);
+    memberIds.forEach((id) => {
+      const current = newModifiers.get(id) || {
+        memberId: id,
+        axialArea: 1.0,
+        shearY: 1.0,
+        shearZ: 1.0,
+        torsionJ: 0.2,
+        momentIyy: 0.35,
+        momentIzz: 0.35,
+      };
+      newModifiers.set(id, { ...current, ...modifiers, memberId: id });
+    });
+
+    const updatedModel = { ...activeModel, memberModifiers: newModifiers };
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+  },
+
+  replicateStory: async (sourceElevationY: number, targetElevationsY: number[]) => {
+    const { activeModel, activeProject, runFemAnalysis } = get();
+    if (!activeModel || targetElevationsY.length === 0) return;
+
+    const newNodes = new Map(activeModel.nodes);
+    const newMembers = new Map(activeModel.members);
+    const newMemberLoads = new Map(activeModel.memberLoads || []);
+
+    let maxNodeId = Math.max(0, ...Array.from(newNodes.keys()));
+    let maxMemId = Math.max(0, ...Array.from(newMembers.keys()));
+
+    // Find all nodes at source elevation
+    const sourceNodes = Array.from(newNodes.values()).filter(
+      (n) => Math.abs(n.y - sourceElevationY) < 0.15
+    );
+
+    // Find all beams at source elevation
+    const sourceBeams = Array.from(newMembers.values()).filter((m) => {
+      const sNode = newNodes.get(m.startNodeId);
+      const eNode = newNodes.get(m.endNodeId);
+      return (
+        sNode &&
+        eNode &&
+        Math.abs(sNode.y - sourceElevationY) < 0.15 &&
+        Math.abs(eNode.y - sourceElevationY) < 0.15
+      );
+    });
+
+    // Find all columns whose TOP node is at the source elevation (so we can
+    // replicate the column below each target storey layout)
+    const sourceColumns = Array.from(newMembers.values()).filter((m) => {
+      const sNode = newNodes.get(m.startNodeId);
+      const eNode = newNodes.get(m.endNodeId);
+      if (!sNode || !eNode) return false;
+      const topNode = sNode.y > eNode.y ? sNode : eNode;
+      return (
+        m.classification === 'COLUMN' &&
+        Math.abs(topNode.y - sourceElevationY) < 0.15
+      );
+    });
+
+    const newMemberModifiers = new Map(activeModel.memberModifiers || []);
+
+    for (const targetY of targetElevationsY) {
+      if (Math.abs(targetY - sourceElevationY) < 0.1) continue;
+
+      const sourceToTargetNodeMap = new Map<number, number>();
+
+      // 1. Create duplicate nodes at target elevation
+      sourceNodes.forEach((sn) => {
+        // Check if node already exists at target coordinate
+        const existingNode = Array.from(newNodes.values()).find(
+          (n) =>
+            Math.abs(n.x - sn.x) < 0.05 &&
+            Math.abs(n.z - sn.z) < 0.05 &&
+            Math.abs(n.y - targetY) < 0.1
+        );
+
+        if (existingNode) {
+          sourceToTargetNodeMap.set(sn.id, existingNode.id);
+        } else {
+          maxNodeId += 1;
+          newNodes.set(maxNodeId, {
+            id: maxNodeId,
+            x: sn.x,
+            y: targetY,
+            z: sn.z,
+            isSupport: false,
+          });
+          sourceToTargetNodeMap.set(sn.id, maxNodeId);
+        }
+      });
+
+      // 2. Duplicate framing beams
+      sourceBeams.forEach((sb) => {
+        const newStartNodeId = sourceToTargetNodeMap.get(sb.startNodeId);
+        const newEndNodeId = sourceToTargetNodeMap.get(sb.endNodeId);
+
+        if (newStartNodeId && newEndNodeId) {
+          // Check if beam already exists
+          const existingBeam = Array.from(newMembers.values()).find(
+            (m) =>
+              (m.startNodeId === newStartNodeId && m.endNodeId === newEndNodeId) ||
+              (m.startNodeId === newEndNodeId && m.endNodeId === newStartNodeId)
+          );
+
+          if (!existingBeam) {
+            maxMemId += 1;
+            newMembers.set(maxMemId, {
+              id: maxMemId,
+              startNodeId: newStartNodeId,
+              endNodeId: newEndNodeId,
+              length: sb.length,
+              classification: 'BEAM',
+              isAutoClassified: true,
+              section: { ...sb.section },
+              materialName: sb.materialName,
+              designStatus: 'NOT_DESIGNED',
+            });
+
+            // Replicate beam loads if any
+            const loads = newMemberLoads.get(sb.id);
+            if (loads) {
+              newMemberLoads.set(
+                maxMemId,
+                loads.map((l) => ({ ...l, memberId: maxMemId }))
+              );
+            }
+
+            // Replicate member modifiers if any
+            const mod = activeModel.memberModifiers?.get(sb.id);
+            if (mod) {
+              newMemberModifiers.set(maxMemId, { ...mod, memberId: maxMemId });
+            }
+          }
+        }
+      });
+
+      // 3. Duplicate columns whose top joint is at the target elevation
+      sourceColumns.forEach((sc) => {
+        const topSource = newNodes.get(sc.startNodeId);
+        const topSourceIsTop =
+          topSource &&
+          Math.abs(topSource.y - sourceElevationY) < 0.15 &&
+          sc.startNodeId === topSource.id;
+        // The top source node maps to a target node; re-derive column ends:
+        const sNode = newNodes.get(sc.startNodeId);
+        const eNode = newNodes.get(sc.endNodeId);
+        if (!sNode || !eNode) return;
+
+        // Top node of source column is the one at sourceElevationY
+        const srcTop = sNode.y > eNode.y ? sNode : eNode;
+        const srcBot = sNode.y > eNode.y ? eNode : sNode;
+
+        const targetTopNodeId = sourceToTargetNodeMap.get(srcTop.id);
+        if (!targetTopNodeId) return;
+
+        // Find matching existing node below target elevation (same x, z, y = srcBot.y + offset)
+        const targetBotNodeId = Array.from(newNodes.values()).find(
+          (n) =>
+            Math.abs(n.x - srcBot.x) < 0.05 &&
+            Math.abs(n.z - srcBot.z) < 0.05 &&
+            Math.abs(n.y - srcBot.y) < 0.1
+        )?.id;
+
+        if (!targetBotNodeId) return;
+
+        const existingCol = Array.from(newMembers.values()).find(
+          (m) =>
+            (m.startNodeId === targetBotNodeId && m.endNodeId === targetTopNodeId) ||
+            (m.startNodeId === targetTopNodeId && m.endNodeId === targetBotNodeId)
+        );
+
+        if (!existingCol) {
+          maxMemId += 1;
+          const botNode = newNodes.get(targetBotNodeId)!;
+          const topNode = newNodes.get(targetTopNodeId)!;
+          const dy = topNode.y - botNode.y;
+          newMembers.set(maxMemId, {
+            id: maxMemId,
+            startNodeId: botNode.id,
+            endNodeId: topNode.id,
+            length: parseFloat(Math.abs(dy).toFixed(3)),
+            classification: 'COLUMN',
+            isAutoClassified: true,
+            section: { ...sc.section },
+            materialName: sc.materialName,
+            designStatus: 'NOT_DESIGNED',
+          });
+
+          const mod = activeModel.memberModifiers?.get(sc.id);
+          if (mod) {
+            newMemberModifiers.set(maxMemId, { ...mod, memberId: maxMemId });
+          }
+        }
+      });
+    }
+
+    const updatedModel = {
+      ...activeModel,
+      nodes: newNodes,
+      members: newMembers,
+      memberLoads: newMemberLoads,
+      memberModifiers: newMemberModifiers,
+      statistics: {
+        ...activeModel.statistics,
+        totalNodes: newNodes.size,
+        totalMembers: newMembers.size,
+        totalBeams: Array.from(newMembers.values()).filter((m) => m.classification === 'BEAM').length,
+        totalColumns: Array.from(newMembers.values()).filter((m) => m.classification === 'COLUMN').length,
+      },
+    };
+
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+
+    await runFemAnalysis();
+  },
+
+  updateLoadPatterns: async (patterns: LoadCase[]) => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel) return;
+
+    const newMap = new Map<number, LoadCase>();
+    patterns.forEach((p) => newMap.set(p.id, p));
+
+    const updatedModel = { ...activeModel, loadCases: newMap };
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
+    }
+  },
+
+  updateLoadCombinations: async (combos: LoadCombination[]) => {
+    const { activeModel, activeProject } = get();
+    if (!activeModel) return;
+
+    const newMap = new Map<number, LoadCombination>();
+    combos.forEach((c) => newMap.set(c.id, c));
+
+    const updatedModel = { ...activeModel, loadCombinations: newMap };
+    set({ activeModel: updatedModel });
+    if (activeProject) {
+      const updatedProj: StoredProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+      };
+      await ProjectStorage.saveProject(updatedProj);
+      set({ activeProject: updatedProj });
     }
   },
 }));

@@ -29,6 +29,7 @@ import {
   Check,
   Box,
   HardHat,
+  FolderPlus,
 } from 'lucide-react';
 import { ConcreteVolumeEngine } from '@/features/calculations/concreteVolumeEngine';
 
@@ -42,6 +43,7 @@ export const ProjectDashboard: React.FC = () => {
     deleteInactiveProjects,
     setActiveView,
     setImportModalOpen,
+    setNewProjectModalOpen,
     batchUpdateSections,
   } = useProjectStore();
   const { user } = useAuth();
@@ -127,29 +129,38 @@ export const ProjectDashboard: React.FC = () => {
     <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-ui-background font-sans">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Project Status & Actions Header */}
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4 px-5 py-4 rounded-xl bg-white border border-slate-200 shadow-xs">
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="px-2 py-0.5 bg-slate-200 text-deep-navy font-mono text-xs rounded font-semibold border border-ui-border">
-                {activeProject?.metadata.code || 'PRJ-2026-04A'}
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="px-2 py-0.5 bg-slate-100 text-slate-800 font-mono text-xs rounded font-semibold border border-slate-200">
+                {activeProject?.metadata.code || 'PRJ-2026-6MILE'}
               </span>
-              <span className="px-2 py-0.5 bg-slate-800 text-white font-mono text-[11px] rounded">
+              <span className="px-2 py-0.5 bg-slate-900 text-cyan-300 font-mono text-[11px] rounded font-bold">
                 STAAD Model Loaded
               </span>
-              <span className="px-2 py-0.5 bg-blue-100 text-blue-900 font-mono text-[11px] rounded border border-blue-200">
+              <span className="px-2 py-0.5 bg-blue-50 text-blue-600 font-mono text-[11px] rounded border border-blue-200 font-semibold">
                 Phase 1 Active
               </span>
             </div>
-            <h1 className="text-xl font-headline font-bold text-deep-navy">
-              {activeProject?.metadata.name || 'G+4 RCC Residential Building'}
+            <h1 className="text-xl font-bold text-slate-900">
+              {activeProject?.metadata.name || 'G+4 RCC Residential Building (6 MILES)'}
             </h1>
             <p className="text-xs text-slate-500 font-sans mt-0.5">
-              Engineer: {activeProject?.metadata.engineer || 'Lead Engineer'} • Location:{' '}
-              {activeProject?.metadata.location || 'Sector 12, Phase II'} • Last updated: Today
+              Engineer: {activeProject?.metadata.engineer || 'Structural Engineer'} • Location:{' '}
+              {activeProject?.metadata.location || '6 Miles Site, Phase II'} • Last updated: Today
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setNewProjectModalOpen(true)}
+              className="fx-glow-btn flex items-center gap-1.5 px-3.5 py-1.5 font-mono text-xs font-bold rounded transition-all"
+              title="Create a New Structural Project"
+            >
+              <FolderPlus className="w-3.5 h-3.5" />
+              <span>+ New Project</span>
+            </button>
+
             {activeModel && (
               <button
                 onClick={handleRunGlobalAutoFix}
@@ -163,9 +174,9 @@ export const ProjectDashboard: React.FC = () => {
 
             <button
               onClick={() => setImportModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-ui-border hover:bg-slate-50 text-slate-800 font-mono text-xs font-semibold rounded shadow-sm transition-colors"
+              className="fx-ghost-btn flex items-center gap-1.5 px-3 py-1.5 font-mono text-xs font-semibold rounded transition-all"
             >
-              <Upload className="w-3.5 h-3.5 text-slate-500" />
+              <Upload className="w-3.5 h-3.5" />
               Import ANL
             </button>
 
@@ -173,12 +184,12 @@ export const ProjectDashboard: React.FC = () => {
               <button
                 onClick={() => handleShare(activeProject)}
                 disabled={sharingProjectId === activeProject.metadata.id}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-indigo-200 hover:bg-indigo-50 text-indigo-700 font-mono text-xs font-semibold rounded shadow-sm transition-colors disabled:opacity-50"
+                className="fx-ghost-btn flex items-center gap-1.5 px-3 py-1.5 font-mono text-xs font-semibold rounded transition-all disabled:opacity-50"
                 title="Copy share link to clipboard"
               >
                 {shareLinkCopied === activeProject.metadata.id ? (
                   <>
-                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    <Check className="w-3.5 h-3.5 text-emerald-500" />
                     Link Copied!
                   </>
                 ) : (
@@ -192,7 +203,7 @@ export const ProjectDashboard: React.FC = () => {
 
             <button
               onClick={() => setActiveView('3d-model')}
-              className="flex items-center gap-1.5 px-4 py-1.5 bg-secondary-brand hover:bg-blue-700 text-white font-mono text-xs font-semibold rounded shadow transition-colors"
+              className="fx-glow-btn flex items-center gap-1.5 px-4 py-1.5 font-mono text-xs font-semibold rounded transition-all"
             >
               <span>View 3D Model</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -207,11 +218,11 @@ export const ProjectDashboard: React.FC = () => {
             {/* Total Elements */}
             <div
               onClick={() => setActiveView('elements')}
-              className="bg-surface-card border border-ui-border rounded-md p-3.5 flex flex-col justify-between hover:border-slate-400 cursor-pointer transition-all shadow-sm"
+              className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between hover:border-blue-400 hover:shadow-xs cursor-pointer transition-all relative overflow-hidden"
             >
-              <span className="font-mono text-[11px] font-semibold text-slate-500 uppercase">ELEMENTS</span>
+              <span className="font-mono text-[11px] font-semibold text-slate-500 uppercase tracking-wider">ELEMENTS</span>
               <div className="flex items-end justify-between mt-3">
-                <span className="font-mono text-2xl font-bold text-deep-navy leading-none">
+                <span className="font-mono text-2xl font-bold text-slate-900 leading-none">
                   {stats.totalMembers}
                 </span>
                 <Layers className="w-5 h-5 text-slate-400" />
@@ -221,11 +232,11 @@ export const ProjectDashboard: React.FC = () => {
             {/* Beams */}
             <div
               onClick={() => setActiveView('member-forces')}
-              className="bg-surface-card border border-ui-border rounded-md p-3.5 flex flex-col justify-between hover:border-slate-400 cursor-pointer transition-all shadow-sm"
+              className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between hover:border-blue-400 hover:shadow-xs cursor-pointer transition-all relative overflow-hidden"
             >
-              <span className="font-mono text-[11px] font-semibold text-slate-500 uppercase">BEAMS</span>
+              <span className="font-mono text-[11px] font-semibold text-slate-500 uppercase tracking-wider">BEAMS</span>
               <div className="flex items-end justify-between mt-3">
-                <span className="font-mono text-2xl font-bold text-sky-700 leading-none">
+                <span className="font-mono text-2xl font-bold text-sky-600 leading-none">
                   {stats.totalBeams}
                 </span>
                 <span className="w-4 h-1 bg-sky-500 rounded-full mb-1.5" />
@@ -235,11 +246,11 @@ export const ProjectDashboard: React.FC = () => {
             {/* Columns */}
             <div
               onClick={() => setActiveView('member-forces')}
-              className="bg-surface-card border border-ui-border rounded-md p-3.5 flex flex-col justify-between hover:border-slate-400 cursor-pointer transition-all shadow-sm"
+              className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between hover:border-blue-400 hover:shadow-xs cursor-pointer transition-all relative overflow-hidden"
             >
-              <span className="font-mono text-[11px] font-semibold text-slate-500 uppercase">COLUMNS</span>
+              <span className="font-mono text-[11px] font-semibold text-slate-500 uppercase tracking-wider">COLUMNS</span>
               <div className="flex items-end justify-between mt-3">
-                <span className="font-mono text-2xl font-bold text-emerald-700 leading-none">
+                <span className="font-mono text-2xl font-bold text-emerald-600 leading-none">
                   {stats.totalColumns}
                 </span>
                 <span className="w-1.5 h-4 bg-emerald-500 rounded-full mb-1" />
@@ -249,11 +260,11 @@ export const ProjectDashboard: React.FC = () => {
             {/* Plates / Slabs */}
             <div
               onClick={() => setActiveView('3d-model')}
-              className="bg-surface-card border border-ui-border rounded-md p-3.5 flex flex-col justify-between hover:border-slate-400 cursor-pointer transition-all shadow-sm"
+              className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between hover:border-blue-400 hover:shadow-xs cursor-pointer transition-all relative overflow-hidden"
             >
-              <span className="font-mono text-[11px] font-semibold text-slate-500 uppercase">PLATES</span>
+              <span className="font-mono text-[11px] font-semibold text-slate-500 uppercase tracking-wider">PLATES</span>
               <div className="flex items-end justify-between mt-3">
-                <span className="font-mono text-2xl font-bold text-indigo-700 leading-none">
+                <span className="font-mono text-2xl font-bold text-indigo-600 leading-none">
                   {stats.totalPlates}
                 </span>
                 <Square className="w-4 h-4 text-indigo-400" />
@@ -263,11 +274,11 @@ export const ProjectDashboard: React.FC = () => {
             {/* Supports / Footings */}
             <div
               onClick={() => setActiveView('joint-reactions')}
-              className="bg-surface-card border border-ui-border rounded-md p-3.5 flex flex-col justify-between hover:border-slate-400 cursor-pointer transition-all shadow-sm"
+              className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between hover:border-blue-400 hover:shadow-xs cursor-pointer transition-all relative overflow-hidden"
             >
-              <span className="font-mono text-[11px] font-semibold text-slate-500 uppercase">SUPPORTS</span>
+              <span className="font-mono text-[11px] font-semibold text-slate-500 uppercase tracking-wider">SUPPORTS</span>
               <div className="flex items-end justify-between mt-3">
-                <span className="font-mono text-2xl font-bold text-red-700 leading-none">
+                <span className="font-mono text-2xl font-bold text-slate-700 leading-none">
                   {stats.totalSupports}
                 </span>
                 <span className="w-3 h-3 bg-red-500 rotate-45 mb-1" />
@@ -278,51 +289,51 @@ export const ProjectDashboard: React.FC = () => {
           {/* Model Health / Warnings Summary */}
           <div
             onClick={() => setActiveView('warnings')}
-            className="col-span-12 lg:col-span-4 bg-surface-card border border-ui-border rounded-md p-4 flex flex-col justify-between shadow-sm cursor-pointer hover:border-slate-400 transition-all"
+            className="col-span-12 lg:col-span-4 bg-surface-card/70 backdrop-blur-sm border border-ui-border rounded-lg p-4 flex flex-col justify-between shadow-sm cursor-pointer hover:border-secondary-brand/50 transition-all fx-scanlines relative overflow-hidden"
           >
             <div className="flex items-center justify-between border-b border-ui-border pb-2">
-              <h3 className="font-mono text-xs font-bold text-slate-700 uppercase flex items-center gap-1.5">
-                <ShieldAlert className="w-4 h-4 text-amber-500" />
+              <h3 className="font-mono text-xs font-bold text-on-surface uppercase flex items-center gap-1.5">
+                <ShieldAlert className="w-4 h-4 text-amber-400" />
                 Model Validation Status
               </h3>
-              <span className="text-[11px] font-mono text-secondary-brand hover:underline">Details →</span>
+              <span className="text-[11px] font-mono text-cyan-400 hover:underline">Details →</span>
             </div>
 
             <div className="space-y-2.5 my-2 text-xs font-mono">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                  <span className="text-slate-700">Nodes & Members Integrity</span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 fx-dot"></span>
+                  <span className="text-on-surface-variant">Nodes & Members Integrity</span>
                 </div>
-                <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold border border-emerald-200">
+                <span className="text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded font-bold border border-emerald-500/30">
                   PASS
                 </span>
               </div>
 
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                  <span className="text-slate-700">Analysis Warnings</span>
+                  <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                  <span className="text-on-surface-variant">Analysis Warnings</span>
                 </div>
-                <span className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded font-bold border border-amber-200">
+                <span className="text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded font-bold border border-amber-500/30">
                   {warningCount} Logged
                 </span>
               </div>
 
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                  <span className="text-slate-700">Critical Geometry Errors</span>
+                  <span className="w-2 h-2 rounded-full bg-red-400"></span>
+                  <span className="text-on-surface-variant">Critical Geometry Errors</span>
                 </div>
-                <span className="text-slate-600 bg-slate-100 px-2 py-0.5 rounded font-bold border border-slate-200">
+                <span className="text-rose-300 bg-rose-500/10 px-2 py-0.5 rounded font-bold border border-rose-500/30">
                   {criticalCount}
                 </span>
               </div>
             </div>
 
             {/* Progress bar */}
-            <div className="w-full h-1.5 flex rounded-full overflow-hidden bg-slate-200 mt-1">
-              <div className="bg-emerald-600 h-full" style={{ width: '85%' }}></div>
+            <div className="w-full h-1.5 flex rounded-full overflow-hidden bg-slate-800 mt-1">
+              <div className="bg-emerald-500 h-full" style={{ width: '85%' }}></div>
               <div className="bg-amber-500 h-full" style={{ width: '15%' }}></div>
             </div>
           </div>
@@ -330,16 +341,16 @@ export const ProjectDashboard: React.FC = () => {
 
         {/* Concrete Volume Schedule by Structure Part */}
         {concreteSummary && (
-          <div className="bg-surface-card border border-ui-border rounded-md shadow-sm overflow-hidden p-4 space-y-3 font-sans">
-            <div className="flex items-center justify-between border-b border-ui-border pb-2 flex-wrap gap-2">
+          <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden p-5 space-y-3 font-sans">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2.5 flex-wrap gap-2">
               <div className="flex items-center gap-2">
-                <Box className="w-4 h-4 text-sky-600" />
-                <h3 className="font-mono text-xs font-bold text-deep-navy uppercase">
+                <Box className="w-4 h-4 text-blue-600" />
+                <h3 className="font-mono text-xs font-bold text-slate-800 uppercase tracking-wide">
                   Concrete Volume by Structure Part (Separately Calculated)
                 </h3>
               </div>
               <div className="flex items-center gap-3 font-mono text-xs">
-                <span className="text-slate-600">Total: <strong className="text-deep-navy text-sm">{concreteSummary.grandTotalConcreteM3} m³</strong></span>
+                <span className="text-slate-600">Total: <strong className="text-slate-900 text-sm">{concreteSummary.grandTotalConcreteM3} m³</strong></span>
                 <span className="text-slate-400">•</span>
                 <span className="text-emerald-700">Substructure: <strong>{concreteSummary.substructureConcreteM3} m³ ({concreteSummary.substructurePercent}%)</strong></span>
                 <span className="text-slate-400">•</span>
@@ -347,7 +358,7 @@ export const ProjectDashboard: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setActiveView('reports')}
-                  className="text-secondary-brand hover:underline font-semibold ml-2"
+                  className="text-blue-600 hover:underline font-semibold ml-2"
                 >
                   Full BOQ Report →
                 </button>
@@ -370,7 +381,7 @@ export const ProjectDashboard: React.FC = () => {
                     else if (comp.id === 'footings') setActiveView('footings-design');
                     else setActiveView('reports');
                   }}
-                  className="bg-slate-50 hover:bg-slate-100/80 p-2.5 rounded border border-ui-border transition-all cursor-pointer flex flex-col justify-between"
+                  className="bg-white hover:bg-slate-50 p-3 rounded-lg border border-slate-200 shadow-2xs transition-all cursor-pointer flex flex-col justify-between"
                   title={`Click to open ${comp.component} Design`}
                 >
                   <div>
@@ -387,7 +398,7 @@ export const ProjectDashboard: React.FC = () => {
                       <span className="text-sm font-bold text-sky-700">{comp.concreteM3} m³</span>
                       <span className="text-[10px] font-semibold text-slate-500">{comp.percentageShare}%</span>
                     </div>
-                    <div className="w-full bg-slate-200 h-1 rounded-full overflow-hidden mt-1">
+                    <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-1.5">
                       <div
                         className={`h-full rounded-full ${comp.category === 'SUPERSTRUCTURE' ? 'bg-sky-600' : 'bg-amber-600'}`}
                         style={{ width: `${Math.min(100, comp.percentageShare)}%` }}
@@ -404,45 +415,57 @@ export const ProjectDashboard: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div
             onClick={() => setActiveView('3d-model')}
-            className="p-4 bg-surface-card border border-ui-border rounded-md hover:shadow-md transition-all cursor-pointer group"
+            className="p-4 bg-white border border-slate-200 rounded-xl hover:shadow-xs transition-all cursor-pointer group"
           >
             <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-blue-100 text-secondary-brand rounded group-hover:bg-secondary-brand group-hover:text-white transition-colors">
-                <Layers className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                <Box className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="font-mono text-sm font-bold text-deep-navy">3D Model Space</h4>
-                <p className="text-xs text-slate-500">Orbit, inspect members, toggle layers</p>
+                <h3 className="text-sm font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
+                  3D Model Space
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Orbit, inspect members, toggle layers
+                </p>
               </div>
             </div>
           </div>
 
           <div
             onClick={() => setActiveView('member-forces')}
-            className="p-4 bg-surface-card border border-ui-border rounded-md hover:shadow-md transition-all cursor-pointer group"
+            className="p-4 bg-white border border-slate-200 rounded-xl hover:shadow-xs transition-all cursor-pointer group"
           >
             <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-sky-100 text-sky-700 rounded group-hover:bg-sky-700 group-hover:text-white transition-colors">
+              <div className="w-10 h-10 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
                 <FileSpreadsheet className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="font-mono text-sm font-bold text-deep-navy">Member Forces</h4>
-                <p className="text-xs text-slate-500">Axial Pu, shear Vy, bending moment Mz</p>
+                <h3 className="text-sm font-bold text-slate-900 group-hover:text-sky-600 transition-colors">
+                  Member Forces
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Axial Pu, shear Vy, bending moments
+                </p>
               </div>
             </div>
           </div>
 
           <div
-            onClick={() => setActiveView('joint-reactions')}
-            className="p-4 bg-surface-card border border-ui-border rounded-md hover:shadow-md transition-all cursor-pointer group"
+            onClick={() => setActiveView('warnings')}
+            className="p-4 bg-white border border-slate-200 rounded-xl hover:shadow-xs transition-all cursor-pointer group"
           >
             <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-red-100 text-red-700 rounded group-hover:bg-red-700 group-hover:text-white transition-colors">
-                <Building className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                <ShieldAlert className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="font-mono text-sm font-bold text-deep-navy">Support Reactions</h4>
-                <p className="text-xs text-slate-500">Vertical loads, pile demands & moments</p>
+                <h3 className="text-sm font-bold text-slate-900 group-hover:text-amber-600 transition-colors">
+                  Model Integrity Warnings
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Zero-length members, duplicate nodes
+                </p>
               </div>
             </div>
           </div>

@@ -10,6 +10,10 @@ import {
   MemberForceRecord,
   MemberDesignSummary,
   StoryDriftRecord,
+  MemberLoad,
+  ShellLoad,
+  MemberModifier,
+  NormalizedStructuralModel,
 } from '@/features/model/types';
 import { EngineeringWarning } from '@/features/warnings/types';
 
@@ -20,8 +24,13 @@ export interface SerializedStructuralModel {
   supports: [number, Support3D][];
   loadCases: [number, LoadCase][];
   loadCombinations: [number, LoadCombination][];
+  memberLoads?: [number, MemberLoad[]][];
+  shellLoads?: ShellLoad[];
+  extLoads?: NormalizedStructuralModel['extLoads'];
+  memberModifiers?: [number, MemberModifier][];
   reactions: JointReaction[];
   memberForces: MemberForceRecord[];
+  nodeDisplacements?: [number, { [loadCaseId: number]: [number, number, number, number, number, number] }][];
   designSummaries?: [number, MemberDesignSummary][];
   storyDrifts: StoryDriftRecord[];
   boundingBox: {

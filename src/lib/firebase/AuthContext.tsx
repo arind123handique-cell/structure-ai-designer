@@ -5,6 +5,9 @@ import {
   createUserWithEmailAndPassword,
   signInWithPopup,
   signOut as firebaseSignOut,
+  updatePassword as firebaseUpdatePassword,
+  updateProfile as firebaseUpdateProfile,
+  sendPasswordResetEmail as firebaseSendPasswordResetEmail,
   User,
 } from 'firebase/auth';
 import { auth, googleProvider } from './config';
@@ -16,6 +19,9 @@ interface AuthContextType {
   signUpWithEmail: (email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
+  changePassword: (newPassword: string) => Promise<void>;
+  updateUserProfile: (displayName: string) => Promise<void>;
+  sendResetPasswordEmail: (email: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -54,8 +60,35 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await firebaseSignOut(auth);
   };
 
+  const changePassword = async (newPassword: string) => {
+    if (!auth.currentUser) throw new Error('No user is currently signed in.');
+    await firebaseUpdatePassword(auth.currentUser, newPassword);
+  };
+
+  const updateUserProfile = async (displayName: string) => {
+    if (!auth.currentUser) throw new Error('No user is currently signed in.');
+    await firebaseUpdateProfile(auth.currentUser, { displayName });
+    setUser({ ...auth.currentUser });
+  };
+
+  const sendResetPasswordEmail = async (email: string) => {
+    await firebaseSendPasswordResetEmail(auth, email);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, signInWithEmail, signUpWithEmail, signInWithGoogle, signOut }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        signInWithEmail,
+        signUpWithEmail,
+        signInWithGoogle,
+        signOut,
+        changePassword,
+        updateUserProfile,
+        sendResetPasswordEmail,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

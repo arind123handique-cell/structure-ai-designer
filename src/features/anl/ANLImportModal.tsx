@@ -62,8 +62,8 @@ export const ANLImportModal: React.FC = () => {
               <UploadCloud className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-mono text-sm font-bold text-deep-navy uppercase">Import STAAD Analysis File</h3>
-              <p className="text-xs text-slate-500">Supports STAAD.Pro .ANL and .STD input/output files</p>
+              <h3 className="font-mono text-sm font-bold text-deep-navy uppercase">Import STAAD / IFC BIM Model</h3>
+              <p className="text-xs text-slate-500">Supports STAAD.Pro .ANL, .STD and IFC 2x3 / IFC4 BIM models</p>
             </div>
           </div>
           <button
@@ -94,7 +94,7 @@ export const ANLImportModal: React.FC = () => {
                 onClick={() => {
                   const input = document.createElement('input');
                   input.type = 'file';
-                  input.accept = '.anl,.std,.txt';
+                  input.accept = '.anl,.std,.ifc,.txt';
                   input.onchange = (e) => {
                     const f = (e.target as HTMLInputElement).files?.[0];
                     if (f) handleFile(f);

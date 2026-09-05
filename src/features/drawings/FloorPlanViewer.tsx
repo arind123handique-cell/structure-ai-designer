@@ -69,11 +69,11 @@ export const FloorPlanViewer: React.FC = () => {
     return floorPlans[selectedLevelIndex] || floorPlans[0];
   }, [floorPlans, selectedLevelIndex]);
 
-  // Layer Visibility States
+  // Layer Visibility States (Always keep labels/dimensions off by default)
   const [showGrids, setShowGrids] = useState(true);
-  const [showDimensions, setShowDimensions] = useState(true);
-  const [showMemberLabels, setShowMemberLabels] = useState(true);
-  const [showSectionSizes, setShowSectionSizes] = useState(true);
+  const [showDimensions, setShowDimensions] = useState(false);
+  const [showMemberLabels, setShowMemberLabels] = useState(false);
+  const [showSectionSizes, setShowSectionSizes] = useState(false);
   const [showSlabs, setShowSlabs] = useState(true);
   const [showPileCaps, setShowPileCaps] = useState(true);
   const [showGradeBeams, setShowGradeBeams] = useState(true);

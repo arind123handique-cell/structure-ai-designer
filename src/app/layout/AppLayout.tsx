@@ -3,11 +3,16 @@ import { useProjectStore } from '@/features/projects/projectStore';
 import { Sidebar } from './Sidebar';
 import { TopHeader } from './TopHeader';
 import { ANLImportModal } from '@/features/anl/ANLImportModal';
+import { NewProjectModal } from '@/features/projects/NewProjectModal';
 import { UniversalRebarModal } from '@/features/design/common/UniversalRebarModal';
 import { Loader2, PanelLeftOpen, PanelTopOpen, Eye, EyeOff, LogOut } from 'lucide-react';
 import { useAuth } from '@/lib/firebase/AuthContext';
+import { WindowHost } from '@/components/window/WindowHost';
+import { FuturisticBackdrop } from '@/components/futuristic/FuturisticBackdrop';
+import { useThemeStore } from '@/features/theme/themeStore';
 
 const ProjectDashboard = lazy(() => import('@/features/projects/ProjectDashboard').then(m => ({ default: m.ProjectDashboard })));
+const EtabsStudioView = lazy(() => import('@/features/etabs/EtabsStudioView').then(m => ({ default: m.EtabsStudioView })));
 const Structural3DViewer = lazy(() => import('@/components/model-viewer/Structural3DViewer').then(m => ({ default: m.Structural3DViewer })));
 const MemberForcesTable = lazy(() => import('@/components/tables/MemberForcesTable').then(m => ({ default: m.MemberForcesTable })));
 const JointReactionsTable = lazy(() => import('@/components/tables/JointReactionsTable').then(m => ({ default: m.JointReactionsTable })));
@@ -40,8 +45,7 @@ const ViewFallback: React.FC = () => (
 export const AppLayout: React.FC = () => {
   const activeView = useProjectStore(s => s.activeView);
   const selectedMemberId = useProjectStore(s => s.selectedMemberId);
-  const { user, signOut } = useAuth();
-  const [showUserMenu, setShowUserMenu] = useState(false);
+  const { user } = useAuth();
 
   // Navigation panel visibility (persisted)
   const [sidebarVisible, setSidebarVisible] = useState(() => {
@@ -57,6 +61,8 @@ export const AppLayout: React.FC = () => {
     switch (activeView) {
       case 'dashboard':
         return <ProjectDashboard />;
+      case 'etabs-studio':
+        return <EtabsStudioView />;
       case '3d-model':
         return <Structural3DViewer />;
       case 'member-forces':
@@ -102,8 +108,10 @@ export const AppLayout: React.FC = () => {
     }
   };
 
+  const theme = useThemeStore((s) => s.theme);
+
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-ui-background text-on-surface">
+    <div className={`${theme === 'dark' ? 'theme-dark' : 'theme-light'} flex h-screen w-screen overflow-hidden bg-ui-background text-on-surface`}>
       {/* Left Sidebar — hideable */}
       {sidebarVisible ? (
         <Sidebar onHide={() => setSidebarVisible(false)} />
@@ -122,43 +130,7 @@ export const AppLayout: React.FC = () => {
       {/* Main Container */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         {headerVisible ? (
-          <div className="relative">
-            <TopHeader onHide={() => setHeaderVisible(false)} />
-            {/* User Badge — top-right corner */}
-            {user && (
-              <div className="absolute right-3 top-2 z-50">
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowUserMenu(!showUserMenu)}
-                    className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md text-[11px] font-mono text-emerald-700 transition-colors"
-                    title="Cloud Sync Active"
-                  >
-                    <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white text-[9px] font-bold">
-                      {user.email?.[0]?.toUpperCase() || 'U'}
-                    </div>
-                    <span className="hidden sm:inline max-w-[120px] truncate">{user.email}</span>
-                    <span className="px-1 py-0.5 bg-emerald-500 text-white rounded text-[8px] font-bold">SYNCED</span>
-                  </button>
-                  {showUserMenu && (
-                    <div className="absolute right-0 top-full mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-xl z-50 overflow-hidden">
-                      <div className="px-3 py-2 bg-slate-50 border-b border-slate-100">
-                        <p className="text-[10px] font-mono text-slate-400">Signed in as</p>
-                        <p className="text-xs font-mono font-semibold text-slate-700 truncate">{user.email}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={async () => { await signOut(); setShowUserMenu(false); }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-xs font-mono text-red-600 hover:bg-red-50 transition-colors"
-                      >
-                        <LogOut className="w-3.5 h-3.5" /> Sign Out
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+          <TopHeader onHide={() => setHeaderVisible(false)} />
         ) : (
           <div className="h-8 bg-surface-card border-b border-ui-border flex items-center justify-between px-3 shrink-0">
             <span className="text-[10px] font-mono text-slate-400">Header hidden</span>
@@ -201,8 +173,21 @@ export const AppLayout: React.FC = () => {
         ) : null}
 
         <div className="flex-1 flex overflow-hidden relative">
+          {/* Futuristic video-like ambience (canvas + animated grid) behind content */}
+          <div className="absolute inset-0 z-0 bg-gradient-to-br from-white via-ui-background to-sky-50/60">
+            <FuturisticBackdrop className="absolute inset-0 w-full h-full opacity-40" />
+            <div
+              className="absolute inset-0 opacity-[0.05]"
+              style={{
+                backgroundImage:
+                  'linear-gradient(#0051d5 1px, transparent 1px), linear-gradient(90deg, #0051d5 1px, transparent 1px)',
+                backgroundSize: '40px 40px',
+              }}
+            />
+          </div>
+
           {/* Main View Area */}
-          <div className="flex-1 flex flex-col h-full overflow-hidden">
+          <div className="flex-1 flex flex-col h-full overflow-hidden relative z-10">
             <Suspense fallback={<ViewFallback />}>{renderMainView()}</Suspense>
           </div>
 
@@ -216,8 +201,14 @@ export const AppLayout: React.FC = () => {
       {/* ANL Import Modal */}
       <ANLImportModal />
 
+      {/* New Project Modal */}
+      <NewProjectModal />
+
       {/* Universal Rebar Master Selection Modal */}
       <UniversalRebarModal />
+
+      {/* Global engineering window system */}
+      <WindowHost />
     </div>
   );
 };
