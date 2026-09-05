@@ -22,6 +22,7 @@ import { RenderMode, ConceptColorMode, SectionLegendItem, StoryLegendItem, Mater
 import { Structural3DStudioPanel } from './Structural3DStudioPanel';
 import { Structural3DInspectorPanel } from './Structural3DInspectorPanel';
 import { Structural3DLegends } from './Structural3DLegends';
+import { Structural3DLayerBar } from './Structural3DLayerBar';
 import {
   RotateCcw,
   Eye,
@@ -311,6 +312,7 @@ export const Structural3DViewer: React.FC = () => {
   const [renderMode, setRenderMode] = useState<RenderMode>('SOLID');
   const [conceptColor, setConceptColor] = useState<ConceptColorMode>('TYPE');
   const [showStudioPanel, setShowStudioPanel] = useState(true);
+  const [showLayerBar, setShowLayerBar] = useState(true);
   const [selectedStoryElevation, setSelectedStoryElevation] = useState<'ALL' | number>('ALL');
 
   const handleDeleteSelected = async () => {
@@ -1992,104 +1994,210 @@ export const Structural3DViewer: React.FC = () => {
 
       {/* 2. Center 3D WebGL Canvas Viewport */}
       <div className="flex-1 h-full relative overflow-hidden flex flex-col min-h-0">
-        <div className="w-[1px] h-4 bg-slate-700 mx-1" />
+        <div
+          ref={containerRef}
+          className="w-full h-full cursor-crosshair flex-1 min-h-0 relative z-[5]"
+          title="Click: select member • Drag: orbit • Scroll: zoom"
+        />
 
-        <button
-          onClick={() => toggleFilterLayer('showBeams')}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            filterLayers.showBeams ? 'bg-sky-500/20 text-sky-400 border border-sky-500/40' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <span className="w-2 h-2 rounded-full bg-sky-400"></span>
-          Beams
-        </button>
-        <button
-          onClick={() => toggleFilterLayer('showColumns')}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            filterLayers.showColumns ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-          Columns
-        </button>
-        <button
-          onClick={() => toggleFilterLayer('showSupports')}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            filterLayers.showSupports ? 'bg-red-500/20 text-red-400 border border-red-500/40' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <span className="w-2 h-2 rounded-full bg-red-400"></span>
-          Supports
-        </button>
+        {/* Video feed overlay if active */}
+        {isStreamActive && (
+          <div
+            ref={videoContainerRef}
+            className="absolute inset-0 z-0 overflow-hidden pointer-events-none flex items-center justify-center bg-black"
+            style={{ opacity: arCalibration?.underlayOpacity ?? 0.4 }}
+          />
+        )}
+        <VideoViewportOverlay />
 
-        <div className="w-[1px] h-4 bg-slate-700 mx-1" />
+        {/* Top Floating Control Bar */}
+        <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-20 flex-wrap gap-2">
+          {/* Left Group: Studio Toggle + Render Mode Pills + Concept Color + Layers Button */}
+          <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 p-1.5 rounded-lg shadow-xl pointer-events-auto font-mono text-xs">
+            <button
+              onClick={() => setShowStudioPanel(!showStudioPanel)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
+                showStudioPanel
+                  ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                  : 'text-slate-300 hover:text-white bg-slate-800/60'
+              }`}
+              title="Toggle 3D Studio & Display Controls Panel"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-300" />
+              <span className="hidden sm:inline">Studio</span>
+            </button>
 
-        {/* Architectural 3D Layer Toggles */}
-        <button
-          onClick={() => setShowArchWalls(!showArchWalls)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            showArchWalls
-              ? 'bg-amber-500/25 text-amber-300 border border-amber-500/50 font-bold shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Toggle 3D Architectural Walls"
-        >
-          <Box className="w-3.5 h-3.5 text-amber-400" />
-          <span>Arch Walls {architecturalWalls && Object.keys(architecturalWalls).length > 0 ? `(${Object.keys(architecturalWalls).length})` : ''}</span>
-        </button>
+            <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
 
-        <button
-          onClick={() => setShowArchDoors(!showArchDoors)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            showArchDoors
-              ? 'bg-amber-600/25 text-amber-200 border border-amber-600/50 font-bold shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Toggle 3D Hosted Doors"
-        >
-          <DoorOpen className="w-3.5 h-3.5 text-amber-400" />
-          <span>Doors {architecturalDoors && Object.keys(architecturalDoors).length > 0 ? `(${Object.keys(architecturalDoors).length})` : ''}</span>
-        </button>
+            {/* Render Mode Quick Pills */}
+            <div className="flex items-center gap-1 bg-slate-950/60 p-0.5 rounded border border-slate-800">
+              {[
+                { id: 'SOLID', label: 'Solid' },
+                { id: 'WIREFRAME', label: 'Wire' },
+                { id: 'ANALYTICAL', label: 'Stick' },
+                { id: 'XRAY', label: 'X-Ray' },
+                { id: 'CLAY', label: 'Clay' },
+              ].map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => {
+                    setRenderMode(m.id as RenderMode);
+                    if (m.id === 'XRAY') setRebarEnabled(true);
+                  }}
+                  className={`px-2 py-0.5 text-[11px] rounded transition-colors ${
+                    renderMode === m.id
+                      ? 'bg-indigo-600 text-white font-bold shadow-2xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title={`${m.label} Render Mode`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
 
-        <button
-          onClick={() => setShowArchWindows(!showArchWindows)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            showArchWindows
-              ? 'bg-sky-500/25 text-sky-200 border border-sky-500/50 font-bold shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Toggle 3D Hosted Windows"
-        >
-          <AppWindow className="w-3.5 h-3.5 text-sky-400" />
-          <span>Windows {architecturalWindows && Object.keys(architecturalWindows).length > 0 ? `(${Object.keys(architecturalWindows).length})` : ''}</span>
-        </button>
+            <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
 
-        <button
-          onClick={() => setShowArchRooms(!showArchRooms)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            showArchRooms
-              ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-500/50 font-bold shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Toggle 3D Room Badges"
-        >
-          <Tag className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Rooms</span>
-        </button>
+            {/* Concept Colour Dropdown */}
+            <div className="flex items-center gap-1">
+              <Palette className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+              <select
+                value={conceptColor}
+                onChange={(e) => setConceptColor(e.target.value as ConceptColorMode)}
+                className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:border-sky-500 font-mono"
+                title="Concept Color Scheme"
+              >
+                <option value="TYPE">Color: By Type</option>
+                <option value="SECTION">Color: By Section</option>
+                <option value="STORY">Color: By Storey</option>
+                <option value="MATERIAL">Color: By Material</option>
+                <option value="UTILIZATION">Color: DCR Stress Heatmap</option>
+                <option value="CYBERPUNK">Color: Cyberpunk Neon</option>
+              </select>
+            </div>
 
-        <button
-          onClick={() => setShowArchStaircases(!showArchStaircases)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-            showArchStaircases
-              ? 'bg-amber-500/25 text-amber-200 border border-amber-500/50 font-bold shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Toggle 3D RCC Staircases (Steps, Landing Slabs, Handrails, Walls & Doors)"
-        >
-          <Footprints className="w-3.5 h-3.5 text-amber-400" />
-          <span>Staircases {architecturalStaircases && Object.keys(architecturalStaircases).length > 0 ? `(${Object.keys(architecturalStaircases).length})` : ''}</span>
-        </button>
-      </div>
+            <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+
+            {/* Layers Autohide/Draggable/Dockable Toggle Button */}
+            <button
+              onClick={() => setShowLayerBar(!showLayerBar)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
+                showLayerBar
+                  ? 'bg-sky-600 text-white font-bold shadow-xs'
+                  : 'text-slate-300 hover:text-white bg-slate-800/60'
+              }`}
+              title="Toggle Layers Toolbar (Autohide / Draggable / Dockable to Upper Toolbar)"
+            >
+              <Layers className="w-3.5 h-3.5 text-sky-300" />
+              <span className="hidden sm:inline">Layers</span>
+            </button>
+          </div>
+
+          {/* Right Group: Camera Presets + Snapshot + Inspector Toggle */}
+          <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 p-1.5 rounded-lg shadow-xl pointer-events-auto font-mono text-xs">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setCameraPreset('iso')}
+                className="px-2 py-1 text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                title="Isometric View"
+              >
+                ISO
+              </button>
+              <button
+                onClick={() => setCameraPreset('top')}
+                className="px-2 py-1 text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                title="Top Plan (X-Z)"
+              >
+                TOP
+              </button>
+              <button
+                onClick={() => setCameraPreset('front')}
+                className="px-2 py-1 text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                title="Front Elevation (X-Y)"
+              >
+                FRONT
+              </button>
+              <button
+                onClick={() => setCameraPreset('side')}
+                className="px-2 py-1 text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                title="Side Elevation (Z-Y)"
+              >
+                SIDE
+              </button>
+              <button
+                onClick={() => setCameraPreset('fit')}
+                className="p-1 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                title="Reset / Fit Extents"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+
+            <button
+              onClick={handleTakeSnapshot}
+              className="p-1.5 text-indigo-300 hover:text-white hover:bg-indigo-600/30 rounded transition-colors"
+              title="Export HD 3D Snapshot (PNG)"
+            >
+              <Camera className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              onClick={() => setMultiSelectMode(!multiSelectMode)}
+              className={`flex items-center gap-1 px-2 py-1 text-[11px] rounded transition-colors ${
+                multiSelectMode
+                  ? 'bg-amber-500/30 text-amber-300 border border-amber-500 font-bold shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Toggle Multi-Select"
+            >
+              <CheckSquare className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden md:inline">Multi</span>
+            </button>
+
+            <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+
+            <button
+              onClick={() => toggleInspectorPanel()}
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
+                showInspectorPanel
+                  ? 'bg-indigo-600 text-white border border-indigo-500 font-bold shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200 border border-slate-700 bg-slate-800/40'
+              }`}
+              title={showInspectorPanel ? 'Inspector Panels: ON (Click to Hide)' : 'Inspector Panels: OFF (Click to Show)'}
+            >
+              <Sliders className="w-3.5 h-3.5 text-indigo-300" />
+              <span>{showInspectorPanel ? 'Inspector: ON' : 'Inspector: OFF'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 3D Layer Bar: Autohide, Draggable, Dockable to Upper Toolbar */}
+        <Structural3DLayerBar
+          isVisible={showLayerBar}
+          onToggleVisibility={() => setShowLayerBar(!showLayerBar)}
+          showBeams={Boolean(filterLayers.showBeams)}
+          onToggleBeams={() => toggleFilterLayer('showBeams')}
+          showColumns={Boolean(filterLayers.showColumns)}
+          onToggleColumns={() => toggleFilterLayer('showColumns')}
+          showSupports={Boolean(filterLayers.showSupports)}
+          onToggleSupports={() => toggleFilterLayer('showSupports')}
+          showArchWalls={showArchWalls}
+          onToggleArchWalls={() => setShowArchWalls(!showArchWalls)}
+          archWallsCount={architecturalWalls ? Object.keys(architecturalWalls).length : 0}
+          showArchDoors={showArchDoors}
+          onToggleArchDoors={() => setShowArchDoors(!showArchDoors)}
+          archDoorsCount={architecturalDoors ? Object.keys(architecturalDoors).length : 0}
+          showArchWindows={showArchWindows}
+          onToggleArchWindows={() => setShowArchWindows(!showArchWindows)}
+          archWindowsCount={architecturalWindows ? Object.keys(architecturalWindows).length : 0}
+          showArchRooms={showArchRooms}
+          onToggleArchRooms={() => setShowArchRooms(!showArchRooms)}
+          showArchStaircases={showArchStaircases}
+          onToggleArchStaircases={() => setShowArchStaircases(!showArchStaircases)}
+          archStaircasesCount={architecturalStaircases ? Object.keys(architecturalStaircases).length : 0}
+        />
 
       {/* Floating Action Banner: Merge Selected Pile Caps (When >= 2 supports selected) */}
       {selectedSupportNodeIds.length >= 2 && (
@@ -2360,172 +2468,7 @@ export const Structural3DViewer: React.FC = () => {
         </div>
       )}
 
-      {/* 2. Center 3D WebGL Canvas Viewport */}
-      <div className="flex-1 h-full relative overflow-hidden flex flex-col min-h-0">
-        <div
-          ref={containerRef}
-          className="w-full h-full cursor-crosshair flex-1 min-h-0 relative z-[5]"
-          title="Click: select member • Drag: orbit • Scroll: zoom"
-        />
-
-        {/* Video feed overlay if active */}
-        {isStreamActive && (
-          <div
-            ref={videoContainerRef}
-            className="absolute inset-0 z-0 overflow-hidden pointer-events-none flex items-center justify-center bg-black"
-            style={{ opacity: arCalibration?.underlayOpacity ?? 0.4 }}
-          />
-        )}
-        <VideoViewportOverlay />
-
-        {/* Top Floating Control Bar */}
-        <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-20 flex-wrap gap-2">
-          {/* Left Group: Studio Toggle + Render Mode Pills + Concept Color */}
-          <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 p-1.5 rounded-lg shadow-xl pointer-events-auto font-mono text-xs">
-            <button
-              onClick={() => setShowStudioPanel(!showStudioPanel)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-                showStudioPanel
-                  ? 'bg-indigo-600 text-white font-bold shadow-xs'
-                  : 'text-slate-300 hover:text-white bg-slate-800/60'
-              }`}
-              title="Toggle 3D Studio & Display Controls Panel"
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-300" />
-              <span className="hidden sm:inline">Studio</span>
-            </button>
-
-            <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
-
-            {/* Render Mode Quick Pills */}
-            <div className="flex items-center gap-1 bg-slate-950/60 p-0.5 rounded border border-slate-800">
-              {[
-                { id: 'SOLID', label: 'Solid' },
-                { id: 'WIREFRAME', label: 'Wire' },
-                { id: 'ANALYTICAL', label: 'Stick' },
-                { id: 'XRAY', label: 'X-Ray' },
-                { id: 'CLAY', label: 'Clay' },
-              ].map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => {
-                    setRenderMode(m.id as RenderMode);
-                    if (m.id === 'XRAY') setRebarEnabled(true);
-                  }}
-                  className={`px-2 py-0.5 text-[11px] rounded transition-colors ${
-                    renderMode === m.id
-                      ? 'bg-indigo-600 text-white font-bold shadow-2xs'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                  title={`${m.label} Render Mode`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
-
-            {/* Concept Colour Dropdown */}
-            <div className="flex items-center gap-1">
-              <Palette className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-              <select
-                value={conceptColor}
-                onChange={(e) => setConceptColor(e.target.value as ConceptColorMode)}
-                className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:border-sky-500 font-mono"
-                title="Concept Color Scheme"
-              >
-                <option value="TYPE">Color: By Type</option>
-                <option value="SECTION">Color: By Section</option>
-                <option value="STORY">Color: By Storey</option>
-                <option value="MATERIAL">Color: By Material</option>
-                <option value="UTILIZATION">Color: DCR Stress Heatmap</option>
-                <option value="CYBERPUNK">Color: Cyberpunk Neon</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Right Group: Camera Presets + Snapshot + Inspector Toggle */}
-          <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 p-1.5 rounded-lg shadow-xl pointer-events-auto font-mono text-xs">
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setCameraPreset('iso')}
-                className="px-2 py-1 text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
-                title="Isometric View"
-              >
-                ISO
-              </button>
-              <button
-                onClick={() => setCameraPreset('top')}
-                className="px-2 py-1 text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
-                title="Top Plan (X-Z)"
-              >
-                TOP
-              </button>
-              <button
-                onClick={() => setCameraPreset('front')}
-                className="px-2 py-1 text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
-                title="Front Elevation (X-Y)"
-              >
-                FRONT
-              </button>
-              <button
-                onClick={() => setCameraPreset('side')}
-                className="px-2 py-1 text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
-                title="Side Elevation (Z-Y)"
-              >
-                SIDE
-              </button>
-              <button
-                onClick={() => setCameraPreset('fit')}
-                className="p-1 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
-                title="Reset / Fit Extents"
-              >
-                <Maximize2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
-
-            <button
-              onClick={handleTakeSnapshot}
-              className="p-1.5 text-indigo-300 hover:text-white hover:bg-indigo-600/30 rounded transition-colors"
-              title="Export HD 3D Snapshot (PNG)"
-            >
-              <Camera className="w-3.5 h-3.5" />
-            </button>
-
-            <button
-              onClick={() => setMultiSelectMode(!multiSelectMode)}
-              className={`flex items-center gap-1 px-2 py-1 text-[11px] rounded transition-colors ${
-                multiSelectMode
-                  ? 'bg-amber-500/30 text-amber-300 border border-amber-500 font-bold shadow-xs'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Toggle Multi-Select"
-            >
-              <CheckSquare className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden md:inline">Multi</span>
-            </button>
-
-            <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
-
-            <button
-              onClick={() => toggleInspectorPanel()}
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
-                showInspectorPanel
-                  ? 'bg-indigo-600 text-white border border-indigo-500 font-bold shadow-xs'
-                  : 'text-slate-400 hover:text-slate-200 border border-slate-700 bg-slate-800/40'
-              }`}
-              title={showInspectorPanel ? 'Inspector Panels: ON (Click to Hide)' : 'Inspector Panels: OFF (Click to Show)'}
-            >
-              <Sliders className="w-3.5 h-3.5 text-indigo-300" />
-              <span>{showInspectorPanel ? 'Inspector: ON' : 'Inspector: OFF'}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Floating Legends */}
+      {/* Floating Legends */}
         <Structural3DLegends
           conceptColor={conceptColor}
           sectionLegends={sectionLegends}
