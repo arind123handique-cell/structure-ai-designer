@@ -589,11 +589,8 @@ export class CalculationPdfService {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(100, 116, 139);
-    doc.text(
-      `Standard: ${report.designCode} | Governing LC: #${report.governingLoadCase} | ${report.summaryCallout}`,
-      margin + 4,
-      y + 10
-    );
+    const headerSummary = `Standard: ${report.designCode} | Governing LC: #${report.governingLoadCase} | ${report.summaryCallout}`;
+    doc.text(headerSummary.length > 128 ? `${headerSummary.slice(0, 125)}...` : headerSummary, margin + 4, y + 10);
 
     // Status Badge
     doc.setFillColor(isPass ? 16 : isWarn ? 217 : 220, isPass ? 185 : isWarn ? 119 : 38, isPass ? 129 : isWarn ? 6 : 38);
@@ -925,13 +922,46 @@ export class CalculationPdfService {
     doc.text(label, (x1 + x2) / 2, above ? y1 - offset : y1 + offset, { align: 'center' });
   }
 
-  private static calloutText(doc: jsPDF, x: number, y: number, lines: string[], color: [number, number, number] = [2, 132, 199]): number {
+  private static wrapPdfText(doc: jsPDF, text: string, maxWidth: number): string[] {
+    const jsPdfDoc = doc as any;
+    if (typeof jsPdfDoc.splitTextToSize === 'function') {
+      return jsPdfDoc.splitTextToSize(text, maxWidth);
+    }
+
+    const maxChars = Math.max(18, Math.floor(maxWidth / 1.6));
+    const words = text.split(/\s+/);
+    const lines: string[] = [];
+    let current = '';
+    for (const word of words) {
+      const next = current ? `${current} ${word}` : word;
+      if (next.length > maxChars && current) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = next;
+      }
+    }
+    if (current) lines.push(current);
+    return lines;
+  }
+
+  private static calloutText(
+    doc: jsPDF,
+    x: number,
+    y: number,
+    lines: string[],
+    color: [number, number, number] = [2, 132, 199],
+    maxWidth = 80
+  ): number {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6.5);
     doc.setTextColor(color[0], color[1], color[2]);
     for (const ln of lines) {
-      doc.text(ln, x, y, { maxWidth: 80 });
-      y += 3.4;
+      for (const wrapped of this.wrapPdfText(doc, ln, maxWidth)) {
+        doc.text(wrapped, x, y);
+        y += 3.4;
+      }
+      y += 0.8;
     }
     doc.setTextColor(15, 23, 42);
     return y;
@@ -978,14 +1008,14 @@ export class CalculationPdfService {
     this.renderColumnSection(doc, margin + 6, margin + 22, b, D, rebar, cover);
     this.renderColumnElevation(doc, margin + 100, margin + 22, b, D, H, rebar, ductility);
 
-    // Notes strip at bottom
-    let y = pageHeight - margin - 26;
+    // Keep general notes in a fixed lower zone so wrapped text never collides with drawings.
+    const y = 218;
     this.calloutText(doc, margin + 6, y, [
       `Section X-X : ${b} × ${D} mm column, clear cover ${cover} mm.`,
       `Longitudinal steel: ${rebar?.callout || 'N/A'} (pt = ${rebar?.pt_prov || 0}%).`,
       `Ductile confinement: ${ductility?.recommendedTieCallout || 'IS 13920 ties @ 100-150 mm c/c'}`,
       `Elevation: ${H.toFixed(2)} m unsupported height, ties at end zone ${this.parseTieCallout(ductility?.recommendedTieCallout).s}mm c/c (${this.parseTieCallout(ductility?.recommendedTieCallout).lo}mm) & mid-height ${this.parseTieCallout(ductility?.recommendedTieCallout).mid}mm c/c.`,
-    ], [30, 41, 59]);
+    ], [30, 41, 59], contentWidth - 12);
   }
 
   private static renderColumnSection(doc: jsPDF, x0: number, y0: number, b: number, D: number, rebar: any, cover: number): void {
@@ -1137,13 +1167,13 @@ export class CalculationPdfService {
     this.renderBeamSection(doc, margin + 6, margin + 22, b, D, topRebar, bottomRebar, cover, shear);
     this.renderBeamElevation(doc, margin + 100, margin + 22, b, D, L, topRebar, bottomRebar, shear);
 
-    const y = pageHeight - margin - 22;
+    const y = 218;
     this.calloutText(doc, margin + 6, y, [
       `Section: ${b} × ${D} mm RCC beam, clear cover ${cover} mm.  Span L = ${L.toFixed(2)} m.`,
       `Top steel: ${topRebar?.callout || 'N/A'}   Bottom steel: ${bottomRebar?.callout || 'N/A'}`,
       `Shear: ${shear?.callout || shear?.stirrupDiameter ? `${shear.legs}L-${shear.stirrupDiameter}mm @ ${shear.stirrupSpacing}mm c/c` : 'N/A'} (${shear?.status || ''})`,
       `Top bars extended ${Math.max(0.15, 0.25).toFixed(2)}L into the span & anchored into supports per IS 13920:2016.`,
-    ], [30, 41, 59]);
+    ], [30, 41, 59], contentWidth - 12);
   }
 
   private static renderBeamSection(doc: jsPDF, x0: number, y0: number, b: number, D: number, topRebar: any, bottomRebar: any, cover: number, shear?: any): void {
@@ -1283,13 +1313,13 @@ export class CalculationPdfService {
     this.renderPileSection(doc, margin + 6, margin + 24, pt);
     this.renderPileElevation(doc, margin + 100, margin + 24, pt);
 
-    const y = pageHeight - margin - 24;
+    const y = 218;
     this.calloutText(doc, margin + 6, y, [
       `Cast-in-situ RCC bored pile, dia ${pt.diameter} mm, ${pt.length} m long (IS 2911:2010).`,
       `Longitudinal steel: ${pt.rebarCallout || `${pt.barCount}-T${pt.barDiameter}`}`,
       `Transverse: ${pt.spiralCallout || `${pt.spiralDiameter}mm helical spiral @ ${pt.spiralPitch}mm pitch`}`,
       `Structural capacity Pc = ${pt.structuralCapacity || '—'} kN | Working safe load = ${pt.safeWorkingLoad} kN | Status: ${pt.status}`,
-    ], [30, 41, 59]);
+    ], [30, 41, 59], contentWidth - 12);
   }
 
   private static renderPileSection(doc: jsPDF, x0: number, y0: number, pt: any): void {
@@ -1403,13 +1433,13 @@ export class CalculationPdfService {
     this.renderPileCapPlan(doc, margin + 6, margin + 24, geom, contentWidth);
     this.renderPileCapSection(doc, margin + 100, margin + 24, geom);
 
-    const y = pageHeight - margin - 24;
+    const y = 218;
     this.calloutText(doc, margin + 6, y, [
       `${geom.pileCount}-pile cap: ${geom.capLength} × ${geom.capWidth} mm, depth ${geom.capDepth} mm. Pile dia ${geom.pileDiameter} mm.`,
       `Bottom mat: ${geom.bottomRebar}`,
       `Top mat: ${geom.topRebar}`,
       `Pile spacing & edge distances per IS 2911 Cl. 6.6 (s = 3Dp, e = Dp).`,
-    ], [30, 41, 59]);
+    ], [30, 41, 59], contentWidth - 12);
   }
 
   private static renderPileCapPlan(doc: jsPDF, x0: number, y0: number, geom: any, contentWidth: number): void {
