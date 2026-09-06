@@ -29,6 +29,7 @@ yarn-error.log*
 
 # Large analysis files (keep sample, ignore generated)
 *.anl
+*.rcdx
 !**/sampleData*.ts
 STR FINAL.anl
 STD 6MILES.ANL
