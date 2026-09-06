@@ -32,6 +32,8 @@ export interface FemAnalysisResult {
   equilibriumCheck: 'PASS' | 'WARNING';
 }
 
+export type FemProgressCallback = (step: number, pct: number, detail: string) => void;
+
 /**
  * 3D Direct Stiffness Finite Element Method (FEM) Space Frame Analysis Solver.
  * Fully supports:
@@ -558,6 +560,71 @@ export class FemSolver3D {
   }
 
   /**
+   * Asynchronously factorizes a banded symmetric positive-definite matrix K into its Cholesky factor L (K = L * L^T).
+   * Periodically yields to the browser event loop to guarantee that UI animations, spinners,
+   * and watchdog timers never freeze or time out.
+   */
+  public static async factorizeBandedAsync(
+    K: Array<Float64Array | number[]>,
+    n: number,
+    bw: number,
+    onProgressRatio?: (ratio: number) => void
+  ): Promise<Array<Float64Array>> {
+    const L = Array.from({ length: n }, () => new Float64Array(bw + 1));
+    const CHUNK_SIZE = n > 500 ? 250 : 500;
+
+    for (let i = 0; i < n; i++) {
+      if (i > 0 && i % CHUNK_SIZE === 0) {
+        onProgressRatio?.(i / n);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      const jStart = Math.max(0, i - bw);
+      const Li = L[i];
+      const offsetI = bw - i;
+      const Ki = K[i];
+
+      for (let j = jStart; j <= i; j++) {
+        let sum = 0;
+        const Lj = L[j];
+        const offsetJ = bw - j;
+
+        let idxI = offsetI + jStart;
+        let idxJ = offsetJ + jStart;
+
+        // Vectorized dot product unrolled 4x for V8 TurboFan
+        let k = jStart;
+        const kEnd4 = j - 3;
+        for (; k < kEnd4; k += 4) {
+          sum += Li[idxI] * Lj[idxJ]
+               + Li[idxI + 1] * Lj[idxJ + 1]
+               + Li[idxI + 2] * Lj[idxJ + 2]
+               + Li[idxI + 3] * Lj[idxJ + 3];
+          idxI += 4;
+          idxJ += 4;
+        }
+        for (; k < j; k++) {
+          sum += Li[idxI++] * Lj[idxJ++];
+        }
+
+        if (i === j) {
+          const val = Ki[i] - sum;
+          if (val <= 0) {
+            Li[bw] = Math.sqrt(Math.max(1e-5, Ki[i] * 1e-4 + 1e-4));
+          } else {
+            Li[bw] = Math.sqrt(val);
+          }
+        } else {
+          const diag = Lj[bw];
+          Li[offsetI + j] = Math.abs(diag) < 1e-12 ? 0 : (Ki[j] - sum) / diag;
+        }
+      }
+    }
+
+    return L;
+  }
+
+  /**
    * Solves L * L^T * U = F using forward and backward substitution with pre-computed factor L.
    * Runs in O(n * bw) time (< 1ms per load case).
    */
@@ -630,42 +697,33 @@ export class FemSolver3D {
     return bw;
   }
 
+  private static emptyResult(): FemAnalysisResult {
+    return {
+      nodeDisplacements: new Map(),
+      reactions: [],
+      memberForces: [],
+      storyDrifts: [],
+      maxDisplacementM: 0,
+      totalAppliedLoadKn: { x: 0, y: 0, z: 0 },
+      totalReactionKn: { x: 0, y: 0, z: 0 },
+      equilibriumCheck: 'PASS',
+    };
+  }
+
   /**
-   * Main 3D Space Frame FEM Direct Stiffness Analysis Pipeline.
+   * Helper: Assembles global 3D space-frame stiffness matrix and caches element properties.
    */
-  public static analyzeModel(
+  private static assembleFrameStiffness(
     model: NormalizedStructuralModel,
-    options: FemSolverOptions = {}
-  ): FemAnalysisResult {
-    const nodes = Array.from(model.nodes.values()).sort((a, b) => a.id - b.id);
-    const members = Array.from(model.members.values());
-    const supports = model.supports;
-
-    if (nodes.length === 0 || members.length === 0) {
-      return {
-        nodeDisplacements: new Map(),
-        reactions: [],
-        memberForces: [],
-        storyDrifts: [],
-        maxDisplacementM: 0,
-        totalAppliedLoadKn: { x: 0, y: 0, z: 0 },
-        totalReactionKn: { x: 0, y: 0, z: 0 },
-        equilibriumCheck: 'PASS',
-      };
-    }
-
-    // 1. Map Node ID to global DOF index using Reverse Cuthill-McKee (RCM)
-    //    bandwidth minimization. This clusters connected joints closely in index
-    //    space, reducing matrix bandwidth by up to 30x and avoiding browser script timeouts.
-    const nodeIndexMap = this.computeRcmOrder(nodes, members, model.plates);
-
+    nodes: Node3D[],
+    members: Member3D[],
+    nodeIndexMap: Map<number, number>,
+    options: FemSolverOptions
+  ) {
     const numNodes = nodes.length;
     const totalDof = numNodes * 6;
-
-    // 2. Build Global Stiffness Matrix K
     const K_global = Array.from({ length: totalDof }, () => new Float64Array(totalDof));
 
-    // Cache element properties
     const memberData: {
       member: Member3D;
       start: Node3D;
@@ -720,7 +778,6 @@ export class FemSolver3D {
         endIdx * 6 + 5,
       ];
 
-      // Assemble element stiffness into global stiffness
       for (let i = 0; i < 12; i++) {
         const row = dofIndices[i];
         for (let j = 0; j < 12; j++) {
@@ -741,34 +798,19 @@ export class FemSolver3D {
       });
     });
 
-    // 3. Assemble Load Cases
-    const loadCases = model.loadCases.size > 0 ? Array.from(model.loadCases.values()) : [
-      { id: 1, title: 'Dead Load (DL)', type: 'DEAD' as const, isCombination: false },
-      { id: 2, title: 'Live Load (LL)', type: 'LIVE' as const, isCombination: false },
-      { id: 3, title: 'Seismic Load X (EQX)', type: 'SEISMIC' as const, isCombination: false },
-      { id: 4, title: 'Seismic Load Z (EQZ)', type: 'SEISMIC' as const, isCombination: false },
-    ];
+    return { K_global, memberData, totalDof };
+  }
 
-    // Concrete density drives member self-weight. Prefer the density captured from
-    // the STAAD material definition (e.g. 23.5615 kN/m3) when the model came from a
-    // real STAAD file; otherwise use the solver option / concrete default (25 kN/m3).
-    const staadDensity = model.extLoads?.source === 'STAAD' ? model.extLoads?.concreteDensity : undefined;
-    const density = staadDensity || options.concreteDensity || 25; // kN/m3
-    const nodeDisplacements = new Map<number, { [lc: number]: [number, number, number, number, number, number] }>();
-    nodes.forEach((n) => nodeDisplacements.set(n.id, {}));
-
-    const reactions: JointReaction[] = [];
-    const memberForces: MemberForceRecord[] = [];
-    let maxDisplacementM = 0;
-
-    let totalAppliedLoadKn = { x: 0, y: 0, z: 0 };
-    let totalReactionKn = { x: 0, y: 0, z: 0 };
-
-    // 4b. Apply Boundary Restraints ONCE on the global stiffness matrix. The K
-    //     modification (penalty stiffness for fixed/pinned supports) is independent of
-    //     the load case, so building K_mod a single time instead of deep-copying the
-    //     full dense matrix for every load case removes a large per-case overhead that
-    //     contributed significantly to main-thread freezes.
+  /**
+   * Helper: Applies boundary restraints (fixed/pinned/roller supports) to global stiffness matrix.
+   */
+  private static applyRestraints(
+    K_global: Array<Float64Array>,
+    nodes: Node3D[],
+    supports: Map<number, Support3D>,
+    nodeIndexMap: Map<number, number>,
+    model: NormalizedStructuralModel
+  ): Array<Float64Array> {
     const K_mod = K_global.map((row) => new Float64Array(row));
     nodes.forEach((n) => {
       const sup = supports.get(n.id);
@@ -805,10 +847,18 @@ export class FemSolver3D {
         }
       }
     });
+    return K_mod;
+  }
 
-    // Hoist the symmetric half-bandwidth and Cholesky factorization out of the per-load-case loop.
-    // Factorizing K_mod ONCE instead of for every loadcase gives a ~40x performance boost.
-    // Calculate bandwidth from joint topology in O(E) time:
+  /**
+   * Helper: Calculates space-frame member bandwidth in O(E) time without plate inflation.
+   */
+  private static computeBandwidth(
+    members: Member3D[],
+    nodeIndexMap: Map<number, number>,
+    totalDof: number,
+    K_mod: Array<Float64Array | number[]>
+  ): number {
     let maxNodeDiff = 0;
     for (const mem of members) {
       const sIdx = nodeIndexMap.get(mem.startNodeId);
@@ -818,66 +868,81 @@ export class FemSolver3D {
         if (diff > maxNodeDiff) maxNodeDiff = diff;
       }
     }
-    if (model.plates) {
-      for (const plate of model.plates.values()) {
-        const pNodes: number[] = plate.nodeIds || [];
-        for (let i = 0; i < pNodes.length; i++) {
-          for (let j = i + 1; j < pNodes.length; j++) {
-            const sIdx = nodeIndexMap.get(pNodes[i]);
-            const eIdx = nodeIndexMap.get(pNodes[j]);
-            if (sIdx !== undefined && eIdx !== undefined) {
-              const diff = Math.abs(sIdx - eIdx);
-              if (diff > maxNodeDiff) maxNodeDiff = diff;
-            }
-          }
-        }
-      }
-    }
     const topologicalBw = Math.max(0, Math.min(totalDof - 1, (maxNodeDiff + 1) * 6 - 1));
-    const bandwidth = topologicalBw > 0 ? topologicalBw : this.measureBandwidth(K_mod, totalDof);
-    const L_factor = bandwidth > 0 ? this.factorizeBanded(K_mod, totalDof, bandwidth) : null;
+    return topologicalBw > 0 ? topologicalBw : this.measureBandwidth(K_mod, totalDof);
+  }
 
-    // 4. Solve each Load Case
+  /**
+   * Helper: Solves displacements, extracts member force records, and recovers reactions for all load cases.
+   */
+  private static solveAllLoadCases(
+    model: NormalizedStructuralModel,
+    nodes: Node3D[],
+    members: Member3D[],
+    supports: Map<number, Support3D>,
+    nodeIndexMap: Map<number, number>,
+    K_global: Array<Float64Array>,
+    K_mod: Array<Float64Array>,
+    L_factor: Array<Float64Array> | null,
+    bandwidth: number,
+    totalDof: number,
+    memberData: Array<{
+      member: Member3D;
+      start: Node3D;
+      end: Node3D;
+      L: number;
+      R: number[][];
+      kLocal: number[][];
+      startDof: number;
+      endDof: number;
+    }>,
+    options: FemSolverOptions
+  ) {
+    const loadCases = model.loadCases.size > 0 ? Array.from(model.loadCases.values()) : [
+      { id: 1, title: 'Dead Load (DL)', type: 'DEAD' as const, isCombination: false },
+      { id: 2, title: 'Live Load (LL)', type: 'LIVE' as const, isCombination: false },
+      { id: 3, title: 'Seismic Load X (EQX)', type: 'SEISMIC' as const, isCombination: false },
+      { id: 4, title: 'Seismic Load Z (EQZ)', type: 'SEISMIC' as const, isCombination: false },
+    ];
+
+    const staadDensity = model.extLoads?.source === 'STAAD' ? model.extLoads?.concreteDensity : undefined;
+    const density = staadDensity || options.concreteDensity || 25; // kN/m3
+    const nodeDisplacements = new Map<number, { [lc: number]: [number, number, number, number, number, number] }>();
+    nodes.forEach((n) => nodeDisplacements.set(n.id, {}));
+
+    const reactions: JointReaction[] = [];
+    const memberForces: MemberForceRecord[] = [];
+    let maxDisplacementM = 0;
+
+    let totalAppliedLoadKn = { x: 0, y: 0, z: 0 };
+    let totalReactionKn = { x: 0, y: 0, z: 0 };
+
     loadCases.forEach((lc) => {
-      // Build Load Vector F
       const F = new Array(totalDof).fill(0);
-      const fixedEndForces = new Map<number, { f1: number[]; f2: number[] }>();
 
-      // Apply Member Gravity & UDLs
       memberData.forEach((item) => {
         const props = this.calculateSectionProps(item.member.section);
-        let wy = 0; // vertical UDL (global -Y in kN/m)
+        let wy = 0;
         let wx = 0;
         let wz = 0;
 
-        // When the model carries explicit STAAD loads (member UDLs), that member's
-        // dead load is FULLY described by self-weight + the explicit loads. The
-        // generic 12.5 kN/m wall UDL / 6.0 kN/m live heuristic must be skipped so
-        // re-analysis does not over-weight the structure ~6x vs STAAD.
         const memberHasStaadLoads =
           model.extLoads?.source === 'STAAD' && (model.memberLoads?.get(item.member.id)?.length || 0) > 0;
 
         if (lc.type === 'DEAD' || lc.id === 1) {
-          // Self-weight always applies (STAAD SELFWEIGHT Y -1 mirrors this).
           const selfWt = props.area * density;
           let nominalFinish = 0;
-          // Only fall back to the nominal wall/finish UDL when no explicit STAAD
-          // loads define this member's gravity load.
           if (!memberHasStaadLoads) {
-            nominalFinish = item.member.classification === 'BEAM' ? 12.5 : 0; // 12.5 kN/m wall UDL heuristic
+            nominalFinish = item.member.classification === 'BEAM' ? 12.5 : 0;
           }
           wy -= selfWt + nominalFinish;
         } else if (lc.type === 'LIVE' || lc.id === 2) {
-          // Floor slab live load distributed to beams. When STAAD defines the loads
-          // explicitly, this generic tributary heuristic is skipped (STAAD's live
-          // acts on the slab finite elements, which the app does not yet re-solve).
           if (item.member.classification === 'BEAM' && !memberHasStaadLoads) {
             wy -= 6.0;
           }
         } else if (lc.type === 'SEISMIC' || lc.id === 3 || lc.id === 4) {
-          // Storey lateral force
           const elevation = (item.start.y + item.end.y) / 2;
-          const baseShearCoeff = 0.05; // ~5% g
+          const baseShearCoeff = 0.05;
           const latForce = props.area * item.L * density * baseShearCoeff * (1 + elevation / 10);
           if (lc.id === 3 || lc.title.includes('EQX')) {
             wx += latForce;
@@ -886,7 +951,6 @@ export class FemSolver3D {
           }
         }
 
-        // Add user-assigned custom member loads (UDLs & Point loads)
         const customLoads = model.memberLoads?.get(item.member.id) || [];
         for (const cl of customLoads) {
           const patternMatches =
@@ -906,7 +970,6 @@ export class FemSolver3D {
                 wz += cl.w1;
               }
             } else if (cl.type === 'POINT') {
-              // Equivalent nodal moment and shear for point load P at center
               const P = cl.w1;
               const a = cl.d1 || item.L / 2;
               const b = item.L - a;
@@ -920,7 +983,6 @@ export class FemSolver3D {
           }
         }
 
-        // Equivalent nodal loads for beam uniform distributed load (wy)
         if (Math.abs(wy) > 1e-4 || Math.abs(wx) > 1e-4 || Math.abs(wz) > 1e-4) {
           const L = item.L;
           const V_end = (wy * L) / 2;
@@ -944,9 +1006,6 @@ export class FemSolver3D {
         }
       });
 
-      // 5. Zero out restrained DOFs on the load vector (support reactions will be
-      //    recovered from K_global * U - F below). The K restraint modification is
-      //    already baked into K_mod once (independent of load case).
       const F_mod = [...F];
       nodes.forEach((n) => {
         const sup = supports.get(n.id);
@@ -976,13 +1035,10 @@ export class FemSolver3D {
         }
       });
 
-      // 6. Solve Equation: K_mod * U = F_mod
-      //    Using pre-factorized Cholesky factor: O(n*bw) per load case (<1ms).
       const U_vector = L_factor
         ? this.solveBandedWithFactor(L_factor, F_mod, totalDof, bandwidth)
         : this.solveLinearSystem(K_mod, F_mod);
 
-      // 7. Store Nodal Displacements & Compute Reactions
       nodes.forEach((n) => {
         const nIdx = nodeIndexMap.get(n.id)!;
         const baseDof = nIdx * 6;
@@ -1001,7 +1057,6 @@ export class FemSolver3D {
         const map = nodeDisplacements.get(n.id)!;
         map[lc.id] = [ux, uy, uz, rx, ry, rz];
 
-        // If support node, calculate reaction: R = K_orig * U - F_orig
         const sup = supports.get(n.id);
         const isBase = n.isSupport || sup !== undefined || Math.abs(n.y - (model.statistics?.baseElevation ?? 0)) < 0.1;
 
@@ -1046,7 +1101,6 @@ export class FemSolver3D {
         }
       });
 
-      // 8. Calculate Member Internal Forces at 5 Stations (0, L/4, L/2, 3L/4, L)
       memberData.forEach((item) => {
         const uStart = [
           U_vector[item.startDof],
@@ -1065,7 +1119,6 @@ export class FemSolver3D {
           U_vector[item.endDof + 5],
         ];
 
-        // Transform global displacement to local displacement: u_local = T * u_global
         const uLocalStart = [
           item.R[0][0] * uStart[0] + item.R[0][1] * uStart[1] + item.R[0][2] * uStart[2],
           item.R[1][0] * uStart[0] + item.R[1][1] * uStart[1] + item.R[1][2] * uStart[2],
@@ -1085,7 +1138,6 @@ export class FemSolver3D {
 
         const uLocal12 = [...uLocalStart, ...uLocalEnd];
 
-        // Member end internal forces: F_local = k_local * u_local
         const fLocal = new Array(12).fill(0);
         for (let i = 0; i < 12; i++) {
           for (let j = 0; j < 12; j++) {
@@ -1101,10 +1153,6 @@ export class FemSolver3D {
         const momentMz1 = parseFloat((-fLocal[5]).toFixed(2));
         const momentMz2 = parseFloat(fLocal[11].toFixed(2));
 
-        // Effective vertical (gravity) UDL acting on this member for the current
-        // load case, used to superpose the primary bending parabola on top of the
-        // end-moment linear interpolation so mid-span BMD/SFD values are realistic
-        // (simply supported primary diagram, sign: positive = sagging).
         let wPrimary = 0;
         const propsCalc = this.calculateSectionProps(item.member.section);
         const memberHasStaadLoads = model.extLoads?.source === 'STAAD' && (model.memberLoads?.get(item.member.id)?.length || 0) > 0;
@@ -1130,12 +1178,10 @@ export class FemSolver3D {
 
         stations.forEach((loc, index) => {
           const ratio = loc / L;
-          // Linear interpolation of end moments + superposed primary parabola
           const endInterp = momentMz1 * (1 - ratio) + momentMz2 * ratio;
           const primaryM = (wPrimary * L * L / 2) * ratio * (1 - ratio);
           const mzAtLoc = parseFloat((endInterp + primaryM).toFixed(2));
 
-          // Shear: primary shear reverses sign across mid-span
           const primaryV = wPrimary * L * (0.5 - ratio);
           const vyAtLoc = parseFloat((shearVy + primaryV).toFixed(2));
           const myAtLoc = parseFloat((momentMy1 * (1 - ratio)).toFixed(2));
@@ -1155,7 +1201,25 @@ export class FemSolver3D {
       });
     });
 
-    // 9. Calculate Story Drifts per IS 1893:2016
+    return {
+      nodeDisplacements,
+      reactions,
+      memberForces,
+      maxDisplacementM,
+      totalAppliedLoadKn,
+      totalReactionKn,
+      loadCases,
+    };
+  }
+
+  /**
+   * Helper: Calculates storey drift ratios per IS 1893:2016 Cl. 7.11.1.
+   */
+  private static computeDrifts(
+    nodes: Node3D[],
+    loadCases: Array<{ id: number }>,
+    nodeDisplacements: Map<number, { [lc: number]: [number, number, number, number, number, number] }>
+  ): StoryDriftRecord[] {
     const storyDrifts: StoryDriftRecord[] = [];
     const floorElevations = Array.from(
       new Set(nodes.map((n) => parseFloat(n.y.toFixed(2))))
@@ -1204,6 +1268,42 @@ export class FemSolver3D {
       });
     }
 
+    return storyDrifts;
+  }
+
+  /**
+   * Main 3D Space Frame FEM Direct Stiffness Analysis Pipeline (Synchronous).
+   */
+  public static analyzeModel(
+    model: NormalizedStructuralModel,
+    options: FemSolverOptions = {}
+  ): FemAnalysisResult {
+    const nodes = Array.from(model.nodes.values()).sort((a, b) => a.id - b.id);
+    const members = Array.from(model.members.values());
+    const supports = model.supports;
+
+    if (nodes.length === 0 || members.length === 0) {
+      return this.emptyResult();
+    }
+
+    // 1. Map Node ID to global DOF index using Reverse Cuthill-McKee (RCM)
+    const nodeIndexMap = this.computeRcmOrder(nodes, members);
+    const { K_global, memberData, totalDof } = this.assembleFrameStiffness(model, nodes, members, nodeIndexMap, options);
+    const K_mod = this.applyRestraints(K_global, nodes, supports, nodeIndexMap, model);
+    const bandwidth = this.computeBandwidth(members, nodeIndexMap, totalDof, K_mod);
+    const L_factor = bandwidth > 0 ? this.factorizeBanded(K_mod, totalDof, bandwidth) : null;
+    const {
+      nodeDisplacements,
+      reactions,
+      memberForces,
+      maxDisplacementM,
+      totalAppliedLoadKn,
+      totalReactionKn,
+      loadCases,
+    } = this.solveAllLoadCases(model, nodes, members, supports, nodeIndexMap, K_global, K_mod, L_factor, bandwidth, totalDof, memberData, options);
+
+    const storyDrifts = this.computeDrifts(nodes, loadCases, nodeDisplacements);
+
     return {
       nodeDisplacements,
       reactions,
@@ -1212,8 +1312,89 @@ export class FemSolver3D {
       maxDisplacementM: parseFloat(maxDisplacementM.toFixed(4)),
       totalAppliedLoadKn,
       totalReactionKn,
-      // Equilibrium is meaningful only when there are loads and reactions: compare
-      // vertical reactions against vertical applied load within a small tolerance.
+      equilibriumCheck:
+        totalAppliedLoadKn.y > 0.01
+          ? Math.abs(totalAppliedLoadKn.y - totalReactionKn.y) / totalAppliedLoadKn.y <= 0.10
+            ? 'PASS'
+            : 'WARNING'
+          : 'PASS',
+    };
+  }
+
+  /**
+   * Asynchronously runs the 3D Space Frame FEM Direct Stiffness Analysis Pipeline.
+   * Yields to the browser event loop between stages so the DOM repaints, loaders spin smoothly at 60fps,
+   * and browser script watchdogs are continuously reset. Reports live progress via onProgress callback.
+   */
+  public static async analyzeModelAsync(
+    model: NormalizedStructuralModel,
+    options: FemSolverOptions = {},
+    onProgress?: FemProgressCallback
+  ): Promise<FemAnalysisResult> {
+    const nodes = Array.from(model.nodes.values()).sort((a, b) => a.id - b.id);
+    const members = Array.from(model.members.values());
+    const supports = model.supports;
+
+    if (nodes.length === 0 || members.length === 0) {
+      onProgress?.(8, 100, 'Empty model');
+      return this.emptyResult();
+    }
+
+    // Step 1 (12%): Geometry & RCM Bandwidth Reduction
+    onProgress?.(1, 12, 'Reading model geometry & RCM bandwidth optimization');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const nodeIndexMap = this.computeRcmOrder(nodes, members);
+
+    // Step 2 (25%): Assembling Global Stiffness Matrix
+    onProgress?.(2, 25, 'Assembling global stiffness matrix: 6-DOF element matrices');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const { K_global, memberData, totalDof } = this.assembleFrameStiffness(model, nodes, members, nodeIndexMap, options);
+
+    // Step 3 (37%): Applying Restraints & Banded Cholesky Factorization
+    onProgress?.(3, 37, 'Applying boundary restraints & Cholesky matrix factorization');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const K_mod = this.applyRestraints(K_global, nodes, supports, nodeIndexMap, model);
+    const bandwidth = this.computeBandwidth(members, nodeIndexMap, totalDof, K_mod);
+    const L_factor = bandwidth > 0
+      ? await this.factorizeBandedAsync(K_mod, totalDof, bandwidth, (ratio) => {
+          onProgress?.(3, Math.min(48, Math.round(37 + ratio * 12)), 'Factorizing global stiffness matrix…');
+        })
+      : null;
+
+    // Step 4 (50%): Solving for Displacements
+    onProgress?.(4, 50, 'Solving for displacements: direct stiffness elimination (K·U = F)');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const {
+      nodeDisplacements,
+      reactions,
+      memberForces,
+      maxDisplacementM,
+      totalAppliedLoadKn,
+      totalReactionKn,
+      loadCases,
+    } = this.solveAllLoadCases(model, nodes, members, supports, nodeIndexMap, K_global, K_mod, L_factor, bandwidth, totalDof, memberData, options);
+
+    // Step 5 (62%): Extracting Member Forces
+    onProgress?.(5, 62, 'Extracting member forces: axial, shear and moment envelope per section');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Step 6 (75%): Support Reactions & Equilibrium
+    onProgress?.(6, 75, 'Computing support reactions: end forces at restrained joints');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Step 7 (87%): Story Drifts per IS 1893:2016
+    onProgress?.(7, 87, 'Computing story drifts: IS 1893:2016 Cl. 7.11.1 storey drift ratio');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const storyDrifts = this.computeDrifts(nodes, loadCases, nodeDisplacements);
+
+    return {
+      nodeDisplacements,
+      reactions,
+      memberForces,
+      storyDrifts,
+      maxDisplacementM: parseFloat(maxDisplacementM.toFixed(4)),
+      totalAppliedLoadKn,
+      totalReactionKn,
       equilibriumCheck:
         totalAppliedLoadKn.y > 0.01
           ? Math.abs(totalAppliedLoadKn.y - totalReactionKn.y) / totalAppliedLoadKn.y <= 0.10

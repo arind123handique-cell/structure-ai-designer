@@ -50,46 +50,37 @@ export const RunAnalysisWindow: React.FC<WindowContentProps> = ({ close }) => {
 
   const run = async () => {
     setPhase('running');
-    setStepIdx(0);
-    setProgress(0);
+    setStepIdx(1);
+    setProgress(12);
+    setStatusLine(STEPS[0]?.detail ?? 'Reading model geometry');
     cancelledRef.current = false;
     const t0 = performance.now();
 
-    const advance = (i: number) => {
-      if (cancelledRef.current) return;
-      if (i > STEPS.length) return;
-      setStepIdx(i);
-      const pct = Math.min(100, Math.round((i / STEPS.length) * 100));
-      setProgress(pct);
-      setStatusLine(STEPS[i - 1]?.detail ?? '');
-      window.setTimeout(() => advance(i + 1), 60);
-    };
-    advance(1);
-
     // Yield to the browser to ensure the running state and progress bar paint immediately
-    await sleep(40);
+    await sleep(20);
 
     let solveErr: unknown = null;
     try {
-      await runFemAnalysis();
+      await runFemAnalysis((step, pct, detail) => {
+        if (cancelledRef.current) return;
+        setStepIdx(step);
+        setProgress(pct);
+        setStatusLine(detail);
+      });
     } catch (e) {
       console.error('RunAnalysis failed:', e);
       solveErr = e;
     }
 
     const elapsedMs = performance.now() - t0;
-    const remaining = Math.max(0, 500 - elapsedMs);
-    await sleep(remaining);
-
-    cancelledRef.current = true;
-    setStepIdx(STEPS.length + 1);
-    setProgress(100);
-    setStatusLine('analysis complete');
-    setElapsed(Math.round(performance.now() - t0));
+    setElapsed(Math.round(elapsedMs));
 
     if (solveErr) {
       setPhase('error');
     } else {
+      setStepIdx(STEPS.length + 1);
+      setProgress(100);
+      setStatusLine('analysis complete');
       await sleep(250);
       setPhase('done');
     }

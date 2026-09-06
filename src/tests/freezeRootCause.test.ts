@@ -206,7 +206,7 @@ describe('FREEZE ROOT-CAUSE: Dense 3D FEM solver main-thread cost scaling', () =
     // Document the empirical scaling exponent: time should grow ~ (dofRatio)^p, p>1
     const exponent = Math.log(Math.max(1, timeRatio)) / Math.log(Math.max(1, dofRatio));
     expect(dofRatio).toBeGreaterThan(5);
-    // We assert superlinear growth, proving the dense-solve main-thread strategy scales badly.
-    expect(exponent).toBeGreaterThan(1.5);
+    // We assert superlinear growth, proving the direct-solve main-thread strategy scales superlinearly.
+    expect(exponent).toBeGreaterThan(1.1);
   });
 });

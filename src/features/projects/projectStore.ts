@@ -54,6 +54,7 @@ export type ViewTab =
   | 'shearwalls-design'
   | 'slabs-design'
   | 'staircase-design'
+  | 'rcdc-design'
   | 'floor-plans'
   | 'architectural-plan'
   | 'drawings'
@@ -87,6 +88,8 @@ export interface ProjectState {
   isImportModalOpen: boolean;
   isNewProjectModalOpen: boolean;
   setNewProjectModalOpen: (open: boolean) => void;
+  isRcdxImportModalOpen: boolean;
+  setRcdxImportModalOpen: (open: boolean) => void;
   isLoading: boolean;
 
   // Foundation Pile & Pile Cap States
@@ -123,6 +126,8 @@ export interface ProjectState {
   deleteInactiveProjects: () => Promise<void>;
   reloadProjects: () => Promise<void>;
   importANL: (fileName: string, content: string, customMetadata?: Partial<ProjectMetadata>) => Promise<StoredProject>;
+  importRCDX: (file: File) => Promise<StoredProject>;
+  rcdcData: import('@/features/rcdx/types').RCDCDocument | null;
   selectMember: (id: number | null) => void;
   selectNode: (id: number | null) => void;
   selectPlate: (id: number | null) => void;
@@ -231,7 +236,7 @@ export interface ProjectState {
   saveStaircaseDesigns: (designs: any, geometry?: any, landingEntry?: any) => Promise<void>;
 
   // Standalone ETABS & 3D FEM Analysis Actions
-  runFemAnalysis: () => Promise<void>;
+  runFemAnalysis: (onProgress?: (step: number, pct: number, detail: string) => void) => Promise<void>;
   runSeismicAnalysis: (params?: Partial<any>) => Promise<any>;
   runAllDesignChecks: () => Promise<number>;
   generateBuildingGrid: (
@@ -357,6 +362,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isImportModalOpen: false,
   isNewProjectModalOpen: false,
   setNewProjectModalOpen: (isNewProjectModalOpen) => set({ isNewProjectModalOpen }),
+  isRcdxImportModalOpen: false,
+  setRcdxImportModalOpen: (isRcdxImportModalOpen) => set({ isRcdxImportModalOpen }),
+  rcdcData: null,
   isLoading: false,
 
   // Architectural Floor Plan Initial State
@@ -442,6 +450,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           savedSlabDesigns: first.savedSlabDesigns || {},
           customColumnRebarOverrides: first.customColumnRebarOverrides || {},
           customBeamRebarOverrides: first.customBeamRebarOverrides || {},
+          rcdcData: (first as any).rcdcData,
           customShearWallOverrides: first.customShearWallOverrides || {},
           customSlabOverrides: first.customSlabOverrides || {},
           architecturalWalls: first.architecturalWalls || {},
@@ -591,6 +600,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           savedSlabDesigns: project.savedSlabDesigns || {},
           customColumnRebarOverrides: project.customColumnRebarOverrides || {},
           customBeamRebarOverrides: project.customBeamRebarOverrides || {},
+          rcdcData: (project as any).rcdcData,
           customShearWallOverrides: project.customShearWallOverrides || {},
           customSlabOverrides: project.customSlabOverrides || {},
           architecturalWalls: project.architecturalWalls || {},
@@ -717,6 +727,63 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
+  importRCDX: async (file) => {
+    set({ isLoading: true });
+    try {
+      const { parseRCDC } = await import('@/features/rcdx/rcdxParser');
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const result = await parseRCDC(bytes, file.name);
+
+      const id = `prj_${Date.now()}`;
+      const metadata: ProjectMetadata = {
+        id,
+        name: file.name.replace(/\.rcdx$/i, '') || 'RCDC Design',
+        code: `STR-${Math.floor(1000 + Math.random() * 9000)}`,
+        client: 'Engineering Client',
+        engineer: 'Lead Structural Engineer',
+        location: 'Sector 12, Phase II',
+        date: new Date().toISOString().split('T')[0],
+        description: `Imported RCDC design "${file.name}" with ${result.model.nodes.size} nodes, ${result.model.members.size} members, ${result.rcdcDocument.beams.length} beams, ${result.rcdcDocument.columns.length} columns and ${result.rcdcDocument.slabs.length} slab panels.`,
+        anlFileName: file.name,
+        anlFileSize: file.size,
+        staadVersion: 'STAAD.Pro CONNECT Edition + RCDC',
+        designSettings: { ...DEFAULT_DESIGN_SETTINGS },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const storedProject: StoredProject = {
+        metadata,
+        model: ProjectStorage.serializeModel(result.model),
+        warnings: result.warnings,
+        rcdcData: result.rcdcDocument,
+        savedBeamDesigns: result.designs.savedBeamDesigns,
+        savedColumnDesigns: result.designs.savedColumnDesigns,
+        savedSlabDesigns: result.designs.savedSlabDesigns,
+      };
+
+      await ProjectStorage.saveProject(storedProject);
+      const updated = await ProjectStorage.getAllProjects();
+
+      set({
+        projects: updated,
+        activeProject: storedProject,
+        activeModel: result.model,
+        rcdcData: result.rcdcDocument,
+        savedBeamDesigns: result.designs.savedBeamDesigns,
+        savedColumnDesigns: result.designs.savedColumnDesigns,
+        savedSlabDesigns: result.designs.savedSlabDesigns,
+        selectedMemberId: null,
+        selectedNodeId: null,
+        isRcdxImportModalOpen: false,
+        activeView: 'rcdc-design',
+      });
+
+      return storedProject;
+    } finally {
+      set({ isLoading: false });
+    }
+  },
   selectMember: (id) => set({ selectedMemberId: id, selectedNodeId: null, selectedPlateId: null }),
   selectNode: (id) => set({ selectedNodeId: id, selectedMemberId: null, selectedPlateId: null }),
   selectPlate: (id) => set({ selectedPlateId: id, selectedMemberId: null, selectedNodeId: null }),
@@ -2556,7 +2623,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  runFemAnalysis: async () => {
+  runFemAnalysis: async (onProgress?: (step: number, pct: number, detail: string) => void) => {
     const { activeModel, activeProject } = get();
     if (!activeModel) return;
 
@@ -2565,10 +2632,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await new Promise((resolve) => setTimeout(resolve, 30));
 
     try {
-      const femResult = await runFemAnalysisAsync(activeModel, {
-        concreteE: activeProject?.metadata.designSettings?.concreteGrade === 'M30' ? 27386000 : 25000000,
-        concreteDensity: 25,
-      });
+      const femResult = await runFemAnalysisAsync(
+        activeModel,
+        {
+          concreteE: activeProject?.metadata.designSettings?.concreteGrade === 'M30' ? 27386000 : 25000000,
+          concreteDensity: 25,
+        },
+        onProgress
+      );
+
+      onProgress?.(8, 92, 'Factoring load combinations & updating project store…');
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       // Compute factored Load Combination forces by superposing per-load-case results.
       // (The FEM solver processes raw load cases; combination results are derived here.)
@@ -2731,6 +2805,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
         set({ activeProject: updatedProject });
       }
+
+      onProgress?.(8, 100, 'Analysis complete');
     } catch (e) {
       console.error('FEM analysis failed:', e);
       set({ isLoading: false });

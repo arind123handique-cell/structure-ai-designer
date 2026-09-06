@@ -149,4 +149,52 @@ describe('RunAnalysisWindow — Lifecycle and Completion Verification', () => {
     expect(finalModel.nodeDisplacements).toBeDefined();
     expect(finalModel.nodeDisplacements!.size).toBeGreaterThan(0);
   });
+
+  it('reports progressive steps via analyzeModelAsync without getting stuck at Step 2', async () => {
+    const { FemSolver3D } = await import('../features/calculations/femSolver3D');
+    const stepsRecorded: number[] = [];
+    const pctsRecorded: number[] = [];
+    const detailsRecorded: string[] = [];
+
+    const result = await FemSolver3D.analyzeModelAsync(
+      mockModel,
+      { concreteDensity: 25 },
+      (step, pct, detail) => {
+        stepsRecorded.push(step);
+        pctsRecorded.push(pct);
+        detailsRecorded.push(detail);
+      }
+    );
+
+    expect(result.memberForces.length).toBeGreaterThan(0);
+    expect(stepsRecorded).toContain(1);
+    expect(stepsRecorded).toContain(2);
+    expect(stepsRecorded).toContain(3);
+    expect(stepsRecorded).toContain(4);
+    expect(stepsRecorded).toContain(5);
+    expect(stepsRecorded).toContain(6);
+    expect(stepsRecorded).toContain(7);
+    // Verify strictly non-decreasing percentages
+    for (let i = 1; i < pctsRecorded.length; i++) {
+      expect(pctsRecorded[i]).toBeGreaterThanOrEqual(pctsRecorded[i - 1]);
+    }
+  });
+
+  it('solves models with plates without bandwidth explosion or freeze', async () => {
+    const { FemSolver3D } = await import('../features/calculations/femSolver3D');
+    const modelWithPlates: NormalizedStructuralModel = {
+      ...mockModel,
+      plates: new Map<number, any>([
+        [1, { id: 1, nodeIds: [1, 2, 3, 4], thickness: 0.15 }],
+      ]),
+    };
+
+    const t0 = performance.now();
+    const result = await FemSolver3D.analyzeModelAsync(modelWithPlates);
+    const elapsed = performance.now() - t0;
+
+    expect(elapsed).toBeLessThan(500); // Should solve in milliseconds
+    expect(result.memberForces.length).toBeGreaterThan(0);
+    expect(result.reactions.length).toBeGreaterThan(0);
+  });
 });
