@@ -84,6 +84,7 @@ export interface StoredProject {
   savedSlabDesigns?: Record<string, any>;
   customColumnRebarOverrides?: Record<number, any>;
   customBeamRebarOverrides?: Record<number, any>;
+  rcdcData?: import('@/features/rcdx/types').RCDCDocument;
   customShearWallOverrides?: Record<number, any>;
   customSlabOverrides?: Record<string, any>;
   architecturalWalls?: Record<string, any>;

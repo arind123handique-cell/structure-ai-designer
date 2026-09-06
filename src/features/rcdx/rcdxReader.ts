@@ -200,8 +200,6 @@ export async function readRCDC(bytes: Uint8Array, fileName: string): Promise<RCD
     SDL: 'DEAD',
     'EQ-X': 'EQ',
     'EQ-Z': 'EQ',
-    'EQ+X': 'EQ',
-    'EQ-Z': 'EQ',
     'WL-X': 'WIND',
     'WL-Z': 'WIND',
     'WIND-X': 'WIND',
@@ -289,10 +287,11 @@ export async function readRCDC(bytes: Uint8Array, fileName: string): Promise<RCD
     for (const r of q('SELECT BeamMemGroupNo, BeamNo, Level FROM Beam_Member_Groups')) {
       const beamNo = num(r.BeamNo);
       const lvl = num(r.Level);
-      let levelGroupNo = beamNo;
-      const range = beamLevelGroupByLevelRange.find((g) => lvl >= g.start && lvl <= g.end);
+      const memGroupNo = num(r.BeamMemGroupNo);
+      let levelGroupNo = memGroupNo;
+      const range = beamLevelGroupByLevelRange.find((g) => g.groupNo === memGroupNo && lvl >= g.start && lvl <= g.end);
       if (range) levelGroupNo = range.groupNo;
-      beamMemGroup.set(beamNo, { memGroupNo: num(r.BeamMemGroupNo), levelGroupNo });
+      beamMemGroup.set(beamNo, { memGroupNo, levelGroupNo });
     }
   }
 
@@ -637,6 +636,10 @@ export async function readRCDC(bytes: Uint8Array, fileName: string): Promise<RCD
         });
       }
 
+      const barCoords = (columnRebar.get(columnNo) ?? [])
+        .filter((b) => b.BarID)
+        .map((b) => ({ dx: num(b.DeltaX), dz: num(b.DeltaZ) }));
+
       const statusAstProvidedMm2 = mainBars.length ? mainBars[0].areaMm2 : 0;
 
       const envelope: RCDCEnvelope = envelRaw
@@ -665,8 +668,9 @@ export async function readRCDC(bytes: Uint8Array, fileName: string): Promise<RCD
         designFail: Math.round(num(optLookup.DesignFailFlag)) === 1,
         envelope,
         mainBars,
+        barCoords,
         linkZones,
-        statusAstProvidedMm2:
+        statusAstProvidedMm2,
       });
     }
     columns.sort((a, b) => a.columnNo - b.columnNo);
@@ -769,7 +773,7 @@ export async function readRCDC(bytes: Uint8Array, fileName: string): Promise<RCD
         const barId = num(rd?.BarID);
         const spacingM = num(rd?.BarSpacing);
         const astProv = barDias[barId]
-          ? round((barDias[barId].areaMm2 * 1000) / Math.max(spacingM, 0.001))
+          ? round(barDias[barId].areaMm2 / Math.max(spacingM, 0.001))
           : 0;
         reinforcement.push({
           reinforcementTypeId: typeId,

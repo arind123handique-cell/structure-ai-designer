@@ -3,6 +3,7 @@ import { useProjectStore } from '@/features/projects/projectStore';
 import { Sidebar } from './Sidebar';
 import { TopHeader } from './TopHeader';
 import { ANLImportModal } from '@/features/anl/ANLImportModal';
+import { RCDXImportModal } from '@/features/rcdx/RCDXImportModal';
 import { NewProjectModal } from '@/features/projects/NewProjectModal';
 import { UniversalRebarModal } from '@/features/design/common/UniversalRebarModal';
 import { Loader2, PanelLeftOpen, PanelTopOpen, Eye, EyeOff, LogOut } from 'lucide-react';
@@ -34,6 +35,7 @@ const FloorPlanViewer = lazy(() => import('@/features/drawings/FloorPlanViewer')
 const ArchitecturalPlanView = lazy(() => import('@/features/architectural/components/ArchitecturalPlanView').then(m => ({ default: m.ArchitecturalPlanView })));
 const DrawingsView = lazy(() => import('@/features/drawings/DrawingsView').then(m => ({ default: m.DrawingsView })));
 const ReportsView = lazy(() => import('@/features/reports/ReportsView').then(m => ({ default: m.ReportsView })));
+const RcdcDesignView = lazy(() => import('@/features/rcdx/RcdcDesignView').then(m => ({ default: m.RcdcDesignView })));
 
 const ViewFallback: React.FC = () => (
   <div className="flex-1 flex flex-col items-center justify-center p-8 text-slate-400 font-mono gap-3">
@@ -104,6 +106,8 @@ export const AppLayout: React.FC = () => {
         return <DrawingsView />;
       case 'reports':
         return <ReportsView />;
+      case 'rcdc-design':
+        return <RcdcDesignView />;
       default:
         return <ProjectDashboard />;
     }
@@ -203,6 +207,9 @@ export const AppLayout: React.FC = () => {
 
       {/* ANL Import Modal */}
       <ANLImportModal />
+
+      {/* RCDC Design Import Modal */}
+      <RCDXImportModal />
 
       {/* New Project Modal */}
       <NewProjectModal />

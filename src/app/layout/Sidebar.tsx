@@ -26,6 +26,7 @@ import {
   Sun,
   Moon,
   UserCog,
+  Database,
 } from 'lucide-react';
 import { cyberAudio } from '@/features/video/audio/cyberAudioSynthesizer';
 import { useVideoStore } from '@/features/video/videoStore';
@@ -42,6 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({ onHide }) => {
   const activeView = useProjectStore(s => s.activeView);
   const setActiveView = useProjectStore(s => s.setActiveView);
   const setImportModalOpen = useProjectStore(s => s.setImportModalOpen);
+  const setRcdxImportModalOpen = useProjectStore(s => s.setRcdxImportModalOpen);
   const setNewProjectModalOpen = useProjectStore(s => s.setNewProjectModalOpen);
   const warningsCount = useProjectStore(s => s.activeProject?.warnings.length ?? 0);
   const engineerName = useProjectStore(s => s.activeProject?.metadata.engineer);
@@ -94,6 +96,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({ onHide }) => {
     { label: 'Shear Wall Design', view: 'shearwalls-design', icon: Layout },
     { label: 'Grade Beam Design', view: 'gradebeams-design', icon: Compass },
     { label: 'Footing Design', view: 'footings-design', icon: Building },
+    { label: 'RCDC Design Results', view: 'rcdc-design', icon: Database },
   ];
 
   const outputItems: { label: string; view: ViewTab; icon: React.FC<{ className?: string }> }[] = [
@@ -131,13 +134,20 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({ onHide }) => {
       </div>
 
       {/* Primary CTA: Import ANL */}
-      <div className="p-3">
+      <div className="p-3 space-y-2">
         <button
           onClick={() => setImportModalOpen(true)}
           className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-mono text-xs font-semibold py-2.5 px-3 rounded-md shadow-sm transition-all active:scale-95"
         >
           <Upload className="w-4 h-4" />
           <span>Import .ANL / .STD</span>
+        </button>
+        <button
+          onClick={() => setRcdxImportModalOpen(true)}
+          className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-semibold py-2.5 px-3 rounded-md shadow-sm transition-all active:scale-95"
+        >
+          <Database className="w-4 h-4" />
+          <span>Import .RCDX Design</span>
         </button>
       </div>
 

@@ -206,6 +206,7 @@ export interface RCDCColumn {
   designFail: boolean;
   envelope: RCDCEnvelope;
   mainBars: RCDCBar[];
+  barCoords?: { dx: number; dz: number }[];
   linkZones: RCDCLinkZone[];
   statusAstProvidedMm2: number;
 }
