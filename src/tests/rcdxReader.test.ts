@@ -71,9 +71,10 @@ describe('RCDX reader', () => {
     expect(entry).toBeDefined();
     expect(entry.bMm).toBe(col.widthMm);
     expect(entry.D).toBe(col.depthMm);
-    expect(entry.rebar.totalBars).toBe(col.mainBars[0].count);
+    const totalMain = col.mainBars.reduce((s, m) => s + m.count, 0);
+    expect(entry.rebar.totalBars).toBe(totalMain);
     expect(entry.rebar.cornerBars.count).toBe(4);
-    if (col.mainBars[0].count > 4) {
+    if (totalMain > 4) {
       expect(entry.rebar.faceBars).toBeDefined();
     }
   });

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useProjectStore } from '@/features/projects/projectStore';
-import { ExcelWorkbookExporter } from './excelExport';
+import { FullEstimateExporter } from './estimateExport';
 import { PDFReportGenerator } from './pdfReportGenerator';
 import { CalculationPdfService } from '@/features/calculations/calculationPdfService';
 import { ConcreteVolumeEngine, ConcreteComponentVolume } from '@/features/calculations/concreteVolumeEngine';
@@ -8,7 +8,6 @@ import { BoqEngine } from '@/features/calculations/boqEngine';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
 import { ArchitecturalTakeoffEngine } from '@/features/architectural/engines/architecturalTakeoffEngine';
 import { FloorPlanEngine } from '@/features/drawings/floorPlanEngine';
-import { exportToCsv } from '@/utils/exportUtils';
 import {
   FileSpreadsheet,
   Printer,
@@ -104,27 +103,8 @@ export const ReportsView: React.FC = () => {
     return BoqEngine.generateBuildingBoq(activeModel, undefined, activeProject.metadata.name);
   }, [activeModel, activeProject]);
 
-  const handleExportBoqMeasurementCsv = () => {
-    const csvRows = boqEstimate.measurementSheet.map((m) => ({
-      ItemNo: m.itemNo,
-      Description: m.description,
-      Category: m.sourceCategory,
-      Nos: m.nos,
-      Length_m: m.lengthM,
-      Breadth_m: m.breadthM,
-      HeightOrDepth_m: m.heightOrDepthM,
-      Quantity: m.quantity,
-      Unit: m.unit,
-      UnitRate_INR: m.unitRateInr,
-      TotalAmount_INR: m.totalAmountInr,
-      CodeRef: m.codeReference || '',
-      FormulaNote: m.formulaNote || '',
-    }));
-    exportToCsv(csvRows, `${activeProject.metadata.code || 'PRJ'}_BOQ_Measurement_Sheet_LBH.csv`);
-  };
-
-  const handleDownloadExcel = () => {
-    ExcelWorkbookExporter.downloadWorkbook(dataset as any);
+  const handleDownloadFullEstimate = () => {
+    FullEstimateExporter.downloadEstimate(dataset as any);
   };
 
   const handleDownloadA4Pdf = () => {
@@ -153,28 +133,6 @@ export const ReportsView: React.FC = () => {
 
   const handlePrintReport = () => {
     PDFReportGenerator.printProjectReport(dataset as any);
-  };
-
-  const handleExportConcreteCsv = () => {
-    const csvRows = concreteSummary.components.map((c) => ({
-      Component: c.component,
-      Category: c.category,
-      CodeClause: c.codeRef,
-      ElementCount: c.count,
-      TypicalDimensions: c.typicalDimensions,
-      Grade: c.concreteGrade,
-      ConcreteVolume_m3: c.concreteM3,
-      PercentageShare: `${c.percentageShare}%`,
-      FormworkArea_m2: c.formworkM2,
-      CementBags_50kg: c.cementBags,
-      Sand_m3: c.sandM3,
-      Sand_MT: c.sandMT,
-      CoarseAggregate_m3: c.aggregateM3,
-      CoarseAggregate_MT: c.aggregateMT,
-      Water_Liters: c.waterLiters,
-    }));
-
-    exportToCsv(csvRows, `${activeProject.metadata.code || 'PRJ'}_Concrete_Volume_Schedule_BOQ.csv`);
   };
 
   return (
@@ -222,11 +180,12 @@ export const ReportsView: React.FC = () => {
             </button>
 
             <button
-              onClick={handleDownloadExcel}
+              onClick={handleDownloadFullEstimate}
               className="flex items-center gap-1.5 px-4 py-2 bg-secondary-brand hover:bg-blue-700 text-white font-mono text-xs font-semibold rounded shadow transition-all"
+              title="Download Full Estimate (DETAIL ESTIMATE measurement sheet, Abstract of Cost, Concrete & BBS) in PWD/DSR format"
             >
               <Download className="w-3.5 h-3.5" />
-              Download Excel (.xls)
+              Download Full Estimate
             </button>
           </div>
         </div>
@@ -367,12 +326,12 @@ export const ReportsView: React.FC = () => {
 
               <button
                 type="button"
-                onClick={concreteViewMode === 'MEASUREMENT_SHEET' ? handleExportBoqMeasurementCsv : handleExportConcreteCsv}
+                onClick={handleDownloadFullEstimate}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded text-xs font-mono font-semibold transition-colors"
-                title={concreteViewMode === 'MEASUREMENT_SHEET' ? 'Export BOQ Measurement Sheet CSV' : 'Export detailed Concrete Volume CSV'}
+                title={concreteViewMode === 'MEASUREMENT_SHEET' ? 'Download Full Estimate measurement sheet (PWD/DSR format)' : 'Download Full Estimate (DETAIL ESTIMATE + Abstract + Concrete + BBS)'}
               >
                 <Download className="w-3.5 h-3.5" />
-                {concreteViewMode === 'MEASUREMENT_SHEET' ? 'BOQ CSV' : 'CSV'}
+                {concreteViewMode === 'MEASUREMENT_SHEET' ? 'Estimate (.xls)' : 'Full Estimate'}
               </button>
             </div>
           </div>

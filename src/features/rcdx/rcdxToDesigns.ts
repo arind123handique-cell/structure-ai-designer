@@ -152,7 +152,7 @@ function columnRebarLayout(col: RCDCColumn): {
 } {
   const main = col.mainBars[0];
   const dia = main?.diameterMm || 16;
-  const totalBars = main?.count || 4;
+  const totalBars = col.mainBars.reduce((s, x) => s + (x.count || 0), 0) || 4;
   const singleArea = (Math.PI * dia * dia) / 4;
   const totalArea = totalBars * singleArea;
   const b = col.widthMm || 400;
@@ -160,35 +160,41 @@ function columnRebarLayout(col: RCDCColumn): {
   const cover = col.coverMm || 50;
 
   // Derive face bar counts from the RCDC per-bar coordinate table when available.
+  // DeltaX/DeltaZ are distances (mm) from the section's bottom-left corner, so a
+  // bar is "near an edge" when its coordinate is at the minimum or maximum band.
   let countX = 0;
   let countY = 0;
   const coords = col.barCoords;
   if (coords && coords.length > 0) {
-    const hw = Math.max(...coords.map((c) => Math.abs(c.dx)));
-    const hd = Math.max(...coords.map((c) => Math.abs(c.dz)));
+    const minAbs = Math.max(2, Math.min(...coords.map((c) => Math.min(Math.abs(c.dx), Math.abs(c.dz)))));
+    const maxAbs = Math.max(...coords.map((c) => Math.max(Math.abs(c.dx), Math.abs(c.dz))));
+    const band = minAbs * 1.8 + 2;
+    const nearEdge = (v: number) => v <= band || v >= maxAbs - band;
+    let faceX = 0;
+    let faceY = 0;
     for (const c of coords) {
-      const ax = Math.abs(c.dx);
-      const az = Math.abs(c.dz);
-      const isCorner = ax >= hw * 0.95 && az >= hd * 0.95;
-      if (isCorner) continue;
-      if (ax >= az) countX += 1;
-      else countY += 1;
+      const nearX = nearEdge(Math.abs(c.dx));
+      const nearZ = nearEdge(Math.abs(c.dz));
+      if (nearX && nearZ) continue; // corner
+      if (nearX) faceX += 1;
+      else if (nearZ) faceY += 1;
     }
+    countX = Math.round(faceX / 2);
+    countY = Math.round(faceY / 2);
   }
-  if (countX + countY >= totalBars - 4 || (countX === 0 && countY === 0)) {
+  if ((countX === 0 && countY === 0) || 2 * (countX + countY) >= totalBars - 4) {
     const face = totalBars - 4;
     if (face > 0) {
       const split = Math.round((face * D) / (2 * (D + b)));
       countX = Math.max(0, split);
-      countY = Math.max(0, face - 2 * countX) / 2;
-      countX = Math.max(0, face - 2 * countY) / 2;
+      countY = Math.max(0, Math.round(face / 2) - countX);
+      countX = Math.max(0, Math.round(face / 2) - countY);
     } else {
       countX = 0;
       countY = 0;
     }
   }
-  const totalFace = 2 * (countX + countY);
-  const faceArea = totalFace > 0 ? totalFace * singleArea : 0;
+  const faceArea = 2 * (countX + countY) * singleArea;
 
   const coreD = D - 2 * (cover + 8);
   const coreB = b - 2 * (cover + 8);

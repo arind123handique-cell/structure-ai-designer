@@ -21,9 +21,12 @@ vi.mock('jspdf', () => {
     setFontSize = vi.fn();
     setTextColor = vi.fn();
     setLineWidth = vi.fn();
+    setLineDashPattern = vi.fn();
     rect = vi.fn();
     text = vi.fn();
     line = vi.fn();
+    circle = vi.fn();
+    lines = vi.fn();
   }
   return {
     default: MockJsPDF,

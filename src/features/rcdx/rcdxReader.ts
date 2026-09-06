@@ -599,16 +599,21 @@ export async function readRCDC(bytes: Uint8Array, fileName: string): Promise<RCD
       };
 
       const details = columnDetails.get(columnNo) ?? [];
-      const mainRow = details.find((d) => Math.round(num(d.CReinfTypeID)) === 1);
       const mainBars: RCDCBar[] = [];
-      if (mainRow) {
-        const diaId = num(mainRow.BarID);
-        const count = Math.round(num(mainRow.BarNos));
-        mainBars.push({
-          diameterMm: diaFor(diaId),
-          count,
-          areaMm2: round(barDias[diaId]?.areaMm2 ? count * barDias[diaId]!.areaMm2 : 0),
-        });
+      const mainRows = details.filter((d) => Math.round(num(d.CReinfTypeID)) === 1);
+      if (mainRows.length) {
+        const byDia = new Map<number, number>();
+        for (const d of mainRows) {
+          const diaId = num(d.BarID);
+          byDia.set(diaId, (byDia.get(diaId) ?? 0) + Math.round(num(d.BarNos)));
+        }
+        for (const [diaId, count] of byDia) {
+          mainBars.push({
+            diameterMm: diaFor(diaId),
+            count,
+            areaMm2: round(barDias[diaId]?.areaMm2 ? count * barDias[diaId]!.areaMm2 : 0),
+          });
+        }
       } else if (columnRebar.has(columnNo)) {
         const barRows = columnRebar.get(columnNo)!;
         const diaId = barRows.find((b) => num(b.BarID))?.BarID;

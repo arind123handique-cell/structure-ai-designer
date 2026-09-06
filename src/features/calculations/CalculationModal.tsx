@@ -1,6 +1,7 @@
 import React from 'react';
 import { DetailedCalculationReport } from './types';
 import { CalculationPdfService } from './calculationPdfService';
+import { useProjectStore } from '@/features/projects/projectStore';
 import { X, Printer, Download, CheckCircle2, AlertTriangle, XCircle, FileText, Compass, Layers } from 'lucide-react';
 
 interface CalculationModalProps {
@@ -9,6 +10,7 @@ interface CalculationModalProps {
 }
 
 export const CalculationModal: React.FC<CalculationModalProps> = ({ report, onClose }) => {
+  const { activeModel, activeProject } = useProjectStore();
   if (!report) return null;
 
   const isPass = report.overallStatus === 'PASS';
@@ -19,7 +21,7 @@ export const CalculationModal: React.FC<CalculationModalProps> = ({ report, onCl
   };
 
   const handleDownloadPdf = () => {
-    CalculationPdfService.exportSingleCalculationPdf(report);
+    CalculationPdfService.exportSingleCalculationPdf(report, activeProject?.metadata, activeModel, activeProject || undefined);
   };
 
   return (
