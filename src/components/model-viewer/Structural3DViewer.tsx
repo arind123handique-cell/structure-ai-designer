@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { useProjectStore } from '@/features/projects/projectStore';
+import { getBuildingFootprintCorners, isModelInsidePlotSite } from '@/features/plot/plotTypes';
 import { Member3D, Node3D } from '@/features/model/types';
 import { ColumnNumberingService } from '@/features/model/columnNumbering';
 import { GradeBeamDesignEngine } from '@/features/design/gradebeam/gradeBeamEngine';
@@ -24,6 +25,7 @@ import { Structural3DInspectorPanel } from './Structural3DInspectorPanel';
 import { Structural3DLegends } from './Structural3DLegends';
 import { Structural3DLayerBar } from './Structural3DLayerBar';
 import {
+  AlertTriangle,
   RotateCcw,
   Eye,
   Maximize2,
@@ -57,8 +59,9 @@ import { cvDefectDetector } from '@/features/video/engines/cvDefectDetector';
 import { useThemeStore } from '@/features/theme/themeStore';
 import { LruCache } from '@/utils/memoryManager';
 
-// Bounded LRU texture cache for 3D sprites to avoid memory leaks and cap RAM usage
+// Bounded LRU texture & material cache for 3D sprites to avoid memory leaks and cap RAM usage
 const spriteTextureCache = new LruCache<string, THREE.CanvasTexture>(30, (tex) => tex.dispose());
+const spriteMaterialCache = new LruCache<string, THREE.SpriteMaterial>(30, (mat) => mat.dispose());
 
 /**
  * Traverses and deeply disposes Three.js geometries, materials, and non-cached textures
@@ -153,12 +156,17 @@ function createTextBadgeSprite(
     spriteTextureCache.set(cacheKey, texture);
   }
 
-  const spriteMaterial = new THREE.SpriteMaterial({
-    map: texture,
-    depthTest: false,
-    depthWrite: false,
-    transparent: true,
-  });
+  let spriteMaterial = spriteMaterialCache.get(cacheKey);
+  if (!spriteMaterial) {
+    spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
+    });
+    spriteMaterial.userData = { isShared: true };
+    spriteMaterialCache.set(cacheKey, spriteMaterial);
+  }
 
   const sprite = new THREE.Sprite(spriteMaterial);
   sprite.scale.set(1.8, 0.9, 1.0);
@@ -172,6 +180,7 @@ export const Structural3DViewer: React.FC = () => {
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const initialCameraFramedRef = useRef(false);
+  const plotBoundaryGroupRef = useRef<THREE.Group | null>(null);
 
   // Dynamic mesh tracking
   const dynamicGroupRef = useRef<THREE.Group | null>(null);
@@ -302,7 +311,15 @@ export const Structural3DViewer: React.FC = () => {
     runStaticAnalysis,
     selectedNodeId,
     selectNode,
+    plotSite,
+    fitSitePlanToModel,
+    moveModelToSitePlan,
   } = useProjectStore() as any;
+
+  const modelPlotAlignment = useMemo(() => {
+    if (!activeModel || activeModel.nodes.size === 0 || !plotSite || plotSite.plotLength <= 0) return null;
+    return isModelInsidePlotSite(activeModel.boundingBox, plotSite);
+  }, [activeModel, plotSite]);
 
   const [isAssignLoadsOpen, setIsAssignLoadsOpen] = useState(false);
   const [isAssignSectionOpen, setIsAssignSectionOpen] = useState(false);
@@ -653,29 +670,45 @@ export const Structural3DViewer: React.FC = () => {
       precision: 'mediump',
     });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     rendererRef.current = renderer;
     canvasRef.current = renderer.domElement;
 
     containerRef.current.replaceChildren(renderer.domElement);
 
-    // Setup Cyberpunk Post-Processing (UnrealBloomPass) - opt-in
-    try {
-      const composer = new EffectComposer(renderer);
-      const renderPass = new RenderPass(scene, camera);
-      composer.addPass(renderPass);
+    // Lazily instantiate Cyberpunk Post-Processing (UnrealBloomPass) on-demand to save VRAM/RAM
+    const getOrCreateComposer = (w: number, h: number): EffectComposer | null => {
+      if (composerRef.current) return composerRef.current;
+      if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return null;
+      try {
+        const composer = new EffectComposer(rendererRef.current);
+        const renderPass = new RenderPass(sceneRef.current, cameraRef.current);
+        composer.addPass(renderPass);
 
-      const bloomPass = new UnrealBloomPass(
-        new THREE.Vector2(width, height),
-        0.75, // bloom strength
-        0.3,  // bloom radius
-        0.5   // bloom threshold
-      );
-      composer.addPass(bloomPass);
-      composerRef.current = composer;
-    } catch (e) {
-      console.warn('EffectComposer bloom init skipped', e);
-    }
+        const bloomPass = new UnrealBloomPass(
+          new THREE.Vector2(w, h),
+          0.75, // bloom strength
+          0.3,  // bloom radius
+          0.5   // bloom threshold
+        );
+        composer.addPass(bloomPass);
+        composerRef.current = composer;
+        return composer;
+      } catch (e) {
+        console.warn('EffectComposer bloom init skipped', e);
+        return null;
+      }
+    };
+
+    const disposeComposer = () => {
+      if (composerRef.current) {
+        try {
+          composerRef.current.renderTarget1?.dispose();
+          composerRef.current.renderTarget2?.dispose();
+        } catch {}
+        composerRef.current = null;
+      }
+    };
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
@@ -737,6 +770,82 @@ export const Structural3DViewer: React.FC = () => {
     gridHelper.position.y = -0.01;
     scene.add(gridHelper);
 
+    // Plot / Site boundary ring (Stage 1 of the pipeline) — rebuilt whenever the plot changes
+    const plotGroup = new THREE.Group();
+    plotGroup.name = 'PLOT_BOUNDARY';
+    plotGroup.position.y = 0.02;
+    scene.add(plotGroup);
+    plotBoundaryGroupRef.current = plotGroup;
+
+    const buildPlotBoundary = () => {
+      if (!plotGroup) return;
+      // Remove previous boundary geometry
+      while (plotGroup.children.length > 0) {
+        const child = plotGroup.children[0];
+        plotGroup.remove(child);
+        if (child instanceof THREE.Mesh) {
+          child.geometry?.dispose();
+          (child.material as THREE.Material)?.dispose();
+        } else if (child instanceof THREE.Line) {
+          child.geometry?.dispose();
+          (child.material as THREE.Material)?.dispose();
+        }
+      }
+      const plot = useProjectStore.getState().plotSite;
+      if (!plot || plot.plotLength <= 0 || plot.plotWidth <= 0) return;
+      const groundY = plot.groundElevation || 0;
+      const h = groundY + 0.02;
+      const plotX0 = plot.plotOriginX;
+      const plotZ0 = plot.plotOriginZ;
+      const plotX1 = plot.plotOriginX + plot.plotLength;
+      const plotZ1 = plot.plotOriginZ + plot.plotWidth;
+
+      const addRect = (x0: number, z0: number, x1: number, z1: number, color: number, lineWidth = 2, dashed = false) => {
+        const pts = [
+          new THREE.Vector3(x0, h, z0),
+          new THREE.Vector3(x1, h, z0),
+          new THREE.Vector3(x1, h, z1),
+          new THREE.Vector3(x0, h, z1),
+          new THREE.Vector3(x0, h, z0),
+        ];
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineBasicMaterial({ color, linewidth: lineWidth });
+        const line = new THREE.Line(geo, mat);
+        plotGroup.add(line);
+      };
+
+      // Plot boundary (amber)
+      addRect(plotX0, plotZ0, plotX1, plotZ1, 0xfbbf24);
+      // Setback envelope (green)
+      addRect(
+        plotX0 + plot.frontSetback,
+        plotZ0 + plot.leftSetback,
+        plotX1 - plot.rearSetback,
+        plotZ1 - plot.rightSetback,
+        0x10b981
+      );
+      // Building footprint (blue outline with world coordinates and rotation)
+      const footprintCorners = getBuildingFootprintCorners(plot);
+      if (footprintCorners.length >= 4) {
+        const fpPts = [
+          ...footprintCorners.map((c) => new THREE.Vector3(c.x, h, c.z)),
+          new THREE.Vector3(footprintCorners[0].x, h, footprintCorners[0].z),
+        ];
+        const fpGeo = new THREE.BufferGeometry().setFromPoints(fpPts);
+        const fpMat = new THREE.LineBasicMaterial({ color: 0x60a5fa, linewidth: 2 });
+        plotGroup.add(new THREE.Line(fpGeo, fpMat));
+      }
+      needsSceneRenderRef.current = true;
+    };
+
+    buildPlotBoundary();
+    const unsubscribePlot = useProjectStore.subscribe((state, prev) => {
+      if (state.plotSite !== prev.plotSite) {
+        buildPlotBoundary();
+        needsSceneRenderRef.current = true;
+      }
+    });
+
     // ResizeObserver for reliable dimension tracking across tabs & window resizes
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -757,17 +866,45 @@ export const Structural3DViewer: React.FC = () => {
     // High-Performance Damped & On-Demand RAF Render Loop (0% idle CPU/GPU)
     let isMounted = true;
     let animationFrameId: number;
+    const disposePlotBoundary = () => {
+      if (unsubscribePlot) unsubscribePlot();
+      if (plotGroup) {
+        scene.remove(plotGroup);
+        while (plotGroup.children.length > 0) {
+          const child = plotGroup.children[0];
+          plotGroup.remove(child);
+          if (child instanceof THREE.Mesh) {
+            child.geometry?.dispose();
+            (child.material as THREE.Material)?.dispose();
+          } else if (child instanceof THREE.Line) {
+            child.geometry?.dispose();
+            (child.material as THREE.Material)?.dispose();
+          }
+        }
+      }
+    };
 
     const animate = () => {
       if (!isMounted) return;
       animationFrameId = requestAnimationFrame(animate);
+      if (document.hidden) return;
       if (controlsRef.current && rendererRef.current && sceneRef.current && cameraRef.current) {
         const controlsDamping = controlsRef.current.update();
         if (controlsDamping || needsSceneRenderRef.current) {
           const bloomActive = useVideoStore.getState().isBloomEnabled;
-          if (bloomActive && composerRef.current) {
-            composerRef.current.render();
+          if (bloomActive) {
+            const w = rendererRef.current.domElement.clientWidth || 800;
+            const h = rendererRef.current.domElement.clientHeight || 600;
+            const composer = composerRef.current || getOrCreateComposer(w, h);
+            if (composer) {
+              composer.render();
+            } else {
+              rendererRef.current.render(sceneRef.current, cameraRef.current);
+            }
           } else {
+            if (composerRef.current) {
+              disposeComposer();
+            }
             rendererRef.current.render(sceneRef.current, cameraRef.current);
           }
           needsSceneRenderRef.current = false;
@@ -776,13 +913,22 @@ export const Structural3DViewer: React.FC = () => {
     };
     animate();
 
+    const onVisibilityChange = () => {
+      if (!document.hidden) {
+        needsSceneRenderRef.current = true;
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     return () => {
       isMounted = false;
       cancelAnimationFrame(animationFrameId);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       resizeObserver.disconnect();
       renderer.domElement?.removeEventListener('pointerdown', onPointerDownNative);
       renderer.domElement?.removeEventListener('pointerup', onPointerUpNative);
       controls.dispose();
+      disposePlotBoundary();
       disposeThreeObject(scene);
 
       // Deeply dispose persistent shared geometries and materials on component unmount
@@ -797,13 +943,7 @@ export const Structural3DViewer: React.FC = () => {
         });
       }
 
-      if (composerRef.current) {
-        try {
-          composerRef.current.renderTarget1?.dispose();
-          composerRef.current.renderTarget2?.dispose();
-        } catch {}
-        composerRef.current = null;
-      }
+      disposeComposer();
       renderer.dispose();
       try {
         renderer.forceContextLoss();
@@ -812,6 +952,7 @@ export const Structural3DViewer: React.FC = () => {
         // ignore
       }
       spriteTextureCache.clear();
+      spriteMaterialCache.clear();
     };
   }, []);
 
@@ -2008,7 +2149,31 @@ export const Structural3DViewer: React.FC = () => {
             style={{ opacity: arCalibration?.underlayOpacity ?? 0.4 }}
           />
         )}
-        <VideoViewportOverlay />
+        {/* Out-of-bounds Site Plan Alignment Banner */}
+        {modelPlotAlignment && !modelPlotAlignment.isInside && (
+          <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-950/95 border border-amber-600/80 shadow-2xl backdrop-blur-md text-amber-200 text-xs font-mono max-w-[95%] flex-wrap justify-center">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Building model is outside the site plan boundary</span>
+            <div className="flex items-center gap-1.5 ml-2">
+              <button
+                onClick={async () => { await fitSitePlanToModel(); }}
+                className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-bold text-[10px] shadow transition-all flex items-center gap-1 cursor-pointer pointer-events-auto"
+                title="Resize and position the site boundary and setbacks around the 3D building"
+              >
+                <Maximize2 className="w-3 h-3" />
+                Fit Site to Building
+              </button>
+              <button
+                onClick={async () => { await moveModelToSitePlan(); }}
+                className="px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold text-[10px] shadow transition-all flex items-center gap-1 cursor-pointer pointer-events-auto"
+                title="Shift building model coordinates into the site plan footprint"
+              >
+                <Compass className="w-3 h-3" />
+                Move Building into Site
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Top Floating Control Bar */}
         <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-20 flex-wrap gap-2">
@@ -2541,6 +2706,25 @@ export const Structural3DViewer: React.FC = () => {
           if (activeModel) await runStaticAnalysis();
         }}
       />
+
+      {/* 5. Member Details Drawer — overlay over the right inspector when a member is clicked.
+          Shows: member info, BMD/SFD diagrams, rebar callout, and an embedded 3D rebar cross-section
+          canvas (with longitudinal bars + tie outline) for the selected column or beam. */}
+      {selectedMember && drawerMemberId !== null && (
+        <MemberDetailsDrawer
+          memberId={drawerMemberId}
+          isColumn={drawerIsColumn}
+          b_mm={drawerBmm}
+          D_mm={drawerDmm}
+          length_m={selectedMember.length}
+          node1Id={selectedMember.startNodeId}
+          node2Id={selectedMember.endNodeId}
+          colDesign={drawerColDesign}
+          beamDesign={drawerBeamDesign}
+          memberForces={activeModel?.memberForces || []}
+          onClose={() => selectMember(null)}
+        />
+      )}
     </div>
   );
 };

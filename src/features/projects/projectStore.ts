@@ -18,6 +18,8 @@ import { ProjectMetadata, DesignParameters } from '@/types';
 import { EngineeringWarning } from '../warnings/types';
 import { ColumnDesignEngine } from '../design/column/columnDesignEngine';
 import { BeamDesignEngine } from '../design/beam/beamDesignEngine';
+import { FloorPlanEngine } from '../drawings/floorPlanEngine';
+import { GradeBeamDesignEngine } from '../design/gradebeam/gradeBeamEngine';
 import { MemberDesignSummary } from '../model/types';
 import { FemSolver3D } from '../calculations/femSolver3D';
 import { runFemAnalysisAsync } from '../calculations/femWorkerClient';
@@ -35,9 +37,18 @@ import {
 } from '../architectural/types/architecturalTypes';
 import { ArchitecturalIdGenerator } from '../architectural/utils/idGenerator';
 import { ArchitecturalGeometryEngine } from '../architectural/engines/architecturalGeometryEngine';
+import {
+  PlotSite,
+  DEFAULT_PLOT_SITE,
+  fitPlotSiteToModel,
+  isModelInsidePlotSite,
+  SetbackOptions,
+} from '../plot/plotTypes';
 
 export type ViewTab =
   | 'dashboard'
+  | 'plot-area'
+  | 'site-3d'
   | 'etabs-studio'
   | '3d-model'
   | 'member-forces'
@@ -178,6 +189,13 @@ export interface ProjectState {
   customStaircaseGeometry?: any;
   customStaircaseLandingEntry?: any;
 
+  // Plot / Site State (Stage 1 of the Building Design Pipeline)
+  plotSite: PlotSite | null;
+
+  // Guided pipeline navigation state (which stage the user is currently on)
+  pipelineStageId: string | null;
+  setPipelineStageId: (id: string | null) => void;
+
   // Architectural Floor Plan State
   architecturalWalls: Record<string, ArchitecturalWall>;
   architecturalDoors: Record<string, ArchitecturalDoor>;
@@ -191,6 +209,11 @@ export interface ProjectState {
   activePlanTool: ActivePlanTool;
   selectedArchitecturalId: string | null;
   selectedArchitecturalType: 'WALL' | 'DOOR' | 'WINDOW' | 'OPENING' | 'ROOM' | 'STAIRCASE' | 'DIMENSION' | null;
+
+  // Plot / Site Actions
+  setPlotSite: (plot: PlotSite) => Promise<void>;
+  fitSitePlanToModel: (setbacks?: SetbackOptions) => Promise<void>;
+  moveModelToSitePlan: () => Promise<void>;
 
   // Architectural Actions
   setActiveFloorIndex: (idx: number) => void;
@@ -338,6 +361,49 @@ function pushArchUndo(action: any) {
   architecturalRedoStack = [];
 }
 
+/**
+ * Returns a memory-pruned copy of non-active projects to prevent hundreds of megabytes
+ * of inactive models, forces, and design calculations from persisting in Zustand heap.
+ */
+function toLightweightStoredProject(p: StoredProject, isActive: boolean): StoredProject {
+  if (isActive) return p;
+  return {
+    ...p,
+    model: {
+      nodes: [],
+      members: [],
+      plates: [],
+      supports: [],
+      loadCases: [],
+      loadCombinations: [],
+      reactions: [],
+      memberForces: [],
+      storyDrifts: [],
+      boundingBox: p.model?.boundingBox || { minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0 },
+      statistics: p.model?.statistics || {
+        totalNodes: 0,
+        totalMembers: 0,
+        totalBeams: 0,
+        totalColumns: 0,
+        totalPlates: 0,
+        totalSupports: 0,
+        totalLoadCases: 0,
+        totalCombinations: 0,
+        maxElevation: 0,
+        baseElevation: 0,
+      },
+    },
+    savedColumnDesigns: undefined,
+    savedBeamDesigns: undefined,
+    savedShearWallDesigns: undefined,
+    savedGradeBeamDesigns: undefined,
+    savedFootingDesigns: undefined,
+    savedPileCapDesigns: undefined,
+    savedCombinedCapDesigns: undefined,
+    savedSlabDesigns: undefined,
+  };
+}
+
 export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
   activeProject: null,
@@ -366,6 +432,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setRcdxImportModalOpen: (isRcdxImportModalOpen) => set({ isRcdxImportModalOpen }),
   rcdcData: null,
   isLoading: false,
+
+  // Plot / Site Initial State (auto-create default plot for the active project)
+  plotSite: DEFAULT_PLOT_SITE,
+  pipelineStageId: null,
 
   // Architectural Floor Plan Initial State
   architecturalWalls: {},
@@ -420,7 +490,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ isLoading: true });
     try {
       const allProjects = await ProjectStorage.getAllProjects();
-      set({ projects: allProjects });
+      const first = allProjects.length > 0 ? allProjects[0] : null;
+      set({ projects: allProjects.map((p) => toLightweightStoredProject(p, p.metadata.id === first?.metadata.id)) });
 
       if (allProjects.length > 0) {
         const first = allProjects[0];
@@ -461,6 +532,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           architecturalStaircases: first.architecturalStaircases || {},
           architecturalDimensions: first.architecturalDimensions || {},
           architecturalSettings: first.architecturalSettings || DEFAULT_ARCHITECTURAL_SETTINGS,
+          plotSite: first.plotSite || DEFAULT_PLOT_SITE,
           universalRebarSelection: uRebar,
           allowedColumnRebarDiameters: uRebar.longitudinalDiameters,
           allowedBeamRebarDiameters: uRebar.longitudinalDiameters,
@@ -527,6 +599,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       architecturalRooms: {},
       architecturalDimensions: {},
       architecturalSettings: DEFAULT_ARCHITECTURAL_SETTINGS,
+      plotSite: DEFAULT_PLOT_SITE,
     };
 
     await ProjectStorage.saveProject(storedProject);
@@ -542,6 +615,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       architecturalRooms: {},
       architecturalDimensions: {},
       architecturalSettings: DEFAULT_ARCHITECTURAL_SETTINGS,
+      plotSite: DEFAULT_PLOT_SITE,
     });
     return storedProject;
   },
@@ -572,6 +646,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const project = await ProjectStorage.getProject(id);
       if (project) {
+        FloorPlanEngine.clearCache();
+        GradeBeamDesignEngine.clearCache();
         const model = ProjectStorage.deserializeModel(project.model);
         const uRebar = project.universalRebarSelection || {
           longitudinalDiameters: project.allowedColumnRebarDiameters || [12, 16, 20, 25],
@@ -580,6 +656,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         };
 
         set({
+          projects: get().projects.map((p) => toLightweightStoredProject(p, p.metadata.id === id)),
           activeProject: project,
           activeModel: model,
           selectedMemberId: null,
@@ -611,6 +688,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           architecturalStaircases: project.architecturalStaircases || {},
           architecturalDimensions: project.architecturalDimensions || {},
           architecturalSettings: project.architecturalSettings || DEFAULT_ARCHITECTURAL_SETTINGS,
+          plotSite: project.plotSite || DEFAULT_PLOT_SITE,
           universalRebarSelection: uRebar,
           allowedColumnRebarDiameters: uRebar.longitudinalDiameters,
           allowedBeamRebarDiameters: uRebar.longitudinalDiameters,
@@ -623,6 +701,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   deleteProject: async (id) => {
+    FloorPlanEngine.clearCache();
+    GradeBeamDesignEngine.clearCache();
     await ProjectStorage.deleteProject(id);
     const updated = await ProjectStorage.getAllProjects();
     const currentActive = get().activeProject;
@@ -639,7 +719,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       nextModel = get().activeModel;
     }
 
-    set({ projects: updated, activeProject: nextActive, activeModel: nextModel });
+    set({
+      projects: updated.map((p) => toLightweightStoredProject(p, p.metadata.id === nextActive?.metadata.id)),
+      activeProject: nextActive,
+      activeModel: nextModel,
+    });
   },
 
   deleteInactiveProjects: async () => {
@@ -652,12 +736,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     }
     const updated = await ProjectStorage.getAllProjects();
-    set({ projects: updated });
+    set({ projects: updated.map((p) => toLightweightStoredProject(p, p.metadata.id === currentActive.metadata.id)) });
   },
 
   reloadProjects: async () => {
     const allProjects = await ProjectStorage.getAllProjects();
-    set({ projects: allProjects });
+    const activeId = get().activeProject?.metadata.id;
+    set({ projects: allProjects.map((p) => toLightweightStoredProject(p, p.metadata.id === activeId)) });
   },
 
   importANL: async (fileName, content, customMetadata) => {
@@ -702,11 +787,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         updatedAt: new Date().toISOString(),
       };
 
+      const autoPlot = fitPlotSiteToModel(modelToUse.boundingBox);
       const storedProject: StoredProject = {
         metadata,
         model: ProjectStorage.serializeModel(modelToUse),
         warnings: warningsToUse,
         rawAnlContent: content,
+        plotSite: autoPlot,
       };
 
       await ProjectStorage.saveProject(storedProject);
@@ -716,6 +803,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         projects: updated,
         activeProject: storedProject,
         activeModel: modelToUse,
+        plotSite: autoPlot,
         selectedMemberId: null,
         selectedNodeId: null,
         isImportModalOpen: false,
@@ -752,6 +840,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         updatedAt: new Date().toISOString(),
       };
 
+      const autoPlot = fitPlotSiteToModel(result.model.boundingBox);
       const storedProject: StoredProject = {
         metadata,
         model: ProjectStorage.serializeModel(result.model),
@@ -760,6 +849,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         savedBeamDesigns: result.designs.savedBeamDesigns,
         savedColumnDesigns: result.designs.savedColumnDesigns,
         savedSlabDesigns: result.designs.savedSlabDesigns,
+        plotSite: autoPlot,
       };
 
       await ProjectStorage.saveProject(storedProject);
@@ -769,6 +859,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         projects: updated,
         activeProject: storedProject,
         activeModel: result.model,
+        plotSite: autoPlot,
         rcdcData: result.rcdcDocument,
         savedBeamDesigns: result.designs.savedBeamDesigns,
         savedColumnDesigns: result.designs.savedColumnDesigns,
@@ -940,6 +1031,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
     }
   },
+
+  setPipelineStageId: (pipelineStageId) => set({ pipelineStageId }),
 
   setActiveView: (view) => set({ activeView: view }),
 
@@ -1639,6 +1732,151 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await ProjectStorage.saveProject(updatedProject);
     set({
       activeProject: updatedProject,
+    });
+  },
+
+  // Plot / Site Action
+  setPlotSite: async (plot) => {
+    set({ plotSite: plot });
+    const currentProj = get().activeProject;
+    if (currentProj) {
+      const updatedProject: StoredProject = {
+        ...currentProj,
+        plotSite: plot,
+        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+      set({ activeProject: updatedProject });
+    }
+  },
+
+  fitSitePlanToModel: async (setbacks) => {
+    const { activeModel, setPlotSite } = get();
+    if (!activeModel || activeModel.nodes.size === 0) return;
+    const fittedPlot = fitPlotSiteToModel(activeModel.boundingBox, setbacks);
+    await setPlotSite(fittedPlot);
+  },
+
+  moveModelToSitePlan: async () => {
+    const { activeModel, plotSite, activeProject } = get();
+    if (!activeModel || !plotSite || activeModel.nodes.size === 0) return;
+
+    // Target footprint corner in World (X, Z) and ground elevation in World Y
+    const targetX = (plotSite.plotOriginX || 0) + plotSite.buildingOffsetX;
+    const targetZ = (plotSite.plotOriginZ || 0) + plotSite.buildingOffsetZ;
+    const targetY = plotSite.groundElevation || 0;
+
+    const currentX = activeModel.boundingBox.minX;
+    const currentZ = activeModel.boundingBox.minZ;
+    const currentY = activeModel.boundingBox.minY;
+
+    const dx = parseFloat((targetX - currentX).toFixed(3));
+    const dy = parseFloat((targetY - currentY).toFixed(3));
+    const dz = parseFloat((targetZ - currentZ).toFixed(3));
+
+    if (Math.abs(dx) < 1e-4 && Math.abs(dy) < 1e-4 && Math.abs(dz) < 1e-4) {
+      return;
+    }
+
+    // 1. Shift structural nodes
+    const newNodes = new Map<number, Node3D>();
+    for (const [id, node] of activeModel.nodes.entries()) {
+      newNodes.set(id, {
+        ...node,
+        x: parseFloat((node.x + dx).toFixed(3)),
+        y: parseFloat((node.y + dy).toFixed(3)),
+        z: parseFloat((node.z + dz).toFixed(3)),
+      });
+    }
+
+    const updatedModel: NormalizedStructuralModel = {
+      ...activeModel,
+      nodes: newNodes,
+      boundingBox: {
+        minX: parseFloat((activeModel.boundingBox.minX + dx).toFixed(3)),
+        maxX: parseFloat((activeModel.boundingBox.maxX + dx).toFixed(3)),
+        minY: parseFloat((activeModel.boundingBox.minY + dy).toFixed(3)),
+        maxY: parseFloat((activeModel.boundingBox.maxY + dy).toFixed(3)),
+        minZ: parseFloat((activeModel.boundingBox.minZ + dz).toFixed(3)),
+        maxZ: parseFloat((activeModel.boundingBox.maxZ + dz).toFixed(3)),
+      },
+      statistics: {
+        ...activeModel.statistics,
+        baseElevation: parseFloat((activeModel.statistics.baseElevation + dy).toFixed(3)),
+        maxElevation: parseFloat((activeModel.statistics.maxElevation + dy).toFixed(3)),
+      },
+    };
+
+    // 2. Shift architectural elements (if any)
+    const currentWalls = get().architecturalWalls || {};
+    const newWalls: Record<string, ArchitecturalWall> = {};
+    for (const [wid, wall] of Object.entries(currentWalls)) {
+      newWalls[wid] = {
+        ...wall,
+        start: {
+          x: parseFloat((wall.start.x + dx).toFixed(3)),
+          y: parseFloat((wall.start.y + dz).toFixed(3)),
+        },
+        end: {
+          x: parseFloat((wall.end.x + dx).toFixed(3)),
+          y: parseFloat((wall.end.y + dz).toFixed(3)),
+        },
+        baseElevation: parseFloat(((wall.baseElevation || 0) + dy).toFixed(3)),
+        topElevation: parseFloat(((wall.topElevation || 0) + dy).toFixed(3)),
+      };
+    }
+
+    const currentRooms = get().architecturalRooms || {};
+    const newRooms: Record<string, ArchitecturalRoom> = {};
+    for (const [rid, room] of Object.entries(currentRooms)) {
+      newRooms[rid] = {
+        ...room,
+        boundary: room.boundary.map((pt) => ({
+          x: parseFloat((pt.x + dx).toFixed(3)),
+          y: parseFloat((pt.y + dz).toFixed(3)),
+        })),
+        labelPosition: room.labelPosition
+          ? {
+              x: parseFloat((room.labelPosition.x + dx).toFixed(3)),
+              y: parseFloat((room.labelPosition.y + dz).toFixed(3)),
+            }
+          : room.labelPosition,
+      };
+    }
+
+    const currentStairs = get().architecturalStaircases || {};
+    const newStairs: Record<string, ArchitecturalStaircase> = {};
+    for (const [sid, st] of Object.entries(currentStairs)) {
+      newStairs[sid] = {
+        ...st,
+        position: {
+          x: parseFloat((st.position.x + dx).toFixed(3)),
+          y: parseFloat((st.position.y + dz).toFixed(3)),
+        },
+        startElevation: parseFloat(((st.startElevation || 0) + dy).toFixed(3)),
+        endElevation: parseFloat(((st.endElevation || 0) + dy).toFixed(3)),
+      };
+    }
+
+    let updatedProject: StoredProject | null = null;
+    if (activeProject) {
+      updatedProject = {
+        ...activeProject,
+        model: ProjectStorage.serializeModel(updatedModel),
+        architecturalWalls: newWalls,
+        architecturalRooms: newRooms,
+        architecturalStaircases: newStairs,
+        metadata: { ...activeProject.metadata, updatedAt: new Date().toISOString() },
+      };
+      await ProjectStorage.saveProject(updatedProject);
+    }
+
+    set({
+      activeModel: updatedModel,
+      activeProject: updatedProject || activeProject,
+      architecturalWalls: newWalls,
+      architecturalRooms: newRooms,
+      architecturalStaircases: newStairs,
     });
   },
 
@@ -2881,9 +3119,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     const summaryMap = new Map<number, MemberDesignSummary>();
 
+    // Index member forces once by memberId. The 6 MILES model stores ~195k force
+    // records; a per-member filter would rescan that entire array for every member
+    // (O(members × records)) and freeze the UI for minutes. One map pass keeps the
+    // design-check loop linear.
+    const forcesByMember = new Map<number, NonNullable<NormalizedStructuralModel['memberForces']>>();
+    for (const f of activeModel.memberForces || []) {
+      const list = forcesByMember.get(f.memberId);
+      if (list) list.push(f);
+      else forcesByMember.set(f.memberId, [f]);
+    }
+
     for (const member of activeModel.members.values()) {
-      const forces = (activeModel.memberForces || []).filter((f) => f.memberId === member.id);
-      if (forces.length === 0) continue;
+      const forces = forcesByMember.get(member.id);
+      if (!forces || forces.length === 0) continue;
 
       let maxPu = 0, maxVy = 0, maxVz = 0, maxMz = 0, maxMy = 0, govLC = 1;
       for (const f of forces) {
@@ -3166,8 +3415,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         };
       }
 
+      const autoPlot = fitPlotSiteToModel(newModel.boundingBox);
+      targetProj.plotSite = autoPlot;
+
       await ProjectStorage.saveProject(targetProj);
-      set({ activeModel: newModel, activeProject: targetProj, isLoading: false });
+      set({ activeModel: newModel, activeProject: targetProj, plotSite: autoPlot, isLoading: false });
     } catch (e) {
       console.error('Failed to generate building grid:', e);
       set({ isLoading: false });

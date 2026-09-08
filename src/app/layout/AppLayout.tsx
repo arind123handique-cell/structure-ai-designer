@@ -13,6 +13,8 @@ import { FuturisticBackdrop } from '@/components/futuristic/FuturisticBackdrop';
 import { useThemeStore } from '@/features/theme/themeStore';
 
 const ProjectDashboard = lazy(() => import('@/features/projects/ProjectDashboard').then(m => ({ default: m.ProjectDashboard })));
+const PlotAreaView = lazy(() => import('@/features/plot/PlotAreaView').then(m => ({ default: m.PlotAreaView })));
+const SiteAnd3DView = lazy(() => import('@/features/plot/SiteAnd3DView').then(m => ({ default: m.SiteAnd3DView })));
 const EtabsStudioView = lazy(() => import('@/features/etabs/EtabsStudioView').then(m => ({ default: m.EtabsStudioView })));
 const Structural3DViewer = lazy(() => import('@/components/model-viewer/Structural3DViewer').then(m => ({ default: m.Structural3DViewer })));
 const MemberForcesTable = lazy(() => import('@/components/tables/MemberForcesTable').then(m => ({ default: m.MemberForcesTable })));
@@ -64,6 +66,10 @@ export const AppLayout: React.FC = () => {
     switch (activeView) {
       case 'dashboard':
         return <ProjectDashboard />;
+      case 'plot-area':
+        return <PlotAreaView />;
+      case 'site-3d':
+        return <SiteAnd3DView />;
       case 'etabs-studio':
         return <EtabsStudioView />;
       case '3d-model':

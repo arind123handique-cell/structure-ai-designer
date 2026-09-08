@@ -439,7 +439,7 @@ export function MemberDetailsDrawer({
 
   return (
     <div
-      className="absolute inset-y-0 right-0 w-[420px] max-w-[90vw] bg-[#0b1120]/95 backdrop-blur-md border-l border-slate-700/60 shadow-2xl z-30 flex flex-col font-mono overflow-hidden"
+      className="absolute inset-y-0 right-0 w-[420px] max-w-[90vw] bg-[#0b1120]/95 backdrop-blur-md border-l border-slate-700/60 shadow-2xl z-40 flex flex-col font-mono overflow-hidden"
       onPointerDown={(e) => e.stopPropagation()}
     >
       {/* Header */}
