@@ -552,6 +552,45 @@ export class FloorPlanEngine {
             }
           }
         }
+
+        // Sort floor beams deterministically in standard structural drafting order:
+        // 1. Horizontal beams (parallel to X axis, |dx| >= |dz|):
+        //    Sorted by grid line Z (ascending), then X start (left to right)
+        // 2. Vertical beams (parallel to Z axis, |dz| > |dx|):
+        //    Sorted by grid line X (ascending), then Z start (bottom to top)
+        floorBeams.sort((a, b) => {
+          const dxA = Math.abs(a.endX - a.startX);
+          const dzA = Math.abs(a.endZ - a.startZ);
+          const isXA = dxA >= dzA;
+
+          const dxB = Math.abs(b.endX - b.startX);
+          const dzB = Math.abs(b.endZ - b.startZ);
+          const isXB = dxB >= dzB;
+
+          if (isXA !== isXB) return isXA ? -1 : 1;
+
+          if (isXA) {
+            const zA = (a.startZ + a.endZ) / 2;
+            const zB = (b.startZ + b.endZ) / 2;
+            if (Math.abs(zA - zB) > 0.1) return zA - zB;
+            const xA = Math.min(a.startX, a.endX);
+            const xB = Math.min(b.startX, b.endX);
+            if (Math.abs(xA - xB) > 0.1) return xA - xB;
+          } else {
+            const xA = (a.startX + a.endX) / 2;
+            const xB = (b.startX + b.endX) / 2;
+            if (Math.abs(xA - xB) > 0.1) return xA - xB;
+            const zA = Math.min(a.startZ, a.endZ);
+            const zB = Math.min(b.startZ, b.endZ);
+            if (Math.abs(zA - zB) > 0.1) return zA - zB;
+          }
+          return a.memberId - b.memberId;
+        });
+
+        // Serialise the beam name per floor: every floor starts from B1, B2, B3...
+        floorBeams.forEach((bm, idx) => {
+          bm.label = `B${idx + 1}`;
+        });
       }
 
       // Collect Columns at this floor level

@@ -164,6 +164,7 @@ describe('2D Floor Framing & Foundation Plan Engine', () => {
     expect(floor1Plan.sheetNumber).toBe('STR-101');
     expect(floor1Plan.elevationY).toBe(3.5);
     expect(floor1Plan.beams.length).toBe(4);
+    expect(floor1Plan.beams.map((b) => b.label)).toEqual(['B1', 'B2', 'B3', 'B4']);
     expect(floor1Plan.columns.length).toBe(4);
 
     // Check Level 2: Roof & Terrace Framing Plan
@@ -172,6 +173,7 @@ describe('2D Floor Framing & Foundation Plan Engine', () => {
     expect(roofPlan.sheetNumber).toBe('STR-102');
     expect(roofPlan.elevationY).toBe(7.0);
     expect(roofPlan.beams.length).toBe(4);
+    expect(roofPlan.beams.map((b) => b.label)).toEqual(['B1', 'B2', 'B3', 'B4']);
     expect(roofPlan.columns.length).toBe(4);
   });
 

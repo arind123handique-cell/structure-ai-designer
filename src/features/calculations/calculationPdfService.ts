@@ -845,7 +845,7 @@ export class CalculationPdfService {
       const bm = level.beams[i];
       const mx = (px(bm.startX) + px(bm.endX)) / 2;
       const mz = (py(bm.startZ) + py(bm.endZ)) / 2;
-      doc.text(`B${bm.memberId}`, mx, mz, { align: 'center' });
+      doc.text(bm.label || `B${bm.memberId}`, mx, mz, { align: 'center' });
     }
 
     // Grid labels
