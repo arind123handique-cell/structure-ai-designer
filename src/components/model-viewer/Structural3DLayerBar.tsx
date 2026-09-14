@@ -15,6 +15,7 @@ import {
   ChevronUp,
   Eye,
   EyeOff,
+  Grid3x3,
 } from 'lucide-react';
 
 export interface Structural3DLayerBarProps {
@@ -46,6 +47,10 @@ export interface Structural3DLayerBarProps {
   onToggleArchStaircases: () => void;
   archStaircasesCount: number;
 
+  // Grid
+  showGrid: boolean;
+  onToggleGrid: () => void;
+
   // External open/close toggle from upper toolbar
   isVisible?: boolean;
   onToggleVisibility?: () => void;
@@ -72,6 +77,8 @@ export const Structural3DLayerBar: React.FC<Structural3DLayerBarProps> = ({
   showArchStaircases,
   onToggleArchStaircases,
   archStaircasesCount,
+  showGrid,
+  onToggleGrid,
   isVisible = true,
   onToggleVisibility,
 }) => {
@@ -183,9 +190,10 @@ export const Structural3DLayerBar: React.FC<Structural3DLayerBarProps> = ({
     showArchWindows,
     showArchRooms,
     showArchStaircases,
+    showGrid,
   ].filter(Boolean).length;
 
-  const totalCount = 8;
+  const totalCount = 9;
 
   const isExpanded = !isManuallyCollapsed && (!isAutoHide || isHovered || isDragging);
 
@@ -240,6 +248,22 @@ export const Structural3DLayerBar: React.FC<Structural3DLayerBarProps> = ({
           <span>Supports</span>
         </div>
         {showSupports && <span className="text-[10px] text-red-400 font-mono">ON</span>}
+      </button>
+
+      <button
+        onClick={onToggleGrid}
+        className={`flex items-center justify-between gap-2 px-2.5 py-1 text-xs rounded transition-colors ${
+          showGrid
+            ? 'bg-violet-500/20 text-violet-300 border border-violet-500/50 shadow-xs'
+            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'
+        }`}
+        title="Toggle Grid Overlay"
+      >
+        <div className="flex items-center gap-1.5">
+          <Grid3x3 className={`w-3.5 h-3.5 ${showGrid ? 'text-violet-400' : 'text-slate-500'}`} />
+          <span>Grid</span>
+        </div>
+        {showGrid && <span className="text-[10px] text-violet-400 font-mono">ON</span>}
       </button>
 
       <div className={horizontal ? 'w-[1px] h-4 bg-slate-700/80 mx-0.5' : 'h-[1px] w-full bg-slate-800 my-0.5'} />

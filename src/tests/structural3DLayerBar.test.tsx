@@ -29,6 +29,8 @@ describe('Structural3DLayerBar Component', () => {
     showArchStaircases: true,
     onToggleArchStaircases: vi.fn(),
     archStaircasesCount: 1,
+    showGrid: true,
+    onToggleGrid: vi.fn(),
     isVisible: true,
     onToggleVisibility: vi.fn(),
   };
