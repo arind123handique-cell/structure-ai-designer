@@ -40,6 +40,9 @@ import {
   LAYER_TEXT_SCALE,
   LAYER_DIMENSION,
   LAYER_BEAM,
+  LAYER_BEAM_NOS,
+  LAYER_COLUMN,
+  LAYER_COLUMN_NOS,
   SECTION_SCALE,
   STRIP_SCALE,
   SheetBuilder,
@@ -546,7 +549,7 @@ export class BeamSectionSheetEngine {
       b.text(LAYER_GRID.name, gx2 + 380, gy - 90, gl.id, TEXT_H.MARK, { anchor: 'middle', bold: true });
     });
 
-    // 2. Bay Dimension Chains (between adjacent grid lines)
+    // 2. Bay Dimension Chains (between adjacent grid lines) + Overall Dimensions
     for (let i = 0; i < gridLinesX.length - 1; i++) {
       const g1 = gridLinesX[i];
       const g2 = gridLinesX[i + 1];
@@ -556,6 +559,18 @@ export class BeamSectionSheetEngine {
         const x2 = toX(g2.coord);
         const dimY = toY(maxZ + 0.8) + 900;
         b.dimHorizontal(x1, x2, dimY, distMm, { textHeight: TEXT_H.CALLOUT - 20, ext: 220 });
+      }
+    }
+
+    if (gridLinesX.length >= 2) {
+      const gFirst = gridLinesX[0];
+      const gLast = gridLinesX[gridLinesX.length - 1];
+      const totalDistMm = Math.round(Math.abs(gLast.coord - gFirst.coord) * 1000);
+      if (totalDistMm >= 80) {
+        const x1 = toX(gFirst.coord);
+        const x2 = toX(gLast.coord);
+        const dimY = toY(maxZ + 0.8) + 1600;
+        b.dimHorizontal(x1, x2, dimY, totalDistMm, { textHeight: TEXT_H.CALLOUT - 20, ext: 220 });
       }
     }
 
@@ -571,21 +586,33 @@ export class BeamSectionSheetEngine {
       }
     }
 
-    // 3. Slabs (clean dashed outline with label and thickness — identical to FloorPlanSvg)
+    if (gridLinesZ.length >= 2) {
+      const gFirst = gridLinesZ[0];
+      const gLast = gridLinesZ[gridLinesZ.length - 1];
+      const totalDistMm = Math.round(Math.abs(gLast.coord - gFirst.coord) * 1000);
+      if (totalDistMm >= 80) {
+        const y1 = toY(gFirst.coord);
+        const y2 = toY(gLast.coord);
+        const dimX = toX(minX - 0.8) - 1600;
+        b.dimVertical(y1, y2, dimX, totalDistMm, { textHeight: TEXT_H.CALLOUT - 20, ext: 220, side: 'left' });
+      }
+    }
+
+    // 3. Slabs (subtle boundary outline with centered label & thickness — leaves bays clean)
     if (!level.isFoundationLevel && slabs.length > 0) {
       slabs.forEach((s) => {
         if (s.points && s.points.length >= 3) {
           const pts: [number, number][] = s.points.map((p) => [toX(p.x), toY(p.z)]);
-          b.poly(LAYER_CONCRETE.name, pts, true);
+          b.poly(LAYER_CONCRETE.name, pts, true, 0.8);
           const cx = s.points.reduce((acc, p) => acc + toX(p.x), 0) / s.points.length;
           const cy = s.points.reduce((acc, p) => acc + toY(p.z), 0) / s.points.length;
-          b.text(LAYER_LABELS.name, cx, cy - 200, s.label, TEXT_H.CALLOUT, { anchor: 'middle', bold: true });
-          b.text(LAYER_LABELS.name, cx, cy + 280, `THK: ${s.thickness}mm`, TEXT_H.CALLOUT - 30, { anchor: 'middle' });
+          b.text(LAYER_LABELS.name, cx, cy - 140, s.label, TEXT_H.CALLOUT - 30, { anchor: 'middle', bold: true });
+          b.text(LAYER_LABELS.name, cx, cy + 180, `THK: ${s.thickness}mm`, TEXT_H.CALLOUT - 60, { anchor: 'middle' });
         }
       });
     }
 
-    // 4. Beams (Double lines with actual GA labels B128, B125...)
+    // 4. Beams (Double lines in CAD Green on LAYER_BEAM with serialised B1, B2, B3... on LAYER_BEAM_NOS)
     beams.forEach((bm) => {
       const x1 = toX(bm.startX);
       const y1 = toY(bm.startZ);
@@ -601,33 +628,61 @@ export class BeamSectionSheetEngine {
       const ny = dx / len;
       const hw = Math.max(5, ((bm.width || 0.23) / 2) * 1000 * scale);
 
-      // Double-line closed outline for beam
-      b.poly(LAYER_BEAM.name, [
-        [x1 + nx * hw, y1 + ny * hw],
-        [x2 + nx * hw, y2 + ny * hw],
-        [x2 - nx * hw, y2 - ny * hw],
-        [x1 - nx * hw, y1 - ny * hw],
-      ], true);
+      // Double-line closed outline for beam on LAYER_BEAM (ACI 3 CAD green, width 2.0)
+      b.poly(
+        LAYER_BEAM.name,
+        [
+          [x1 + nx * hw, y1 + ny * hw],
+          [x2 + nx * hw, y2 + ny * hw],
+          [x2 - nx * hw, y2 - ny * hw],
+          [x1 - nx * hw, y1 - ny * hw],
+        ],
+        true,
+        2.0
+      );
 
-      // Beam label: use EXACT label from GA plan (e.g. B128, B125)
+      // Beam label: serialised B1, B2, B3... on LAYER_BEAM_NOS (ACI 7 white text)
       const label = bm.label || `B${bm.memberId}`;
       const midX = (x1 + x2) / 2;
       const midY = (y1 + y2) / 2;
-      if (len >= 25) {
-        b.text(LAYER_BEAM.name, midX, midY - 60, label, TEXT_H.CALLOUT, { anchor: 'middle', bold: true });
+      if (len >= 20) {
+        const isHorizontal = Math.abs(dx) >= Math.abs(dy);
+        if (isHorizontal) {
+          // Horizontal beam: text placed cleanly above the beam outline
+          b.text(LAYER_BEAM_NOS.name, midX, midY + hw + 110, label, TEXT_H.CALLOUT - 20, {
+            anchor: 'middle',
+            bold: true,
+          });
+        } else {
+          // Vertical beam: text placed cleanly to the right of the beam outline
+          b.text(LAYER_BEAM_NOS.name, midX + hw + 110, midY - 40, label, TEXT_H.CALLOUT - 20, {
+            anchor: 'start',
+            bold: true,
+          });
+        }
       }
     });
 
-    // 5. Columns (rectangles with X cross-hatch and labels)
+    // 5. Columns (Solid bright CAD yellow rectangles on LAYER_COLUMN with C1, C2... labels on LAYER_COLUMN_NOS)
     columns.forEach((col) => {
       const cx = toX(col.x);
       const cy = toY(col.z);
-      const cw = Math.max(10, (col.width || 0.45) * 1000 * scale);
-      const cd = Math.max(10, (col.depth || 0.55) * 1000 * scale);
-      b.rect(LAYER_CONCRETE.name, cx - cw / 2, cy - cd / 2, cw, cd, 1.4);
-      b.line(LAYER_CONCRETE.name, cx - cw / 2, cy - cd / 2, cx + cw / 2, cy + cd / 2, 0.8);
-      b.line(LAYER_CONCRETE.name, cx - cw / 2, cy + cd / 2, cx + cw / 2, cy - cd / 2, 0.8);
-      b.text(LAYER_LABELS_SUPPORT.name, cx, cy + cd / 2 + 420, col.label, TEXT_H.MARK, { anchor: 'middle', bold: true });
+      const cw = Math.max(12, (col.width || 0.45) * 1000 * scale);
+      const cd = Math.max(12, (col.depth || 0.55) * 1000 * scale);
+
+      // Solid yellow fill + crisp outline
+      const p1: [number, number] = [cx - cw / 2, cy - cd / 2];
+      const p2: [number, number] = [cx + cw / 2, cy - cd / 2];
+      const p3: [number, number] = [cx + cw / 2, cy + cd / 2];
+      const p4: [number, number] = [cx - cw / 2, cy + cd / 2];
+      b.solid(LAYER_COLUMN.name, [p1, p2, p3, p4]);
+      b.rect(LAYER_COLUMN.name, cx - cw / 2, cy - cd / 2, cw, cd, 1.8);
+
+      // Column mark on LAYER_COLUMN_NOS (ACI 7 white text) below the column
+      b.text(LAYER_COLUMN_NOS.name, cx, cy - cd / 2 - 280, col.label, TEXT_H.MARK, {
+        anchor: 'middle',
+        bold: true,
+      });
     });
 
     // 6. Staircases (if present on this level)
@@ -644,7 +699,7 @@ export class BeamSectionSheetEngine {
       try {
         const comp = StaircasePlacementEngine.getStaircase2DComponents(stair);
         if (stair.hasEnclosureWalls && comp.enclosurePolygon && comp.enclosurePolygon.length > 0) {
-          b.poly(LAYER_CONCRETE.name, comp.enclosurePolygon.map((p) => [toX(p.x), toY(p.y)]), true);
+          b.poly(LAYER_COLUMN.name, comp.enclosurePolygon.map((p) => [toX(p.x), toY(p.y)]), true, 2.5);
         }
         if (comp.floorLandingPolygon && comp.floorLandingPolygon.length > 0) {
           b.poly(LAYER_CONCRETE.name, comp.floorLandingPolygon.map((p) => [toX(p.x), toY(p.y)]), true);
@@ -664,22 +719,50 @@ export class BeamSectionSheetEngine {
         (comp.flight2TreadLines || []).forEach((t) => {
           b.line(LAYER_CONCRETE.name, toX(t.start.x), toY(t.start.y), toX(t.end.x), toY(t.end.y));
         });
-        b.text(LAYER_LABELS.name, toX(comp.center.x), toY(comp.center.y), 'STAIRCASE', TEXT_H.CALLOUT, { anchor: 'middle', bold: true });
+        b.text(LAYER_LABELS.name, toX(comp.center.x), toY(comp.center.y), 'STAIRCASE', TEXT_H.CALLOUT, {
+          anchor: 'middle',
+          bold: true,
+        });
       } catch (e) {
         // Skip malformed staircase
       }
     });
 
-    // 7. Shear Walls / Lift Core (if present on this level)
+    // 7. Shear Walls / Lift Core (bright yellow outlines with shaft cross lines)
     if (level.combinedPileCaps && level.combinedPileCaps.length > 0) {
       level.combinedPileCaps
         .filter((grp) => grp.reason === 'SHEAR_WALL' || grp.wallFootprint || grp.nodeIds.length >= 3)
         .forEach((grp) => {
           const wf = grp.wallFootprint;
-          if (wf && wf.segments) {
+          if (wf && wf.segments && wf.segments.length > 0) {
             wf.segments.forEach((seg) => {
-              b.line(LAYER_CONCRETE.name, toX(seg.x1), toY(seg.z1), toX(seg.x2), toY(seg.z2), 2.2);
+              b.line(LAYER_COLUMN.name, toX(seg.x1), toY(seg.z1), toX(seg.x2), toY(seg.z2), 2.8);
             });
+          } else if (
+            Number.isFinite(grp.minX) &&
+            Number.isFinite(grp.maxX) &&
+            Number.isFinite(grp.minZ) &&
+            Number.isFinite(grp.maxZ)
+          ) {
+            const gx1 = toX(grp.minX);
+            const gx2 = toX(grp.maxX);
+            const gz1 = toY(grp.minZ);
+            const gz2 = toY(grp.maxZ);
+            const gw = gx2 - gx1;
+            const gh = gz2 - gz1;
+            if (gw > 10 && gh > 10) {
+              b.rect(LAYER_COLUMN.name, gx1, gz1, gw, gh, 2.5);
+              b.line(LAYER_COLUMN.name, gx1, gz1, gx2, gz2, 1.2);
+              b.line(LAYER_COLUMN.name, gx1, gz2, gx2, gz1, 1.2);
+              b.text(
+                LAYER_COLUMN_NOS.name,
+                (gx1 + gx2) / 2,
+                (gz1 + gz2) / 2 - 60,
+                'LIFT / SHAFT',
+                TEXT_H.CALLOUT,
+                { anchor: 'middle', bold: true }
+              );
+            }
           }
         });
     }
@@ -693,7 +776,14 @@ export class BeamSectionSheetEngine {
     b.text(LAYER_GRID.name, naX, naY + 950, 'N', TEXT_H.MARK, { anchor: 'middle', bold: true });
 
     // 9. Framing Plan Title & Scale
-    b.text(LAYER_SCHEDULE_HEADER.name, planCenterX, drawY0 - 450, `${level.levelName.toUpperCase()} FRAMING PLAN (SCALE 1:100 @ A3)`, TEXT_H.CALLOUT, { anchor: 'middle', bold: true });
+    b.text(
+      LAYER_SCHEDULE_HEADER.name,
+      planCenterX,
+      drawY0 - 450,
+      `${level.levelName.toUpperCase()} FRAMING PLAN (SCALE 1:100 @ A3)`,
+      TEXT_H.CALLOUT,
+      { anchor: 'middle', bold: true }
+    );
   }
 
   // -------------------------------------------------------------------------

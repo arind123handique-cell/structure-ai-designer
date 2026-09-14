@@ -139,6 +139,10 @@ export const BEAM_SECTION_SHEET_LAYERS: SheetLayer[] = [
   LAYER_SCHEDULE_TEXT,
   LAYER_CUT_LINE,
   LAYER_SECTION_MARK,
+  LAYER_BEAM,
+  LAYER_BEAM_NOS,
+  LAYER_COLUMN,
+  LAYER_COLUMN_NOS,
 ];
 
 /** Layers used by the slab detailing sheet. */
@@ -159,6 +163,10 @@ export const SLAB_SHEET_LAYERS: SheetLayer[] = [
   LAYER_CUT_LINE,
   LAYER_SECTION_MARK,
   LAYER_SOLID,
+  LAYER_BEAM,
+  LAYER_BEAM_NOS,
+  LAYER_COLUMN,
+  LAYER_COLUMN_NOS,
 ];
 
 // ---------------------------------------------------------------------------
@@ -168,7 +176,7 @@ export const SLAB_SHEET_LAYERS: SheetLayer[] = [
 const ACI_PALETTE: Record<number, { dark: string; light: string }> = {
   1: { dark: '#ff5f5f', light: '#c00000' },
   2: { dark: '#ffd24a', light: '#0f6fbf' },
-  3: { dark: '#6ede8a', light: '#0b7a3b' },
+  3: { dark: '#00e676', light: '#0b7a3b' },
   4: { dark: '#5ad0ff', light: '#a3006a' },
   5: { dark: '#7d9bff', light: '#0000c0' },
   6: { dark: '#e07ce0', light: '#8000a0' },
