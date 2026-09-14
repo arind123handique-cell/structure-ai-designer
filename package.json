@@ -2,13 +2,21 @@
   "name": "structure-ai-designer",
   "private": true,
   "version": "1.0.0",
+  "description": "StructureAI Designer Desktop Application",
+  "author": "StructureAI Team",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "desktop": "electron electron/main.cjs",
+    "desktop:build": "npm run build && electron electron/main.cjs",
+    "desktop:pack": "npm run build && electron-packager . \"StructureAI Designer\" --platform=win32 --arch=x64 --out=release-build --overwrite --prune=true --ignore=\"^/(release-build|desktop-build)\"",
+    "desktop:sync": "powershell -Command \"Remove-Item -Path 'release-build\\StructureAI Designer-win32-x64\\resources\\app\\electron' -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path 'release-build\\StructureAI Designer-win32-x64\\resources\\app\\dist' -Recurse -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Path 'release-build\\StructureAI Designer-win32-x64\\resources\\app\\electron' -Force; New-Item -ItemType Directory -Path 'release-build\\StructureAI Designer-win32-x64\\resources\\app\\dist' -Force; Copy-Item -Path 'electron\\*' -Destination 'release-build\\StructureAI Designer-win32-x64\\resources\\app\\electron' -Recurse -Force; Copy-Item -Path 'dist\\*' -Destination 'release-build\\StructureAI Designer-win32-x64\\resources\\app\\dist' -Recurse -Force; Copy-Item -Path 'package.json' -Destination 'release-build\\StructureAI Designer-win32-x64\\resources\\app\\package.json' -Force\"",
+    "desktop:open": "powershell -Command \"Start-Process -FilePath 'release-build\\StructureAI Designer-win32-x64\\StructureAI Designer.exe' -WorkingDirectory 'release-build\\StructureAI Designer-win32-x64'\""
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -32,6 +40,8 @@
     "@types/three": "^0.174.0",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "electron": "^44.3.0",
+    "electron-packager": "^17.1.2",
     "jsdom": "^26.0.0",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",

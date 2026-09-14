@@ -74,7 +74,7 @@ export function disposeReinforcementShared(shared: ReinforcementShared | null) {
 /**
  * Build a single longitudinal bar as a cylinder spanning the full local Y axis.
  */
-function buildBar(length: number, x: number, z: number, shared: ReinforcementShared): THREE.Mesh {
+export function buildBar(length: number, x: number, z: number, shared: ReinforcementShared): THREE.Mesh {
   const mesh = new THREE.Mesh(shared.barGeom, shared.barMat);
   mesh.scale.set(1, length, 1);
   mesh.position.set(x, 0, z);
@@ -131,66 +131,122 @@ function spreadBars(count: number, hw: number, inset: number, fixedZ: number): B
   return pts;
 }
 
-/** Build column longitudinal bars down the perimeter. */
+/**
+ * Creates a single InstancedMesh for multiple longitudinal bars of identical length.
+ * Drastically reduces draw calls and Three.js scene graph node overhead.
+ */
+function createInstancedBars(pts: BarPos[], length: number, shared: ReinforcementShared): THREE.InstancedMesh | null {
+  if (!pts.length) return null;
+  const instanced = new THREE.InstancedMesh(shared.barGeom, shared.barMat, pts.length);
+  const matrix = new THREE.Matrix4();
+  const quat = new THREE.Quaternion();
+  const scale = new THREE.Vector3(1, length, 1);
+
+  for (let i = 0; i < pts.length; i++) {
+    matrix.compose(new THREE.Vector3(pts[i].x, 0, pts[i].z), quat, scale);
+    instanced.setMatrixAt(i, matrix);
+  }
+  instanced.instanceMatrix.needsUpdate = true;
+  return instanced;
+}
+
+/** Build column longitudinal bars down the perimeter using InstancedMesh. */
 function buildColumnBars(length: number, b: number, D: number, rebar: any, coverMm: number, radius: number, shared: ReinforcementShared, group: THREE.Group) {
   const face = rebar?.faceBars;
   const inset = (coverMm / 1000) + radius - 0.004;
   const pts = columnBarPositions(b, D, inset, face);
-  pts.forEach((p) => group.add(buildBar(length, p.x, p.z, shared)));
+  const instanced = createInstancedBars(pts, length, shared);
+  if (instanced) group.add(instanced);
 }
 
-/** Build column ties (rectangular rings) at regular spacing along length. */
+/** Build column ties (rectangular rings) consolidated into a single LineSegments geometry. */
 function buildColumnTies(length: number, b: number, D: number, coverMm: number, radius: number, shared: ReinforcementShared, group: THREE.Group) {
   const inset = (coverMm / 1000) + radius - 0.004;
   const hw = Math.max(0.001, b / 2 - inset);
   const hd = Math.max(0.001, D / 2 - inset);
   const nTies = Math.min(MAX_TIES, Math.max(1, Math.round(length / COLUMN_TIE_SPACING_M)));
-  const scaleX = hw * 2;
-  const scaleZ = hd * 2;
+
+  const count = nTies + 1;
+  const vertices = new Float32Array(count * 8 * 3);
+  let v = 0;
+
   for (let i = 0; i <= nTies; i += 1) {
     const y = -length / 2 + (length * i) / nTies;
-    const line = new THREE.Line(shared.unitRingGeom, shared.tieMat);
-    line.scale.set(scaleX, 1, scaleZ);
-    line.position.set(0, y, 0);
-    group.add(line);
+    // Edge 1: top-left to top-right (-hw,-hd -> hw,-hd)
+    vertices[v++] = -hw; vertices[v++] = y; vertices[v++] = -hd;
+    vertices[v++] = hw;  vertices[v++] = y; vertices[v++] = -hd;
+    // Edge 2: top-right to bottom-right (hw,-hd -> hw,hd)
+    vertices[v++] = hw;  vertices[v++] = y; vertices[v++] = -hd;
+    vertices[v++] = hw;  vertices[v++] = y; vertices[v++] = hd;
+    // Edge 3: bottom-right to bottom-left (hw,hd -> -hw,hd)
+    vertices[v++] = hw;  vertices[v++] = y; vertices[v++] = hd;
+    vertices[v++] = -hw; vertices[v++] = y; vertices[v++] = hd;
+    // Edge 4: bottom-left to top-left (-hw,hd -> -hw,-hd)
+    vertices[v++] = -hw; vertices[v++] = y; vertices[v++] = hd;
+    vertices[v++] = -hw; vertices[v++] = y; vertices[v++] = -hd;
   }
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+  const lines = new THREE.LineSegments(geom, shared.tieMat);
+  group.add(lines);
 }
 
-/** Build beam main (top/bottom) bars spanning length. */
+/** Build beam main (top/bottom) bars spanning length using InstancedMesh. */
 function buildBeamBars(length: number, b: number, D: number, topBars: any[], bottomBars: any[], coverMm: number, radius: number, shared: ReinforcementShared, group: THREE.Group) {
   const inset = (coverMm / 1000) + radius - 0.004;
   const hw = b / 2;
   const topZ = -(D / 2 - inset);
   const botZ = (D / 2 - inset);
 
-  const place = (bars: any[], fixedZ: number) => {
+  const pts: BarPos[] = [];
+  const collect = (bars: any[], fixedZ: number) => {
     if (!bars) return;
     for (const layer of bars) {
       const count = layer?.count || 0;
       if (count <= 0) continue;
-      spreadBars(count, hw, inset, fixedZ).forEach((p) => group.add(buildBar(length, p.x, p.z, shared)));
+      pts.push(...spreadBars(count, hw, inset, fixedZ));
     }
   };
-  place(topBars, topZ);
-  place(bottomBars, botZ);
+  collect(topBars, topZ);
+  collect(bottomBars, botZ);
+
+  const instanced = createInstancedBars(pts, length, shared);
+  if (instanced) group.add(instanced);
 }
 
-/** Build beam stirrups (vertical rectangular loops) at shear spacing. */
+/** Build beam stirrups (vertical rectangular loops) consolidated into a single LineSegments geometry. */
 function buildBeamStirrups(length: number, b: number, D: number, spacingMm: number, coverMm: number, shared: ReinforcementShared, group: THREE.Group) {
   const spacing = Math.max(0.075, (spacingMm || 150) / 1000);
   const inset = (coverMm / 1000) + 0.004;
   const hw = Math.max(0.001, b / 2 - inset);
   const hd = Math.max(0.001, D / 2 - inset);
   const n = Math.min(MAX_TIES, Math.max(1, Math.round(length / spacing)));
-  const scaleX = hw * 2;
-  const scaleZ = hd * 2;
+
+  const count = n + 1;
+  const vertices = new Float32Array(count * 8 * 3);
+  let v = 0;
+
   for (let i = 0; i <= n; i += 1) {
     const y = -length / 2 + (length * i) / n;
-    const line = new THREE.Line(shared.unitRingGeom, shared.tieMat);
-    line.scale.set(scaleX, 1, scaleZ);
-    line.position.set(0, y, 0);
-    group.add(line);
+    // Edge 1: (-hw,-hd -> hw,-hd)
+    vertices[v++] = -hw; vertices[v++] = y; vertices[v++] = -hd;
+    vertices[v++] = hw;  vertices[v++] = y; vertices[v++] = -hd;
+    // Edge 2: (hw,-hd -> hw,hd)
+    vertices[v++] = hw;  vertices[v++] = y; vertices[v++] = -hd;
+    vertices[v++] = hw;  vertices[v++] = y; vertices[v++] = hd;
+    // Edge 3: (hw,hd -> -hw,hd)
+    vertices[v++] = hw;  vertices[v++] = y; vertices[v++] = hd;
+    vertices[v++] = -hw; vertices[v++] = y; vertices[v++] = hd;
+    // Edge 4: (-hw,hd -> -hw,-hd)
+    vertices[v++] = -hw; vertices[v++] = y; vertices[v++] = hd;
+    vertices[v++] = -hw; vertices[v++] = y; vertices[v++] = -hd;
   }
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+  const lines = new THREE.LineSegments(geom, shared.tieMat);
+  group.add(lines);
 }
 
 export interface ReinforcementSpec {

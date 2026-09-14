@@ -49,6 +49,7 @@ vi.mock('../features/projects/projectStorage', () => ({
 
 import { useProjectStore } from '../features/projects/projectStore';
 import { FemSolver3D } from '../features/calculations/femSolver3D';
+import { FrameElevationEngine } from '../features/etabs/frameElevationEngine';
 
 describe('ETABS Structural Engineering Feature Suite Tests', () => {
   beforeEach(async () => {
@@ -179,5 +180,66 @@ describe('ETABS Structural Engineering Feature Suite Tests', () => {
     expect(result.reactions.length).toBeGreaterThan(0);
     expect(result.totalReactionKn.y).toBeGreaterThan(0);
     expect(result.equilibriumCheck).toBe('PASS');
+  });
+
+  it('should discover available grid lines for 2D elevation views (X and Z grids)', () => {
+    const store = useProjectStore.getState();
+    const model = store.activeModel!;
+
+    const grids = FrameElevationEngine.getAvailableGrids(model);
+    expect(grids.length).toBeGreaterThanOrEqual(2);
+
+    const xGrids = grids.filter((g) => g.axis === 'X');
+    const zGrids = grids.filter((g) => g.axis === 'Z');
+
+    expect(xGrids.length).toBeGreaterThanOrEqual(2);
+    expect(zGrids.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('should extract multi-storey 2D frame elevation along X grid with beams, columns, datums, and bending moments', () => {
+    const store = useProjectStore.getState();
+    const model = store.activeModel!;
+
+    const frame = FrameElevationEngine.extractFrameElevation(model, '1');
+    expect(frame).toBeDefined();
+    expect(frame!.axis).toBe('X');
+    expect(frame!.columns.length).toBeGreaterThan(0);
+    expect(frame!.beams.length).toBeGreaterThan(0);
+
+    // Beams must have valid vertical elevation and positive bending moments
+    const firstBeam = frame!.beams[0];
+    expect(firstBeam.length).toBeGreaterThan(0);
+    expect(firstBeam.y).toBeGreaterThan(0);
+    expect(firstBeam.spanMoment).toBeGreaterThan(0);
+    expect(firstBeam.supMoment1).toBeGreaterThan(0);
+    expect(firstBeam.supMoment2).toBeGreaterThan(0);
+
+    // Storey elevations must include Base and upper floors
+    expect(frame!.storeyElevations.length).toBeGreaterThanOrEqual(2);
+    expect(frame!.storeyElevations[0].y).toBe(0);
+
+    // Intersecting grids along perpendicular axis
+    expect(frame!.intersectingGrids.length).toBeGreaterThan(0);
+    expect(frame!.bayDimensions.length).toBeGreaterThan(0);
+  });
+
+  it('should extract multi-storey 2D frame elevation along Z grid with intersecting grids and shear forces', () => {
+    const store = useProjectStore.getState();
+    const model = store.activeModel!;
+
+    const frame = FrameElevationEngine.extractFrameElevation(model, 'A');
+    expect(frame).toBeDefined();
+    expect(frame!.axis).toBe('Z');
+    expect(frame!.columns.length).toBeGreaterThan(0);
+    expect(frame!.beams.length).toBeGreaterThan(0);
+
+    const beam = frame!.beams[0];
+    expect(beam.maxShear).toBeGreaterThan(0);
+    expect(beam.h2).toBeGreaterThan(beam.h1);
+
+    // Columns must span vertically
+    const col = frame!.columns[0];
+    expect(col.yTop).toBeGreaterThan(col.yBottom);
+    expect(col.maxMoment).toBeGreaterThan(0);
   });
 });

@@ -95,7 +95,12 @@ export interface StoredProject {
   architecturalStaircases?: Record<string, any>;
   architecturalDimensions?: Record<string, any>;
   architecturalSettings?: any;
+  plotSite?: import('@/features/plot/plotTypes').PlotSite;
   savedStaircaseDesigns?: any;
   customStaircaseGeometry?: any;
   customStaircaseLandingEntry?: any;
+  designAnalysisSource?: DesignAnalysisSource;
+  sectionAnalysisSources?: Record<string, DesignAnalysisSource>;
 }
+
+export type DesignAnalysisSource = 'ANL_FILE' | 'MANUAL';

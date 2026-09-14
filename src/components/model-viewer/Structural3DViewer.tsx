@@ -13,7 +13,6 @@ import { CombinedPileCapEngine, CombinedPileCapGroup } from '@/features/design/p
 import { StaircaseDesignEngine } from '@/features/design/staircase/staircaseEngine';
 import { Architectural3DLayer } from '@/features/architectural/3d/Architectural3DLayer';
 import { buildMemberReinforcement, createReinforcementShared, disposeReinforcementShared } from './Reinforcement3DRenderer';
-import { MemberDetailsDrawer } from './MemberDetailsDrawer';
 import { PlateDetailsDrawer } from './PlateDetailsDrawer';
 import { EtabsPropertyInspector } from '@/features/etabs/components/EtabsPropertyInspector';
 import { AssignFrameLoadsModal, AssignFrameSectionModal } from '@/features/etabs/components/EtabsModals';
@@ -328,7 +327,8 @@ export const Structural3DViewer: React.FC = () => {
   // 3D Redesign States: Render Modes, Concept Colours, Studio Panel, Story Isolation
   const [renderMode, setRenderMode] = useState<RenderMode>('SOLID');
   const [conceptColor, setConceptColor] = useState<ConceptColorMode>('TYPE');
-  const [showStudioPanel, setShowStudioPanel] = useState(true);
+  const [showStudioPanel, setShowStudioPanel] = useState(false);
+  const [selectedPileNodeId, setSelectedPileNodeId] = useState<number | null>(null);
   const [showLayerBar, setShowLayerBar] = useState(true);
   const [selectedStoryElevation, setSelectedStoryElevation] = useState<'ALL' | number>('ALL');
 
@@ -721,10 +721,19 @@ export const Structural3DViewer: React.FC = () => {
       RIGHT: THREE.MOUSE.ROTATE,
     };
     controlsRef.current = controls;
+    raycasterRef.current.params.Line = { threshold: 0.3 };
 
     // Native pointer click/drag discriminator directly on WebGL canvas
     let pointerDownPos = { x: 0, y: 0 };
     let pointerDownTime = 0;
+    let lastRaycastTime = 0;
+
+    const triggerSelection = (clientX: number, clientY: number, isMulti: boolean) => {
+      const now = Date.now();
+      if (now - lastRaycastTime < 250) return;
+      lastRaycastTime = now;
+      performRaycastSelectionRef.current(clientX, clientY, isMulti);
+    };
 
     const onPointerDownNative = (e: PointerEvent) => {
       if (e.button === 0) {
@@ -739,15 +748,56 @@ export const Structural3DViewer: React.FC = () => {
         const dy = e.clientY - pointerDownPos.y;
         const dist = Math.hypot(dx, dy);
         const elapsed = Date.now() - pointerDownTime;
-        // Tolerant click discrimination for high-DPI screens, mice & touchpads (< 14px movement, < 2500ms)
-        if (dist < 14 && elapsed < 2500) {
-          performRaycastSelectionRef.current(e.clientX, e.clientY, e.shiftKey || e.ctrlKey || multiSelectModeRef.current);
+        // Tolerant click discrimination for high-DPI screens, mice & touchpads (< 18px movement, < 3000ms)
+        if (dist < 18 && elapsed < 3000) {
+          triggerSelection(e.clientX, e.clientY, e.shiftKey || e.ctrlKey || multiSelectModeRef.current);
         }
       }
     };
 
+    const onClickNative = (e: MouseEvent) => {
+      if (e.button === 0) {
+        const dx = e.clientX - pointerDownPos.x;
+        const dy = e.clientY - pointerDownPos.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 20) {
+          triggerSelection(e.clientX, e.clientY, e.shiftKey || e.ctrlKey || multiSelectModeRef.current);
+        }
+      }
+    };
+
+    let hoverThrottle = 0;
+    const hoverRaycaster = new THREE.Raycaster();
+    const hoverMouse = new THREE.Vector2();
+    const onPointerMoveNative = (e: PointerEvent) => {
+      const now = Date.now();
+      if (now - hoverThrottle < 60) return;
+      hoverThrottle = now;
+      if (!cameraRef.current || !dynamicGroupRef.current) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      hoverMouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      hoverMouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      hoverRaycaster.setFromCamera(hoverMouse, cameraRef.current);
+      const targets = [dynamicGroupRef.current];
+      if (arch3DLayerRef.current) targets.push(arch3DLayerRef.current.getGroup());
+      const hits = hoverRaycaster.intersectObjects(targets, true);
+      const isOverMember = hits.some((h) => {
+        let n: THREE.Object3D | null = h.object;
+        while (n && n !== dynamicGroupRef.current && n !== sceneRef.current) {
+          if (n.userData && (n.userData.memberId != null || n.userData.type != null)) return true;
+          n = n.parent;
+        }
+        return false;
+      });
+      renderer.domElement.style.cursor = isOverMember ? 'pointer' : 'default';
+    };
+
     renderer.domElement.addEventListener('pointerdown', onPointerDownNative);
     renderer.domElement.addEventListener('pointerup', onPointerUpNative);
+    renderer.domElement.addEventListener('click', onClickNative);
+    renderer.domElement.addEventListener('pointermove', onPointerMoveNative);
+
 
     controls.addEventListener('change', () => {
       needsSceneRenderRef.current = true;
@@ -927,6 +977,9 @@ export const Structural3DViewer: React.FC = () => {
       resizeObserver.disconnect();
       renderer.domElement?.removeEventListener('pointerdown', onPointerDownNative);
       renderer.domElement?.removeEventListener('pointerup', onPointerUpNative);
+      renderer.domElement?.removeEventListener('click', onClickNative);
+      renderer.domElement?.removeEventListener('pointermove', onPointerMoveNative);
+
       controls.dispose();
       disposePlotBoundary();
       disposeThreeObject(scene);
@@ -1554,16 +1607,18 @@ export const Structural3DViewer: React.FC = () => {
           capGroup.userData = { type: 'support', nodeId: supp.nodeId };
 
           // Piles: use shared unitCylinder and unitCone with scaling
-          pileOffsets.forEach((off) => {
+          pileOffsets.forEach((off, pIdx) => {
             const shaftMesh = new THREE.Mesh(sharedGeoms.unitCylinder, pileMat);
             shaftMesh.scale.set(pileRadius, pileLength, pileRadius);
             shaftMesh.position.set(off.x, -capDepth - pileLength / 2, off.z);
+            shaftMesh.userData = { type: 'pile', nodeId: supp.nodeId, pileIndex: pIdx };
             capGroup.add(shaftMesh);
 
             const toeMesh = new THREE.Mesh(sharedGeoms.unitCone, pileMat);
             toeMesh.scale.set(pileRadius, 0.35, pileRadius);
             toeMesh.rotation.x = Math.PI;
             toeMesh.position.set(off.x, -capDepth - pileLength - 0.18, off.z);
+            toeMesh.userData = { type: 'pile', nodeId: supp.nodeId, pileIndex: pIdx };
             capGroup.add(toeMesh);
           });
 
@@ -1630,19 +1685,21 @@ export const Structural3DViewer: React.FC = () => {
           line.position.copy(combMesh.position);
           combGroup.add(line);
 
-          grp.pileOffsets.forEach((off) => {
+          grp.pileOffsets.forEach((off, pIdx) => {
             const px = off.x / 1000;
             const pz = -off.z / 1000;
 
             const shaftMesh = new THREE.Mesh(sharedGeoms.unitCylinder, pileMat);
             shaftMesh.scale.set(pileRadius, pileLength, pileRadius);
             shaftMesh.position.set(px, -capD - pileLength / 2, pz);
+            shaftMesh.userData = { type: 'pile', nodeId: grp.nodeIds?.[0] || 0, pileIndex: pIdx };
             combGroup.add(shaftMesh);
 
             const toeMesh = new THREE.Mesh(sharedGeoms.unitCone, pileMat);
             toeMesh.scale.set(pileRadius, 0.35, pileRadius);
             toeMesh.rotation.x = Math.PI;
             toeMesh.position.set(px, -capD - pileLength - 0.18, pz);
+            toeMesh.userData = { type: 'pile', nodeId: grp.nodeIds?.[0] || 0, pileIndex: pIdx };
             combGroup.add(toeMesh);
           });
 
@@ -1909,7 +1966,8 @@ export const Structural3DViewer: React.FC = () => {
             }
             if (
               node.userData &&
-              (node.userData.type === 'support' ||
+              (node.userData.type === 'pile' ||
+                node.userData.type === 'support' ||
                 node.userData.type === 'gradebeam' ||
                 node.userData.type === 'combinedPileCap')
             ) {
@@ -1942,43 +2000,51 @@ export const Structural3DViewer: React.FC = () => {
             selectArchitecturalElement(u.id, 'WALL');
             selectMember(null);
             setSelectedGradeBeamId(null);
+            setSelectedPileNodeId(null);
             (selectPlate as any)(null);
             if (!isMulti) clearSelectedSupportNodes();
           } else if (u.type === 'arch_door') {
             selectArchitecturalElement(u.id, 'DOOR');
             selectMember(null);
             setSelectedGradeBeamId(null);
+            setSelectedPileNodeId(null);
             (selectPlate as any)(null);
             if (!isMulti) clearSelectedSupportNodes();
           } else if (u.type === 'arch_window') {
             selectArchitecturalElement(u.id, 'WINDOW');
             selectMember(null);
             setSelectedGradeBeamId(null);
+            setSelectedPileNodeId(null);
             (selectPlate as any)(null);
             if (!isMulti) clearSelectedSupportNodes();
           } else if (u.type === 'arch_opening') {
             selectArchitecturalElement(u.id, 'OPENING');
             selectMember(null);
             setSelectedGradeBeamId(null);
+            setSelectedPileNodeId(null);
             (selectPlate as any)(null);
             if (!isMulti) clearSelectedSupportNodes();
           } else if (u.type === 'arch_room') {
             selectArchitecturalElement(u.id, 'ROOM');
             selectMember(null);
             setSelectedGradeBeamId(null);
+            setSelectedPileNodeId(null);
             (selectPlate as any)(null);
             if (!isMulti) clearSelectedSupportNodes();
           } else if (u.type === 'arch_staircase') {
             selectArchitecturalElement(u.id, 'STAIRCASE');
             selectMember(null);
             setSelectedGradeBeamId(null);
+            setSelectedPileNodeId(null);
             (selectPlate as any)(null);
             if (!isMulti) clearSelectedSupportNodes();
           } else if (u.type === 'gradebeam' && u.gradeBeamId) {
             setSelectedGradeBeamId(u.gradeBeamId);
             selectMember(null);
             selectArchitecturalElement(null);
+            setSelectedPileNodeId(null);
             if (!isMulti) clearSelectedSupportNodes();
+            toggleInspectorPanel(true);
           } else if (u.type === 'combinedPileCap' && u.nodeIds) {
             const nodeIds: number[] = u.nodeIds;
             if (isMulti) {
@@ -1987,30 +2053,45 @@ export const Structural3DViewer: React.FC = () => {
               clearSelectedSupportNodes();
               nodeIds.forEach((nid) => selectSupportNode(nid, true));
             }
+            setSelectedPileNodeId(null);
             selectMember(null);
             selectArchitecturalElement(null);
             setSelectedGradeBeamId(null);
-          } else if (u.type === 'support' && u.nodeId) {
-            selectSupportNode(Number(u.nodeId), isMulti);
+            toggleInspectorPanel(true);
+          } else if (u.type === 'pile' && u.nodeId) {
+            selectSupportNode(Number(u.nodeId), false);
+            setSelectedPileNodeId(Number(u.nodeId));
             selectMember(null);
             selectArchitecturalElement(null);
             setSelectedGradeBeamId(null);
             (selectPlate as any)(null);
+            toggleInspectorPanel(true);
+          } else if (u.type === 'support' && u.nodeId) {
+            selectSupportNode(Number(u.nodeId), isMulti);
+            setSelectedPileNodeId(null);
+            selectMember(null);
+            selectArchitecturalElement(null);
+            setSelectedGradeBeamId(null);
+            (selectPlate as any)(null);
+            toggleInspectorPanel(true);
           } else if (u.type === 'plate' && u.plateId) {
             (selectPlate as any)(Number(u.plateId));
             selectMember(null);
             selectArchitecturalElement(null);
             setSelectedGradeBeamId(null);
+            setSelectedPileNodeId(null);
             if (!isMulti) clearSelectedSupportNodes();
+            toggleInspectorPanel(true);
           } else if (u.memberId != null || resolvedMemberId != null) {
             const targetMemberId = resolvedMemberId ?? Number(u.memberId);
             selectMember(targetMemberId);
             selectArchitecturalElement(null);
             setSelectedGradeBeamId(null);
-            (selectPlate as any)(null);
+            setSelectedPileNodeId(null);
             if (!isMulti) {
               clearSelectedSupportNodes();
             }
+            toggleInspectorPanel(true);
           }
           return;
         }
@@ -2023,6 +2104,7 @@ export const Structural3DViewer: React.FC = () => {
         setSelectedGradeBeamId(null);
         (selectPlate as any)(null);
         clearSelectedSupportNodes();
+        setSelectedPileNodeId(null);
       }
     },
     [
@@ -2032,11 +2114,22 @@ export const Structural3DViewer: React.FC = () => {
       selectSupportNode,
       clearSelectedSupportNodes,
       multiSelectMode,
+      toggleInspectorPanel,
     ]
   );
 
   // Sync latest raycast selection function to ref for native DOM listener
   performRaycastSelectionRef.current = performRaycastSelection;
+  if (typeof window !== 'undefined') {
+    (window as any).__3D_DEBUG__ = {
+      get scene() { return sceneRef.current; },
+      get camera() { return cameraRef.current; },
+      get memberMeshes() { return memberMeshesRef.current; },
+      get dynamicGroup() { return dynamicGroupRef.current; },
+      raycast: (x: number, y: number) => performRaycastSelectionRef.current(x, y, false),
+    };
+  }
+
 
   // Camera Presets
   const setCameraPreset = (preset: 'iso' | 'top' | 'front' | 'side' | 'fit') => {
@@ -2073,65 +2166,51 @@ export const Structural3DViewer: React.FC = () => {
   const selectedMember = selectedMemberId && activeModel ? activeModel.members.get(selectedMemberId) : null;
   const selectedGradeBeam = selectedGradeBeamId ? gradeBeamsList.find((g) => g.gradeBeamId === selectedGradeBeamId) : null;
 
-  // Safe member-drawer props (computed here, never throw)
-  const drawerMemberId = selectedMemberId ?? null;
-  const drawerIsColumn = !!(selectedMember && selectedMember.classification === 'COLUMN');
-  const drawerColDesign = drawerMemberId ? savedColumnDesigns?.[drawerMemberId] : null;
-  const drawerBeamDesign = drawerMemberId ? savedBeamDesigns?.[drawerMemberId] : null;
-  const drawerBmm = ((() => {
-    if (!selectedMember) return 300;
-    const cd = savedColumnDesigns?.[drawerMemberId!];
-    const bd = savedBeamDesigns?.[drawerMemberId!];
-    const raw = cd?.b || cd?.bMm || bd?.b || bd?.bMm || selectedMember.section?.zd || 0.3;
-    return raw > 5 ? Math.round(raw) : Math.round(raw * 1000);
-  })());
-  const drawerDmm = ((() => {
-    if (!selectedMember) return 450;
-    const cd = savedColumnDesigns?.[drawerMemberId!];
-    const bd = savedBeamDesigns?.[drawerMemberId!];
-    const raw = cd?.D || cd?.dMm || bd?.D || bd?.dMm || selectedMember.section?.yd || 0.45;
-    return raw > 5 ? Math.round(raw) : Math.round(raw * 1000);
-  })());
+
 
   return (
     <div className="relative w-full h-full flex overflow-hidden bg-deep-navy font-sans min-h-0 select-none">
-      {/* 1. Left Dockable 3D Studio & Explorer Panel */}
-      <Structural3DStudioPanel
-        isOpen={showStudioPanel}
-        onClose={() => setShowStudioPanel(false)}
-        renderMode={renderMode}
-        onSetRenderMode={(m) => {
-          setRenderMode(m);
-          if (m === 'XRAY') setRebarEnabled(true);
-        }}
-        conceptColor={conceptColor}
-        onSetConceptColor={setConceptColor}
-        rebarEnabled={rebarEnabled}
-        onToggleRebar={setRebarEnabled}
-        rebarShowColumnBars={rebarShowColumnBars}
-        onToggleColBars={setRebarShowColumnBars}
-        rebarShowBeamBars={rebarShowBeamBars}
-        onToggleBeamBars={setRebarShowBeamBars}
-        rebarShowColumnTies={rebarShowColumnTies}
-        onToggleColTies={setRebarShowColumnTies}
-        rebarShowBeamStirrups={rebarShowBeamStirrups}
-        onToggleBeamStirrups={setRebarShowBeamStirrups}
-        storyElevations={storyLegends.map((s) => s.elevationY)}
-        selectedStoryElevation={selectedStoryElevation}
-        onSelectStoryElevation={setSelectedStoryElevation}
-        model={activeModel}
-        filterLayers={filterLayers}
-        onToggleFilterLayer={toggleFilterLayer}
-        showLabels={showLabels}
-        onToggleLabels={() => setShowLabels(!showLabels)}
-        onSelectAllColumns={handleSelectAllColumns}
-        onSelectAllBeams={handleSelectAllBeams}
-        onClearSelection={handleClearSelection}
-        onFitView={() => frameCameraToModel(activeModel)}
-        onTakeSnapshot={handleTakeSnapshot}
-        onSelectMember={(id) => selectMember(id)}
-        selectedMemberId={selectedMemberId}
-      />
+      {/* 1. Left Dockable 3D Studio & Explorer Panel (Overlay) */}
+      {showStudioPanel && (
+        <div className="absolute top-0 bottom-0 left-0 z-30 shadow-2xl">
+          <Structural3DStudioPanel
+            isOpen={showStudioPanel}
+            onClose={() => setShowStudioPanel(false)}
+            renderMode={renderMode}
+            onSetRenderMode={(m) => {
+              setRenderMode(m);
+              if (m === 'XRAY') setRebarEnabled(true);
+            }}
+            conceptColor={conceptColor}
+            onSetConceptColor={setConceptColor}
+            rebarEnabled={rebarEnabled}
+            onToggleRebar={setRebarEnabled}
+            rebarShowColumnBars={rebarShowColumnBars}
+            onToggleColBars={setRebarShowColumnBars}
+            rebarShowBeamBars={rebarShowBeamBars}
+            onToggleBeamBars={setRebarShowBeamBars}
+            rebarShowColumnTies={rebarShowColumnTies}
+            onToggleColTies={setRebarShowColumnTies}
+            rebarShowBeamStirrups={rebarShowBeamStirrups}
+            onToggleBeamStirrups={setRebarShowBeamStirrups}
+            storyElevations={storyLegends.map((s) => s.elevationY)}
+            selectedStoryElevation={selectedStoryElevation}
+            onSelectStoryElevation={setSelectedStoryElevation}
+            model={activeModel}
+            filterLayers={filterLayers}
+            onToggleFilterLayer={toggleFilterLayer}
+            showLabels={showLabels}
+            onToggleLabels={() => setShowLabels(!showLabels)}
+            onSelectAllColumns={handleSelectAllColumns}
+            onSelectAllBeams={handleSelectAllBeams}
+            onClearSelection={handleClearSelection}
+            onFitView={() => frameCameraToModel(activeModel)}
+            onTakeSnapshot={handleTakeSnapshot}
+            onSelectMember={(id) => selectMember(id)}
+            selectedMemberId={selectedMemberId}
+          />
+        </div>
+      )}
 
       {/* 2. Center 3D WebGL Canvas Viewport */}
       <div className="flex-1 h-full relative overflow-hidden flex flex-col min-h-0">
@@ -2436,14 +2515,35 @@ export const Structural3DViewer: React.FC = () => {
               </span>
               {selectedColInfo && (
                 <>
-                  <span className="px-2 py-0.5 bg-sky-800 text-sky-100 rounded font-bold text-xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      selectMember(null);
+                      const targetNodeId = selectedColInfo.supportNodeId || selectedMember.startNodeId;
+                      selectNode(targetNodeId);
+                    }}
+                    className="px-2 py-0.5 bg-sky-800 hover:bg-sky-700 text-sky-100 rounded font-bold text-xs transition-colors cursor-pointer"
+                    title="Select connected Joint"
+                  >
                     JOINT {selectedColInfo.jointLabel}
-                  </span>
-                  <span className="px-2 py-0.5 bg-slate-700 text-slate-200 rounded font-bold text-xs">
-                    PILE CAP {selectedColInfo.pileCapLabel}
-                  </span>
+                  </button>
+                  {selectedColInfo.supportNodeId != null && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        selectMember(null);
+                        selectSupportNode(selectedColInfo.supportNodeId!);
+                      }}
+                      className="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded font-bold text-xs transition-colors cursor-pointer"
+                      title="Select connected Pile Cap"
+                    >
+                      PILE CAP {selectedColInfo.pileCapLabel}
+                    </button>
+                  )}
                 </>
               )}
+
+
             </div>
             <span className="text-slate-300 block text-[11px]">
               {selectedMember.classification} • {selectedMember.section.name || '300x450 mm'} • Length: {selectedMember.length.toFixed(2)} m
@@ -2669,8 +2769,10 @@ export const Structural3DViewer: React.FC = () => {
         selectedPlateId={selectedPlateId}
         selectedSupportNodeIds={new Set(selectedSupportNodeIds)}
         selectedGradeBeamId={selectedGradeBeamId}
+        selectedPileNodeId={selectedPileNodeId}
         onSelectMember={selectMember}
         onSelectNode={selectNode}
+        onSelectSupportNode={selectSupportNode}
         onOpenAssignLoads={() => setIsAssignLoadsOpen(true)}
         onOpenAssignSection={() => setIsAssignSectionOpen(true)}
         onDeleteSelected={handleDeleteSelected}
@@ -2706,25 +2808,6 @@ export const Structural3DViewer: React.FC = () => {
           if (activeModel) await runStaticAnalysis();
         }}
       />
-
-      {/* 5. Member Details Drawer — overlay over the right inspector when a member is clicked.
-          Shows: member info, BMD/SFD diagrams, rebar callout, and an embedded 3D rebar cross-section
-          canvas (with longitudinal bars + tie outline) for the selected column or beam. */}
-      {selectedMember && drawerMemberId !== null && (
-        <MemberDetailsDrawer
-          memberId={drawerMemberId}
-          isColumn={drawerIsColumn}
-          b_mm={drawerBmm}
-          D_mm={drawerDmm}
-          length_m={selectedMember.length}
-          node1Id={selectedMember.startNodeId}
-          node2Id={selectedMember.endNodeId}
-          colDesign={drawerColDesign}
-          beamDesign={drawerBeamDesign}
-          memberForces={activeModel?.memberForces || []}
-          onClose={() => selectMember(null)}
-        />
-      )}
     </div>
   );
 };

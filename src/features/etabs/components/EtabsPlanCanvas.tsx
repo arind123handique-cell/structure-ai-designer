@@ -35,6 +35,7 @@ interface EtabsPlanCanvasProps {
   onSelectNode: (id: number | null) => void;
   diagramType?: 'NONE' | 'BMD' | 'SFD';
   onSetDiagramType?: (type: 'NONE' | 'BMD' | 'SFD') => void;
+  onOpenElevation?: (gridId?: string) => void;
 }
 
 export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
@@ -53,6 +54,7 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
   onSelectNode,
   diagramType: propDiagramType,
   onSetDiagramType: propSetDiagramType,
+  onOpenElevation,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -143,49 +145,6 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
     return { cmX, cmZ, crX, crZ, ex, ez, edx };
   }, [activeFloorPlan, columns, bounds]);
 
-  // Extract internal forces for active framing beams (O(N) indexed grouping)
-  const memberForcesMap = useMemo(() => {
-    const map = new Map<number, { maxMoment: number; maxShear: number; spanMoment: number }>();
-    if (!model) return map;
-
-    // Pre-group member forces by memberId in a single pass O(M)
-    const forcesByMember = new Map<number, typeof model.memberForces>();
-    if (model.memberForces) {
-      for (let i = 0; i < model.memberForces.length; i++) {
-        const mf = model.memberForces[i];
-        let list = forcesByMember.get(mf.memberId);
-        if (!list) {
-          list = [];
-          forcesByMember.set(mf.memberId, list);
-        }
-        list.push(mf);
-      }
-    }
-
-    beams.forEach((b) => {
-      const forces = forcesByMember.get(b.memberId);
-      if (forces && forces.length > 0) {
-        const maxM = forces.reduce((max, f) => Math.max(max, Math.abs(f.mz || 0)), 0);
-        const maxV = forces.reduce((max, f) => Math.max(max, Math.abs(f.vy || 0)), 0);
-        map.set(b.memberId, {
-          maxMoment: maxM || 42.0,
-          maxShear: maxV || 28.0,
-          spanMoment: (maxM || 42.0) * 0.7,
-        });
-      } else {
-        const wEst = 18.0;
-        const L = b.length;
-        const mSpan = (wEst * L * L) / 12;
-        const vMax = (wEst * L) / 2;
-        map.set(b.memberId, {
-          maxMoment: mSpan,
-          maxShear: vMax,
-          spanMoment: mSpan * 0.7,
-        });
-      }
-    });
-    return map;
-  }, [model, beams]);
 
   // Drawing beam & CAD snapping state
   const [drawingBeamStart, setDrawingBeamStart] = useState<{
@@ -447,31 +406,17 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
 
       {/* Floating Zoom, Extents, Labels, Diagrams & CM/CR Controls */}
       <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5 bg-slate-900/95 border border-slate-700 p-1 rounded-lg shadow-2xl backdrop-blur-xs">
-        {/* Diagram Type Selector */}
-        <div className="flex items-center bg-slate-950 rounded p-0.5 border border-slate-800 text-[10px]">
+        {/* Elevation View Action for BMD / SFD Diagrams */}
+        {onOpenElevation && (
           <button
-            onClick={() => setDiagramType('NONE')}
-            className={`px-1.5 py-1 rounded font-bold transition-colors ${diagramType === 'NONE' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+            onClick={() => onOpenElevation()}
+            className="px-2.5 py-1 bg-amber-600/90 hover:bg-amber-600 text-white rounded font-bold text-[11px] flex items-center gap-1.5 shadow-xs transition-all"
+            title="View vertical Bending Moment (BMD) & Shear Force (SFD) Diagrams in 2D Elevation View"
           >
-            Frames
+            <TrendingUp className="w-3.5 h-3.5" />
+            <span>View BMD / SFD in Elevation</span>
           </button>
-          <button
-            onClick={() => setDiagramType('BMD')}
-            className={`px-1.5 py-1 rounded font-bold transition-colors flex items-center gap-1 ${diagramType === 'BMD' ? 'bg-amber-600 text-white shadow-xs' : 'text-amber-400 hover:text-amber-300'}`}
-            title="Display 2D Bending Moment Diagram (Mz)"
-          >
-            <TrendingUp className="w-3 h-3" />
-            <span>BMD (Mz)</span>
-          </button>
-          <button
-            onClick={() => setDiagramType('SFD')}
-            className={`px-1.5 py-1 rounded font-bold transition-colors flex items-center gap-1 ${diagramType === 'SFD' ? 'bg-emerald-600 text-white shadow-xs' : 'text-emerald-400 hover:text-emerald-300'}`}
-            title="Display 2D Shear Force Diagram (Vy)"
-          >
-            <Activity className="w-3 h-3" />
-            <span>SFD (Vy)</span>
-          </button>
-        </div>
+        )}
 
         <div className="h-4 w-px bg-slate-700" />
 
@@ -568,7 +513,16 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
 
           {/* Grid Lines (X Axis) */}
           {gridLinesX.map((gx) => (
-            <g key={gx.id}>
+            <g
+              key={gx.id}
+              onClick={(e) => {
+                if (onOpenElevation) {
+                  e.stopPropagation();
+                  onOpenElevation(gx.id);
+                }
+              }}
+              className={onOpenElevation ? 'cursor-pointer group' : ''}
+            >
               <line
                 x1={gx.coord}
                 y1={bounds.minZ - 2}
@@ -577,10 +531,27 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
                 stroke="#475569"
                 strokeWidth={0.04}
                 strokeDasharray="0.3,0.2"
+                className="group-hover:stroke-amber-400 transition-colors"
               />
               {/* Grid Bubble */}
-              <circle cx={gx.coord} cy={bounds.minZ - 2} r={0.35} fill="#0f172a" stroke="#64748b" strokeWidth={0.05} />
-              <text cx={gx.coord} x={gx.coord} y={bounds.minZ - 1.85} fill="#e2e8f0" fontSize="0.3" fontWeight="bold" textAnchor="middle">
+              <circle
+                cx={gx.coord}
+                cy={bounds.minZ - 2}
+                r={0.35}
+                fill="#0f172a"
+                stroke="#64748b"
+                strokeWidth={0.05}
+                className="group-hover:stroke-amber-400 group-hover:fill-amber-950 transition-colors"
+              />
+              <text
+                x={gx.coord}
+                y={bounds.minZ - 1.85}
+                fill="#e2e8f0"
+                fontSize="0.3"
+                fontWeight="bold"
+                textAnchor="middle"
+                className="group-hover:fill-amber-300"
+              >
                 {gx.label}
               </text>
             </g>
@@ -588,7 +559,16 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
 
           {/* Grid Lines (Z Axis) */}
           {gridLinesZ.map((gz) => (
-            <g key={gz.id}>
+            <g
+              key={gz.id}
+              onClick={(e) => {
+                if (onOpenElevation) {
+                  e.stopPropagation();
+                  onOpenElevation(gz.id);
+                }
+              }}
+              className={onOpenElevation ? 'cursor-pointer group' : ''}
+            >
               <line
                 x1={bounds.minX - 2}
                 y1={gz.coord}
@@ -597,10 +577,27 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
                 stroke="#475569"
                 strokeWidth={0.04}
                 strokeDasharray="0.3,0.2"
+                className="group-hover:stroke-amber-400 transition-colors"
               />
               {/* Grid Bubble */}
-              <circle cx={bounds.minX - 2} cy={gz.coord} r={0.35} fill="#0f172a" stroke="#64748b" strokeWidth={0.05} />
-              <text x={bounds.minX - 2} y={gz.coord + 0.1} fill="#e2e8f0" fontSize="0.3" fontWeight="bold" textAnchor="middle">
+              <circle
+                cx={bounds.minX - 2}
+                cy={gz.coord}
+                r={0.35}
+                fill="#0f172a"
+                stroke="#64748b"
+                strokeWidth={0.05}
+                className="group-hover:stroke-amber-400 group-hover:fill-amber-950 transition-colors"
+              />
+              <text
+                x={bounds.minX - 2}
+                y={gz.coord + 0.1}
+                fill="#e2e8f0"
+                fontSize="0.3"
+                fontWeight="bold"
+                textAnchor="middle"
+                className="group-hover:fill-amber-300"
+              >
                 {gz.label}
               </text>
             </g>
@@ -612,17 +609,6 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
             const midX = (beam.startX + beam.endX) / 2;
             const midZ = (beam.startZ + beam.endZ) / 2;
             const beamW = Math.max(0.2, beam.width || 0.3);
-            const forces = memberForcesMap.get(beam.memberId) || { maxMoment: 42, maxShear: 28, spanMoment: 29.4 };
-
-            // Compute perpendicular offset vector for diagrams
-            const dx = beam.endX - beam.startX;
-            const dz = beam.endZ - beam.startZ;
-            const len = Math.max(0.1, Math.sqrt(dx * dx + dz * dz));
-            const nx = -dz / len;
-            const nz = dx / len;
-
-            const momentOffset = Math.min(1.2, Math.max(0.3, (forces.spanMoment / 100) * 1.5));
-            const shearOffset = Math.min(0.9, Math.max(0.25, (forces.maxShear / 80) * 1.2));
 
             return (
               <g
@@ -655,80 +641,6 @@ export const EtabsPlanCanvas: React.FC<EtabsPlanCanvasProps> = React.memo(({
                   strokeWidth={isSelected ? 0.35 : beamW}
                   strokeLinecap="square"
                 />
-
-                {/* 2D Bending Moment Diagram (BMD Mz) Overlay */}
-                {diagramType === 'BMD' && (
-                  <g pointerEvents="none">
-                    {/* Filled Moment Parabola */}
-                    <path
-                      d={`M ${beam.startX} ${beam.startZ} Q ${midX + nx * momentOffset} ${midZ + nz * momentOffset} ${beam.endX} ${beam.endZ} Z`}
-                      fill="rgba(245, 158, 11, 0.3)"
-                      stroke="#f59e0b"
-                      strokeWidth={0.04}
-                    />
-                    {/* Moment Peak Value Tag */}
-                    <rect
-                      x={midX + nx * (momentOffset + 0.15) - 0.55}
-                      y={midZ + nz * (momentOffset + 0.15) - 0.16}
-                      width="1.1"
-                      height="0.32"
-                      fill="#0f172a"
-                      rx="0.06"
-                      stroke="#f59e0b"
-                      strokeWidth={0.02}
-                    />
-                    <text
-                      x={midX + nx * (momentOffset + 0.15)}
-                      y={midZ + nz * (momentOffset + 0.15) + 0.08}
-                      fill="#fef08a"
-                      fontSize="0.18"
-                      fontWeight="bold"
-                      textAnchor="middle"
-                    >
-                      +{forces.spanMoment.toFixed(1)} kNm
-                    </text>
-                  </g>
-                )}
-
-                {/* 2D Shear Force Diagram (SFD Vy) Overlay */}
-                {diagramType === 'SFD' && (
-                  <g pointerEvents="none">
-                    {/* Stepped Shear Polygons */}
-                    <polygon
-                      points={`${beam.startX},${beam.startZ} ${beam.startX + nx * shearOffset},${beam.startZ + nz * shearOffset} ${midX + nx * shearOffset},${midZ + nz * shearOffset} ${midX},${midZ}`}
-                      fill="rgba(16, 185, 129, 0.3)"
-                      stroke="#10b981"
-                      strokeWidth={0.03}
-                    />
-                    <polygon
-                      points={`${midX},${midZ} ${midX - nx * shearOffset},${midZ - nz * shearOffset} ${beam.endX - nx * shearOffset},${beam.endZ - nz * shearOffset} ${beam.endX},${beam.endZ}`}
-                      fill="rgba(16, 185, 129, 0.3)"
-                      stroke="#10b981"
-                      strokeWidth={0.03}
-                    />
-                    {/* Shear Value Tag */}
-                    <rect
-                      x={midX + nx * (shearOffset + 0.15) - 0.5}
-                      y={midZ + nz * (shearOffset + 0.15) - 0.16}
-                      width="1.0"
-                      height="0.32"
-                      fill="#0f172a"
-                      rx="0.06"
-                      stroke="#10b981"
-                      strokeWidth={0.02}
-                    />
-                    <text
-                      x={midX + nx * (shearOffset + 0.15)}
-                      y={midZ + nz * (shearOffset + 0.15) + 0.08}
-                      fill="#a7f3d0"
-                      fontSize="0.18"
-                      fontWeight="bold"
-                      textAnchor="middle"
-                    >
-                      ±{forces.maxShear.toFixed(1)} kN
-                    </text>
-                  </g>
-                )}
 
                 {/* Beam Tag Label (Only if Labels ON or Beam Selected) */}
                 {(showLabels || isSelected) && (

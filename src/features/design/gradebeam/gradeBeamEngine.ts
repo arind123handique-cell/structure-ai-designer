@@ -218,24 +218,42 @@ export class GradeBeamDesignEngine {
     };
   }
 
+  private static gradeBeamCache = new WeakMap<
+    NormalizedStructuralModel,
+    Map<string, GradeBeamDesignOutput[]>
+  >();
+
+  public static clearCache(): void {
+    this.gradeBeamCache = new WeakMap();
+  }
+
   /**
    * Generates and designs all Grade Beam tie connections between support pile caps.
    */
   public static discoverAndDesignAll(
     model: NormalizedStructuralModel,
     fck: number = 25,
-    fy: number = 500
+    fy: number = 500,
+    customReactionMap?: Map<number, number>
   ): GradeBeamDesignOutput[] {
     if (!model || !model.supports || model.supports.size === 0) return [];
+
+    const cacheKey = `${fck}_${fy}_${model.supports.size}_${model.members.size}_${customReactionMap ? 'MANUAL' : 'ANL'}`;
+    let modelCache = this.gradeBeamCache.get(model);
+    if (modelCache && modelCache.has(cacheKey)) {
+      return modelCache.get(cacheKey)!;
+    }
 
     const columnMapping = ColumnNumberingService.getColumnSupportMapping(model);
     const supports = Array.from(model.supports.values());
 
     // Reaction lookup
-    const reactionMap = new Map<number, number>();
-    for (const r of model.reactions) {
-      const cur = reactionMap.get(r.nodeId) || 0;
-      if (r.fy > cur) reactionMap.set(r.nodeId, r.fy);
+    const reactionMap = customReactionMap || new Map<number, number>();
+    if (!customReactionMap) {
+      for (const r of model.reactions) {
+        const cur = reactionMap.get(r.nodeId) || 0;
+        if (r.fy > cur) reactionMap.set(r.nodeId, r.fy);
+      }
     }
 
     const results: GradeBeamDesignOutput[] = [];
@@ -337,6 +355,11 @@ export class GradeBeamDesignEngine {
       }
     }
 
+    if (!modelCache) {
+      modelCache = new Map();
+      GradeBeamDesignEngine.gradeBeamCache.set(model, modelCache);
+    }
+    modelCache.set(cacheKey, results);
     return results;
   }
 }

@@ -17,6 +17,8 @@ import { BeamAutoDesignModal } from './BeamAutoDesignModal';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
 import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
 import { CalculationPdfService } from '@/features/calculations/calculationPdfService';
+import { ManualAnalysisEngine } from '@/features/calculations/manualAnalysisEngine';
+import { AnalysisSourceToggle } from '@/components/common/AnalysisSourceToggle';
 import { Member3D } from '@/features/model/types';
 import {
   Play,
@@ -84,6 +86,9 @@ export const BeamDesignView: React.FC = () => {
     allowedBeamRebarDiameters,
     setAllowedBeamRebarDiameters,
     saveBeamDesigns,
+    getSectionAnalysisSource,
+    sectionAnalysisSources,
+    designAnalysisSource,
   } = useProjectStore();
 
   const [designedBeams, setDesignedBeams] = useState<Map<number, BeamDesignOutput>>(new Map());
@@ -207,6 +212,10 @@ export const BeamDesignView: React.FC = () => {
     const fy = activeProject.metadata.designSettings.steelGrade === 'Fe500D' ? 500 : 500;
     const cover = activeProject.metadata.designSettings.clearCoverBeam || 30;
 
+    const analysisSource = getSectionAnalysisSource('beams');
+    const manualSummary = analysisSource === 'MANUAL' ? ManualAnalysisEngine.computeReview(activeModel, 'GRAVITY_COMBO') : null;
+    const manualMap = manualSummary ? new Map(manualSummary.rows.filter((r) => r.memberType === 'BEAM').map((r) => [r.memberId, r])) : null;
+
     const newMap = new Map<number, BeamDesignOutput>();
 
     for (const beam of allBeams) {
@@ -214,47 +223,61 @@ export const BeamDesignView: React.FC = () => {
       const D = Math.round((beam.section.yd || 0.45) * 1000);
       const spanLength = beam.length;
 
-      const forces = activeModel.memberForces.filter((f) => f.memberId === beam.id);
-      let maxMoment = 0;
-      let maxShear = 0;
+      let designMoment = 0;
+      let designShear = 0;
       let govLC = 0; // 0 = unset
 
-      if (forces.length > 0) {
-        for (const f of forces) {
-          // Update govLC whenever a higher shear or moment is found
-          // (mz from forceParser is back-calculated; use loadCaseId from shear line which IS correct)
-          if (Math.abs(f.vy) > maxShear) {
-            maxShear = Math.abs(f.vy);
-            govLC = f.loadCaseId; // governs from STAAD shear design LD=XX line
+      if (analysisSource === 'MANUAL') {
+        const mRow = manualMap?.get(beam.id);
+        if (mRow) {
+          designMoment = mRow.manualMoment;
+          designShear = mRow.manualShear;
+          govLC = 9; // Manual Statics (IS 456 Table 12 continuous beam gravity check)
+        } else {
+          const sw_unfactored = (b / 1000) * (D / 1000) * 25;
+          const wu_gravity = 1.5 * (sw_unfactored + 8.5 + 8.0);
+          designMoment = parseFloat(Math.max(45, (wu_gravity * spanLength * spanLength) / 10).toFixed(1));
+          designShear = parseFloat(Math.max(35, (wu_gravity * spanLength) / 2).toFixed(1));
+          govLC = 9;
+        }
+      } else {
+        const forces = activeModel.memberForces.filter((f) => f.memberId === beam.id);
+        let maxMoment = 0;
+        let maxShear = 0;
+
+        if (forces.length > 0) {
+          for (const f of forces) {
+            if (Math.abs(f.vy) > maxShear) {
+              maxShear = Math.abs(f.vy);
+              govLC = f.loadCaseId;
+            }
+            if (Math.abs(f.mz) > maxMoment) {
+              maxMoment = Math.abs(f.mz);
+              govLC = f.loadCaseId;
+            }
           }
-          if (Math.abs(f.mz) > maxMoment) {
-            maxMoment = Math.abs(f.mz);
-            govLC = f.loadCaseId;
+          const summary = activeModel.memberForces
+            .filter((f) => f.memberId === beam.id)
+            .reduce<{ maxMz: number; lc: number }>(
+              (acc, f) => (f.mz > acc.maxMz ? { maxMz: f.mz, lc: f.loadCaseId } : acc),
+              { maxMz: 0, lc: govLC }
+            );
+          if (summary.maxMz > 0) {
+            maxMoment = summary.maxMz;
           }
         }
-        // Also check the MemberDesignSummary (has correct Mu back-calc'd from REINF AREA table)
-        const summary = activeModel.memberForces
-          .filter((f) => f.memberId === beam.id)
-          .reduce<{ maxMz: number; lc: number }>(
-            (acc, f) => (f.mz > acc.maxMz ? { maxMz: f.mz, lc: f.loadCaseId } : acc),
-            { maxMz: 0, lc: govLC }
-          );
-        if (summary.maxMz > 0) {
-          maxMoment = summary.maxMz;
-        }
+
+        // Engineering Gravity Envelope (1.5 DL + 1.5 LL)
+        const sw_unfactored = (b / 1000) * (D / 1000) * 25; // kN/m
+        const wu_gravity = 1.5 * (sw_unfactored + 8.5 + 8.0); // ~28.5 to 30.5 kN/m factored
+        const minGravityMoment = parseFloat(Math.max(45, (wu_gravity * spanLength * spanLength) / 10).toFixed(1));
+        const minGravityShear = parseFloat(Math.max(35, (wu_gravity * spanLength) / 2).toFixed(1));
+
+        // Design envelope: take max of STAAD parsed forces and realistic gravity envelope
+        designMoment = Math.max(maxMoment, minGravityMoment);
+        designShear = Math.max(maxShear, minGravityShear);
+        if (govLC <= 0) govLC = 9; // Default to LC9 = 1.5DL+1.5LL if no STAAD forces
       }
-
-      // Engineering Gravity Envelope (1.5 DL + 1.5 LL)
-      // Factored load: self-weight + 230mm brick wall (8.5 kN/m) + tributary slab DL+LL (~8.0 kN/m)
-      const sw_unfactored = (b / 1000) * (D / 1000) * 25; // kN/m
-      const wu_gravity = 1.5 * (sw_unfactored + 8.5 + 8.0); // ~28.5 to 30.5 kN/m factored
-      const minGravityMoment = parseFloat(Math.max(45, (wu_gravity * spanLength * spanLength) / 10).toFixed(1));
-      const minGravityShear = parseFloat(Math.max(35, (wu_gravity * spanLength) / 2).toFixed(1));
-
-      // Design envelope: take max of STAAD parsed forces and realistic gravity envelope
-      const designMoment = Math.max(maxMoment, minGravityMoment);
-      const designShear = Math.max(maxShear, minGravityShear);
-      if (govLC <= 0) govLC = 9; // Default to LC9 = 1.5DL+1.5LL if no STAAD forces
 
       const staadSummary = activeModel.designSummaries?.get(beam.id);
 
@@ -348,7 +371,7 @@ export const BeamDesignView: React.FC = () => {
 
     setDesignedBeams(newMap);
     setIsDesigning(false);
-  }, [activeModel, activeProject, allBeams, customBeamRebarMap]);
+  }, [activeModel, activeProject, allBeams, customBeamRebarMap, getSectionAnalysisSource, sectionAnalysisSources, designAnalysisSource]);
 
   // Auto-run if empty or if member sections updated
   React.useEffect(() => {
@@ -633,6 +656,17 @@ export const BeamDesignView: React.FC = () => {
       align: 'center',
       cell: (r) => {
         if (!r.design) return <span className="text-slate-400 font-mono text-[10px]">—</span>;
+        const currentSrc = getSectionAnalysisSource('beams');
+        if (currentSrc === 'MANUAL') {
+          return (
+            <div className="font-mono text-[10px] px-2 py-1 rounded border bg-emerald-50 text-emerald-900 border-emerald-300 text-center leading-tight">
+              <div className="font-bold flex items-center justify-center gap-1">
+                <span>📐 Manual</span>
+              </div>
+              <div className="text-[9px] text-emerald-700">1.5 DL + 1.5 LL</div>
+            </div>
+          );
+        }
         const lcId = r.design.governingLoadCase;
         const lc = activeModel?.loadCases.get(lcId);
         const lcType = lc?.type || '';
@@ -856,10 +890,11 @@ export const BeamDesignView: React.FC = () => {
         contentClassName="p-4"
       >
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
+          <div className="space-y-2">
             <p className="text-xs text-slate-500">
               Story-by-story beam detailing, 1-click economical auto-designer, Ast rebar optimizer, and ductile confinement.
             </p>
+            <AnalysisSourceToggle section="beams" sectionLabel="Beams" onSourceChange={() => handleDesignAll()} />
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">

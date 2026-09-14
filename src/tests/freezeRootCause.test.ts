@@ -197,6 +197,8 @@ describe('FREEZE ROOT-CAUSE: Dense 3D FEM solver main-thread cost scaling', () =
   it('shows the cost grows faster than linear (approximately cubic in DOF)', () => {
     const small = buildBuildingGrid(scenarios[0].opts);
     const big = buildBuildingGrid(scenarios[scenarios.length - 1].opts);
+    // Warmup JIT to prevent initial compilation spike from inflating small model time
+    timeAnalysis(small.model);
     const msSmall = timeAnalysis(small.model);
     const msBig = timeAnalysis(big.model);
 

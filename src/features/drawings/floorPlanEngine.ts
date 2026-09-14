@@ -95,6 +95,15 @@ export interface FloorPlanLevel {
 }
 
 export class FloorPlanEngine {
+  private static floorPlanCache = new WeakMap<
+    NormalizedStructuralModel,
+    { key: string; result: FloorPlanLevel[] }
+  >();
+
+  public static clearCache(): void {
+    FloorPlanEngine.floorPlanCache = new WeakMap();
+  }
+
   /**
    * Discovers and extracts all floor framing plans from foundation to top roof level.
    */
@@ -115,6 +124,19 @@ export class FloorPlanEngine {
     designSettings?: { concreteGrade?: string; steelGrade?: string }
   ): FloorPlanLevel[] {
     if (!model || !model.nodes || !model.members) return [];
+
+    const cacheKey = `${model.nodes.size}_${model.members.size}_${model.plates?.size || 0}_${model.supports?.size || 0}_${
+      model.customGrids?.x?.length || 0
+    }_${model.customGrids?.z?.length || 0}_${projectPileTypes?.length || 0}_${
+      Object.keys(supportPileAssignments || {}).length
+    }_${Object.keys(customPileCapOverrides || {}).length}_${manualMergedPileCapGroups?.length || 0}_${
+      designSettings?.concreteGrade || ''
+    }_${designSettings?.steelGrade || ''}`;
+
+    const cached = FloorPlanEngine.floorPlanCache.get(model);
+    if (cached && cached.key === cacheKey) {
+      return cached.result;
+    }
 
     const nodes = model.nodes;
     const members = model.members;
@@ -648,6 +670,7 @@ export class FloorPlanEngine {
       });
     });
 
+    FloorPlanEngine.floorPlanCache.set(model, { key: cacheKey, result: floorPlans });
     return floorPlans;
   }
 }

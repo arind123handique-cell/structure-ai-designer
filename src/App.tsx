@@ -17,7 +17,7 @@ function getShareTokenFromUrl(): string | null {
 
 const AppInner: React.FC = () => {
   const { initializeStore, activeProject, importANL, isLoading } = useProjectStore();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, isLocalMode } = useAuth();
   const [shareToken] = useState<string | null>(getShareTokenFromUrl);
 
   // If ?share= param is present, show shared project view (no auth required)
@@ -36,10 +36,10 @@ const AppInner: React.FC = () => {
     );
   }
 
-  // Sync auth user to ProjectStorage for cloud sync
+  // Sync auth user to ProjectStorage for cloud sync (local mode stays local-only)
   useEffect(() => {
-    ProjectStorage.setCloudUser(user?.uid || null);
-    if (user) {
+    ProjectStorage.setCloudUser(isLocalMode ? null : (user?.uid || null));
+    if (user && !isLocalMode) {
       // Push pre-existing local projects to cloud, then pull cloud → local
       ProjectStorage.syncToCloud().then(() =>
         ProjectStorage.syncFromCloud()
@@ -50,6 +50,19 @@ const AppInner: React.FC = () => {
       });
     }
   }, [user]);
+
+  // Prevent Chromium from navigating away when files are dragged into the window
+  useEffect(() => {
+    const preventNav = (e: DragEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener('dragover', preventNav);
+    window.addEventListener('drop', preventNav);
+    return () => {
+      window.removeEventListener('dragover', preventNav);
+      window.removeEventListener('drop', preventNav);
+    };
+  }, []);
 
   // Load the app when authenticated
   useEffect(() => {

@@ -51,6 +51,14 @@ export interface PileCapDesignOutput {
   topAstProv: number; // mm2/m
   sideFaceAstReq: number; // mm2
   sideFaceAstProv: number; // mm2
+  // Actual rebar design values (for drawing)
+  bottomBarDia: number;       // mm (e.g. 16)
+  bottomBarSpacing: number;   // mm c/c (e.g. 125)
+  topBarDia: number;          // mm (e.g. 12)
+  topBarSpacing: number;      // mm c/c (e.g. 150)
+  sideBarDia: number;         // mm (e.g. 12)
+  numSideLayers: number;      // number of side face bar layers per face
+  sideBarSpacing: number;     // mm c/c vertical spacing
   governingLoadCase: number;
   isManuallyEdited?: boolean;
   status: 'PASS' | 'WARNING' | 'FAIL';
@@ -516,6 +524,14 @@ export class PileCapDesignEngine {
       topAstProv,
       sideFaceAstReq,
       sideFaceAstProv: finalSideAstProv,
+      // Actual rebar design values
+      bottomBarDia: 16,
+      bottomBarSpacing: 125,
+      topBarDia,
+      topBarSpacing,
+      sideBarDia,
+      numSideLayers,
+      sideBarSpacing,
       governingLoadCase,
       isManuallyEdited,
       status,

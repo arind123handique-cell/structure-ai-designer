@@ -28,6 +28,7 @@ import {
   UserCog,
   Database,
   Columns2,
+  GitCompare,
 } from 'lucide-react';
 import { cyberAudio } from '@/features/video/audio/cyberAudioSynthesizer';
 import { useVideoStore } from '@/features/video/videoStore';
@@ -87,6 +88,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({ onHide }) => {
     { label: 'Manual Structural Analysis', view: 'etabs-studio', icon: Sparkles, badge: 'SA' },
     { label: '3D Structural Model', view: '3d-model', icon: Box, badge: isStreamActive ? 'AR LIVE' : undefined },
     { label: 'Member Forces', view: 'member-forces', icon: FileSpreadsheet },
+    { label: 'Analysis Review', view: 'analysis-review', icon: GitCompare, badge: 'NEW' },
     { label: 'Support Reactions', view: 'joint-reactions', icon: Building },
     { label: 'Load Cases & Comb.', view: 'load-cases', icon: Workflow },
     { label: 'Elements & Building Details', view: 'elements', icon: Layers },

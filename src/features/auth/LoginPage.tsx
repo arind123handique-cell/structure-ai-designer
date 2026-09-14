@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/lib/firebase/AuthContext';
-import { Loader2, Mail, Lock, LogIn, UserPlus, Cpu, Activity } from 'lucide-react';
+import { Loader2, Mail, Lock, LogIn, UserPlus, Cpu, Activity, WifiOff, HardDrive } from 'lucide-react';
 import { FuturisticBackdrop } from '@/components/futuristic/FuturisticBackdrop';
 
 export const LoginPage: React.FC = () => {
-  const { signInWithEmail, signUpWithEmail, signInWithGoogle } = useAuth();
+  const { signInWithEmail, signUpWithEmail, signInWithGoogle, authUnreachable, signInLocalMode, isLocalMode } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -100,12 +100,43 @@ export const LoginPage: React.FC = () => {
             <h1 className="text-lg font-bold text-deep-navy font-mono">STRUCTURE AI</h1>
           </div>
 
+          {authUnreachable && !isLocalMode && (
+            <div className="mb-5 px-3 py-2.5 rounded-lg border border-amber-300 bg-amber-50">
+              <div className="flex items-center gap-2 text-amber-800 font-mono text-xs font-bold mb-1">
+                <WifiOff className="w-4 h-4" />
+                Firebase sign-in unreachable
+              </div>
+              <p className="text-[11px] text-amber-700 leading-snug">
+                Could not reach the authentication server. You can keep working
+                offline — projects are saved locally on this device.
+              </p>
+              <button
+                type="button"
+                onClick={signInLocalMode}
+                className="mt-2 w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold font-mono text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 transition-colors"
+              >
+                <HardDrive className="w-4 h-4" />
+                Continue in Local Mode
+              </button>
+            </div>
+          )}
+
           <h2 className="text-xl font-bold text-deep-navy font-mono mb-1">
             {isSignUp ? 'Create Account' : 'Welcome Back'}
           </h2>
           <p className="text-sm text-slate-500 mb-6">
             {isSignUp ? 'Sign up to save projects to the cloud' : 'Sign in to access your projects'}
           </p>
+
+          {/* Direct Local Desktop Mode Button */}
+          <button
+            type="button"
+            onClick={signInLocalMode}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-secondary-brand/30 to-cyan-500/30 hover:from-secondary-brand/40 hover:to-cyan-500/40 border border-cyan-400/60 hover:border-cyan-300 rounded-lg text-sm font-bold font-mono text-cyan-200 hover:text-white transition-all mb-4 shadow-[0_0_20px_-3px_rgba(6,182,212,0.4)]"
+          >
+            <HardDrive className="w-4 h-4 text-cyan-300" />
+            Continue in Local Desktop Mode
+          </button>
 
           {/* Google Sign-In */}
           <button
@@ -126,7 +157,7 @@ export const LoginPage: React.FC = () => {
           {/* Divider */}
           <div className="flex items-center gap-3 mb-4">
             <div className="flex-1 h-px bg-slate-200" />
-            <span className="text-[10px] font-mono text-slate-400 uppercase">or</span>
+            <span className="text-[10px] font-mono text-slate-400 uppercase">or email</span>
             <div className="flex-1 h-px bg-slate-200" />
           </div>
 
@@ -164,8 +195,15 @@ export const LoginPage: React.FC = () => {
             </div>
 
             {error && (
-              <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs font-mono text-red-600">
-                {error}
+              <div className="px-3.5 py-2.5 bg-red-950/80 border border-red-500/50 rounded-lg text-xs font-mono text-red-200 space-y-1.5">
+                <div className="font-semibold text-red-300">
+                  {error}
+                </div>
+                {(error.includes('unauthorized-domain') || error.includes('auth/')) && (
+                  <div className="text-[11px] text-slate-300 font-sans leading-relaxed pt-1 border-t border-red-500/30">
+                    Google OAuth domain not registered for desktop. Sign in with <strong>Email &amp; Password</strong> or click <strong>Continue in Local Desktop Mode</strong> above.
+                  </div>
+                )}
               </div>
             )}
 

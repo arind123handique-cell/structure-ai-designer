@@ -8,11 +8,21 @@ import {
   Building,
   Grid,
   Layers,
+  Columns,
+  TrendingUp,
+  Activity,
 } from 'lucide-react';
 
 export interface StoreyElevationItem {
   label: string;
   elevationY: number;
+}
+
+export interface GridItemOption {
+  id: string;
+  label: string;
+  axis: 'X' | 'Z';
+  coord: number;
 }
 
 interface EtabsToolbarProps {
@@ -29,6 +39,13 @@ interface EtabsToolbarProps {
   onOpenWizard: () => void;
   onSave: () => void;
   isAnalyzing: boolean;
+  viewMode?: 'PLAN' | 'ELEVATION';
+  onChangeViewMode?: (mode: 'PLAN' | 'ELEVATION') => void;
+  selectedGridId?: string;
+  onChangeSelectedGridId?: (gridId: string) => void;
+  availableGrids?: GridItemOption[];
+  diagramType?: 'NONE' | 'BMD' | 'SFD';
+  onChangeDiagramType?: (type: 'NONE' | 'BMD' | 'SFD') => void;
 }
 
 export const EtabsToolbar: React.FC<EtabsToolbarProps> = React.memo(({
@@ -45,6 +62,13 @@ export const EtabsToolbar: React.FC<EtabsToolbarProps> = React.memo(({
   onOpenWizard,
   onSave,
   isAnalyzing,
+  viewMode = 'PLAN',
+  onChangeViewMode,
+  selectedGridId = '1',
+  onChangeSelectedGridId,
+  availableGrids = [],
+  diagramType = 'NONE',
+  onChangeDiagramType,
 }) => {
   return (
     <div className="bg-slate-800 text-slate-200 border-b border-slate-700 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 font-mono text-xs shadow-xs z-20">
@@ -162,22 +186,108 @@ export const EtabsToolbar: React.FC<EtabsToolbarProps> = React.memo(({
 
         <div className="h-5 w-px bg-slate-600 mx-1" />
 
-        {/* Storey Elevation Dropdown */}
-        <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1 rounded border border-slate-700">
-          <Building className="w-3.5 h-3.5 text-sky-400" />
-          <span className="text-[10px] text-slate-400 uppercase font-bold">Level:</span>
-          <select
-            value={selectedStoreyElevation}
-            onChange={(e) => onChangeStoreyElevation(Number(e.target.value))}
-            className="bg-transparent text-indigo-300 font-bold text-xs focus:outline-hidden cursor-pointer"
+        {/* View Mode Toggle: Plan View vs Elevation View */}
+        <div className="flex items-center bg-slate-900 rounded border border-slate-700 p-0.5">
+          <button
+            type="button"
+            onClick={() => onChangeViewMode?.('PLAN')}
+            className={`flex items-center gap-1 px-2.5 py-0.5 rounded text-[11px] font-bold transition-all ${
+              viewMode === 'PLAN'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+            title="2D Floor Plan Framing View"
           >
-            {availableElevations.map((item) => (
-              <option key={item.elevationY} value={item.elevationY} className="bg-slate-800 text-white">
-                {item.label} (EL. +{item.elevationY.toFixed(2)}m)
-              </option>
-            ))}
-          </select>
+            <Building className="w-3 h-3" />
+            <span>Plan View</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onChangeViewMode?.('ELEVATION')}
+            className={`flex items-center gap-1 px-2.5 py-0.5 rounded text-[11px] font-bold transition-all ${
+              viewMode === 'ELEVATION'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+            title="2D Multi-Storey Frame Elevation View (BMD & SFD Diagrams)"
+          >
+            <Columns className="w-3 h-3" />
+            <span>Elevation View</span>
+          </button>
         </div>
+
+        {/* Dynamic Context Selector: Storey Level (in Plan) vs Grid Line & Diagrams (in Elevation) */}
+        {viewMode === 'PLAN' ? (
+          <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1 rounded border border-slate-700">
+            <Building className="w-3.5 h-3.5 text-sky-400" />
+            <span className="text-[10px] text-slate-400 uppercase font-bold">Level:</span>
+            <select
+              value={selectedStoreyElevation}
+              onChange={(e) => onChangeStoreyElevation(Number(e.target.value))}
+              className="bg-transparent text-indigo-300 font-bold text-xs focus:outline-hidden cursor-pointer"
+            >
+              {availableElevations.map((item) => (
+                <option key={item.elevationY} value={item.elevationY} className="bg-slate-800 text-white">
+                  {item.label} (EL. +{item.elevationY.toFixed(2)}m)
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            {/* Grid Line Selector */}
+            <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1 rounded border border-slate-700">
+              <Grid className="w-3.5 h-3.5 text-amber-400" />
+              <span className="text-[10px] text-slate-400 uppercase font-bold">Grid:</span>
+              <select
+                value={selectedGridId}
+                onChange={(e) => onChangeSelectedGridId?.(e.target.value)}
+                className="bg-transparent text-amber-300 font-bold text-xs focus:outline-hidden cursor-pointer"
+              >
+                {availableGrids.map((g) => (
+                  <option key={`${g.axis}-${g.id}`} value={g.id} className="bg-slate-800 text-white">
+                    {g.label} ({g.axis}={g.coord.toFixed(2)}m)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Diagram Type Selector */}
+            <div className="flex items-center bg-slate-900 rounded p-0.5 border border-slate-700 text-[10px]">
+              <button
+                type="button"
+                onClick={() => onChangeDiagramType?.('NONE')}
+                className={`px-2 py-0.5 rounded font-bold transition-colors ${
+                  diagramType === 'NONE' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Frame
+              </button>
+              <button
+                type="button"
+                onClick={() => onChangeDiagramType?.('BMD')}
+                className={`px-2 py-0.5 rounded font-bold transition-colors flex items-center gap-1 ${
+                  diagramType === 'BMD' ? 'bg-amber-600 text-white shadow-xs' : 'text-amber-400 hover:text-amber-300'
+                }`}
+                title="Bending Moment Diagram (Mz)"
+              >
+                <TrendingUp className="w-3 h-3" />
+                <span>BMD (Mz)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onChangeDiagramType?.('SFD')}
+                className={`px-2 py-0.5 rounded font-bold transition-colors flex items-center gap-1 ${
+                  diagramType === 'SFD' ? 'bg-emerald-600 text-white shadow-xs' : 'text-emerald-400 hover:text-emerald-300'
+                }`}
+                title="Shear Force Diagram (Vy)"
+              >
+                <Activity className="w-3 h-3" />
+                <span>SFD (Vy)</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Right Quick Status Badges */}

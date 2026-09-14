@@ -78,22 +78,45 @@ export class CombinedPileCapEngine {
     const results: CombinedPileCapGroup[] = [];
     const supportNodes: SupportNodeInfo[] = [];
 
+    // Pre-index max vertical reaction per node O(R)
+    const maxFyByNode = new Map<number, number>();
+    if (model.reactions) {
+      for (let i = 0; i < model.reactions.length; i++) {
+        const r = model.reactions[i];
+        const val = Math.abs(r.fy);
+        const cur = maxFyByNode.get(r.nodeId) || 0;
+        if (val > cur) maxFyByNode.set(r.nodeId, val);
+      }
+    }
+
+    // Lazy index of max member axial force if fallback is needed
+    let axialForceByNode: Map<number, number> | null = null;
+
     for (const sup of model.supports.values()) {
       const node = model.nodes.get(sup.nodeId);
       if (!node) continue;
       const colInfo = columnMapping.get(sup.nodeId);
-      const reactions = model.reactions?.filter((r) => r.nodeId === sup.nodeId) || [];
-      let maxFy = reactions.length > 0 ? Math.max(...reactions.map((r) => Math.abs(r.fy))) : 0;
+      let maxFy = maxFyByNode.get(sup.nodeId) || 0;
       if (maxFy <= 0 && model.memberForces && model.members) {
-        const connectedMemberIds = new Set(
-          Array.from(model.members.values())
-            .filter((m) => m.startNodeId === sup.nodeId || m.endNodeId === sup.nodeId)
-            .map((m) => m.id)
-        );
-        const connectedForces = model.memberForces.filter((f) => connectedMemberIds.has(f.memberId));
-        for (const cf of connectedForces) {
-          if (Math.abs(cf.axial) > maxFy) maxFy = Math.abs(cf.axial);
+        if (!axialForceByNode) {
+          axialForceByNode = new Map<number, number>();
+          const memberNodeMap = new Map<number, [number, number]>();
+          for (const m of model.members.values()) {
+            memberNodeMap.set(m.id, [m.startNodeId, m.endNodeId]);
+          }
+          for (let i = 0; i < model.memberForces.length; i++) {
+            const f = model.memberForces[i];
+            const nodes = memberNodeMap.get(f.memberId);
+            if (nodes) {
+              const ax = Math.abs(f.axial || 0);
+              const cur0 = axialForceByNode.get(nodes[0]) || 0;
+              if (ax > cur0) axialForceByNode.set(nodes[0], ax);
+              const cur1 = axialForceByNode.get(nodes[1]) || 0;
+              if (ax > cur1) axialForceByNode.set(nodes[1], ax);
+            }
+          }
         }
+        maxFy = axialForceByNode.get(sup.nodeId) || 0;
       }
       if (maxFy <= 0) maxFy = 650;
 

@@ -37,7 +37,7 @@ export class ANLTokenizer {
       if (/PAGE\s+NO\.\s+\d+/i.test(line)) continue;
 
       // Skip asterisk header banners
-      if (/^\*+$/.test(line) || /^\*\s+STAAD\.Pro/i.test(line) || /^\*\s+Bentley/i.test(line) || /^\*\s+Licensed/i.test(line)) {
+      if (line.startsWith('*') || /^\*\s+STAAD\.Pro/i.test(line) || /^\*\s+Bentley/i.test(line) || /^\*\s+Licensed/i.test(line) || line.startsWith('<!') || line.startsWith('!>')) {
         continue;
       }
 
@@ -61,6 +61,11 @@ export class ANLTokenizer {
         line = cmdMatch[2].trim();
       } else {
         if (!currentLineNum) currentLineNum = i + 1;
+      }
+
+      // Skip comments or generated data banners after command number has been stripped
+      if (!line || line.startsWith('*') || line.startsWith('<!') || line.startsWith('!>') || line.startsWith('--')) {
+        continue;
       }
 
       // Check for line continuation ending with '-'

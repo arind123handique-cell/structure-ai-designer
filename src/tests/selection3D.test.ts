@@ -413,5 +413,36 @@ describe('3D Viewport Selection Engine — 5 Scenarios Verified 5 Times', () => 
       expect(raycastCalled).toBe(true);
       expect(useProjectStore.getState().selectedMemberId).toBe(1);
     });
+
+    it('retains selectedMemberId even if selectPlate(null) or selectNode(null) is called', () => {
+      const store = useProjectStore.getState();
+      // 1. Select member 1
+      store.selectMember(1);
+      expect(useProjectStore.getState().selectedMemberId).toBe(1);
+      expect(useProjectStore.getState().selectedPlateId).toBe(null);
+      expect(useProjectStore.getState().selectedNodeId).toBe(null);
+
+      // 2. Calling selectPlate(null) must NOT clear selectedMemberId
+      store.selectPlate(null);
+      expect(useProjectStore.getState().selectedMemberId).toBe(1);
+
+      // 3. Calling selectNode(null) must NOT clear selectedMemberId
+      store.selectNode(null);
+      expect(useProjectStore.getState().selectedMemberId).toBe(1);
+
+      // 4. Selecting a plate should switch selection to plate and clear member
+      store.selectPlate(2);
+      expect(useProjectStore.getState().selectedMemberId).toBe(null);
+      expect(useProjectStore.getState().selectedPlateId).toBe(2);
+
+      // 5. Selecting a member should switch selection back to member and clear plate
+      store.selectMember(2);
+      expect(useProjectStore.getState().selectedMemberId).toBe(2);
+      expect(useProjectStore.getState().selectedPlateId).toBe(null);
+
+      // 6. Clearing member explicitly sets it to null
+      store.selectMember(null);
+      expect(useProjectStore.getState().selectedMemberId).toBe(null);
+    });
   });
 });

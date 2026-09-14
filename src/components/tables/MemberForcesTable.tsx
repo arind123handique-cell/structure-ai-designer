@@ -3,6 +3,7 @@ import { useProjectStore } from '@/features/projects/projectStore';
 import { DataTable, ColumnDef } from './DataTable';
 import { MemberForceRecord } from '@/features/model/types';
 import { exportToCsv } from '@/utils/exportUtils';
+import { GitCompare } from 'lucide-react';
 
 export const MemberForcesTable: React.FC = () => {
   const { activeModel, selectMember, setActiveView } = useProjectStore();
@@ -168,6 +169,15 @@ export const MemberForcesTable: React.FC = () => {
             </button>
           ))}
         </div>
+
+        <button
+          onClick={() => setActiveView('analysis-review')}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-md transition-colors shadow-xs"
+          title="Compare STAAD ANL file forces against in-app FEM re-analysis"
+        >
+          <GitCompare className="w-3.5 h-3.5 text-indigo-600" />
+          <span>Compare: ANL vs FEM Analysis Review</span>
+        </button>
       </div>
 
       <div className="flex-1 overflow-hidden">

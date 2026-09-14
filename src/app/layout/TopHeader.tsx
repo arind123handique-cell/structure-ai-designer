@@ -26,6 +26,7 @@ import {
   Undo2,
   Redo2,
   Download,
+  GitCompare,
 } from 'lucide-react';
 import { useVideoStore } from '@/features/video/videoStore';
 import { DroneStreamModal } from '@/features/video/components/DroneStreamModal';
@@ -48,6 +49,8 @@ export const TopHeader: React.FC<TopHeaderProps> = React.memo(({ onHide }) => {
   const batchUpdateSections = useProjectStore(s => s.batchUpdateSections);
   const universalRebarSelection = useProjectStore(s => s.universalRebarSelection);
   const setUniversalRebarModalOpen = useProjectStore(s => s.setUniversalRebarModalOpen);
+  const designAnalysisSource = useProjectStore(s => s.designAnalysisSource);
+  const setDesignAnalysisSource = useProjectStore(s => s.setDesignAnalysisSource);
 
   const setStreamModalOpen = useVideoStore(s => s.setStreamModalOpen);
   const isStreamActive = useVideoStore(s => s.isStreamActive);
@@ -145,6 +148,36 @@ export const TopHeader: React.FC<TopHeaderProps> = React.memo(({ onHide }) => {
 
         {/* Right: Quick Action Buttons */}
         <div className="flex items-center gap-2">
+          {/* Global Analysis Force Source Selector */}
+          {activeModel && (
+            <div className="inline-flex items-center bg-slate-100 p-0.5 rounded-md border border-slate-200 shadow-2xs font-mono text-xs">
+              <button
+                type="button"
+                onClick={() => setDesignAnalysisSource('ANL_FILE')}
+                className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-all ${
+                  designAnalysisSource === 'ANL_FILE'
+                    ? 'bg-sky-600 text-white font-bold shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
+                }`}
+                title="Global Design Forces: STAAD .ANL Finite Element Results"
+              >
+                <span>📁 STAAD .ANL</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDesignAnalysisSource('MANUAL')}
+                className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-all ${
+                  designAnalysisSource === 'MANUAL'
+                    ? 'bg-emerald-600 text-white font-bold shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
+                }`}
+                title="Global Design Forces: IS 456 Tributary & Manual Statics"
+              >
+                <span>📐 Manual Statics</span>
+              </button>
+            </div>
+          )}
+
           {/* Universal Rebar Selector Button */}
           {activeModel && (
             <button
@@ -312,6 +345,15 @@ export const TopHeader: React.FC<TopHeaderProps> = React.memo(({ onHide }) => {
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-sky-600" />
             <span className="hidden sm:inline">Forces</span>
+          </button>
+
+          <button
+            onClick={() => setActiveView('analysis-review')}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-semibold text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 border border-indigo-200 rounded-md transition-colors shadow-xs"
+            title="Compare STAAD ANL results vs Built-in FEM re-analysis"
+          >
+            <GitCompare className="w-3.5 h-3.5 text-indigo-600" />
+            <span className="hidden sm:inline">ANL vs FEM</span>
           </button>
 
           <button

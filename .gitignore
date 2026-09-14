@@ -37,3 +37,15 @@ STD 6MILES.STD
 
 # Testing
 coverage/
+
+# Desktop / Release builds
+release-build/
+desktop-build/
+src-tauri/target/
+scratch/
+
+# Generated export test files
+*.pdf
+*.xlsx
+Design column cacl.html
+Design data for columns.html

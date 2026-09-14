@@ -11,6 +11,7 @@ import { useAuth } from '@/lib/firebase/AuthContext';
 import { WindowHost } from '@/components/window/WindowHost';
 import { FuturisticBackdrop } from '@/components/futuristic/FuturisticBackdrop';
 import { useThemeStore } from '@/features/theme/themeStore';
+import { ViewErrorBoundary } from '@/components/common/ViewErrorBoundary';
 
 const ProjectDashboard = lazy(() => import('@/features/projects/ProjectDashboard').then(m => ({ default: m.ProjectDashboard })));
 const PlotAreaView = lazy(() => import('@/features/plot/PlotAreaView').then(m => ({ default: m.PlotAreaView })));
@@ -18,6 +19,7 @@ const SiteAnd3DView = lazy(() => import('@/features/plot/SiteAnd3DView').then(m 
 const EtabsStudioView = lazy(() => import('@/features/etabs/EtabsStudioView').then(m => ({ default: m.EtabsStudioView })));
 const Structural3DViewer = lazy(() => import('@/components/model-viewer/Structural3DViewer').then(m => ({ default: m.Structural3DViewer })));
 const MemberForcesTable = lazy(() => import('@/components/tables/MemberForcesTable').then(m => ({ default: m.MemberForcesTable })));
+const AnalysisReviewView = lazy(() => import('@/components/tables/AnalysisReviewView').then(m => ({ default: m.AnalysisReviewView })));
 const JointReactionsTable = lazy(() => import('@/components/tables/JointReactionsTable').then(m => ({ default: m.JointReactionsTable })));
 const LoadCasesTable = lazy(() => import('@/components/tables/LoadCasesTable').then(m => ({ default: m.LoadCasesTable })));
 const ElementsTable = lazy(() => import('@/components/tables/ElementsTable').then(m => ({ default: m.ElementsTable })));
@@ -76,6 +78,8 @@ export const AppLayout: React.FC = () => {
         return <Structural3DViewer />;
       case 'member-forces':
         return <MemberForcesTable />;
+      case 'analysis-review':
+        return <AnalysisReviewView />;
       case 'joint-reactions':
         return <JointReactionsTable />;
       case 'load-cases':
@@ -201,7 +205,9 @@ export const AppLayout: React.FC = () => {
 
           {/* Main View Area */}
           <div className="flex-1 flex flex-col h-full overflow-hidden relative z-10">
-            <Suspense fallback={<ViewFallback />}>{renderMainView()}</Suspense>
+            <ViewErrorBoundary viewName={activeView}>
+              <Suspense fallback={<ViewFallback />}>{renderMainView()}</Suspense>
+            </ViewErrorBoundary>
           </div>
 
           {/* Member Inspector Panel (renders when member selected and inspector switch is enabled in non-3D views) */}

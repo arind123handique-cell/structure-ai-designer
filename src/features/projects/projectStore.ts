@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { StoredProject } from './types';
+import { StoredProject, DesignAnalysisSource } from './types';
 import { ProjectStorage } from './projectStorage';
 import { ANLParser } from '../anl/anlParser';
 import {
@@ -52,6 +52,7 @@ export type ViewTab =
   | 'etabs-studio'
   | '3d-model'
   | 'member-forces'
+  | 'analysis-review'
   | 'joint-reactions'
   | 'load-cases'
   | 'elements'
@@ -127,6 +128,13 @@ export interface ProjectState {
   setAllowedBeamRebarDiameters: (dias: number[]) => void;
   rotateColumnOrientation: (memberId: number) => Promise<void>;
   autoOrientAllColumns: () => Promise<number>;
+
+  // Analysis Source Configuration (STAAD .ANL File vs IS 456 Manual Statics Check)
+  designAnalysisSource: DesignAnalysisSource;
+  sectionAnalysisSources: Record<string, DesignAnalysisSource>;
+  setDesignAnalysisSource: (source: DesignAnalysisSource) => void;
+  setSectionAnalysisSource: (section: string, source: DesignAnalysisSource) => void;
+  getSectionAnalysisSource: (section: string) => DesignAnalysisSource;
 
   // Actions
   initializeStore: () => Promise<void>;
@@ -486,6 +494,70 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   allowedColumnRebarDiameters: [12, 16, 20, 25],
   allowedBeamRebarDiameters: [12, 16, 20, 25],
 
+  // Analysis Source Configuration Initial States
+  designAnalysisSource: 'ANL_FILE',
+  sectionAnalysisSources: {
+    beams: 'ANL_FILE',
+    columns: 'ANL_FILE',
+    footings: 'ANL_FILE',
+    pilecaps: 'ANL_FILE',
+    gradebeams: 'ANL_FILE',
+  },
+  setDesignAnalysisSource: (source: DesignAnalysisSource) => {
+    const prev = get().sectionAnalysisSources;
+    const updatedSections: Record<string, DesignAnalysisSource> = {
+      ...prev,
+      beams: source,
+      columns: source,
+      footings: source,
+      pilecaps: source,
+      gradebeams: source,
+    };
+    const currentProj = get().activeProject;
+    const updatedProject = currentProj
+      ? {
+          ...currentProj,
+          designAnalysisSource: source,
+          sectionAnalysisSources: updatedSections,
+          metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+        }
+      : null;
+    if (updatedProject) {
+      ProjectStorage.saveProject(updatedProject);
+    }
+    set({
+      designAnalysisSource: source,
+      sectionAnalysisSources: updatedSections,
+      ...(updatedProject ? { activeProject: updatedProject } : {}),
+    });
+  },
+  setSectionAnalysisSource: (section: string, source: DesignAnalysisSource) => {
+    const prev = get().sectionAnalysisSources;
+    const updatedSections: Record<string, DesignAnalysisSource> = {
+      ...prev,
+      [section]: source,
+    };
+    const currentProj = get().activeProject;
+    const updatedProject = currentProj
+      ? {
+          ...currentProj,
+          sectionAnalysisSources: updatedSections,
+          metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+        }
+      : null;
+    if (updatedProject) {
+      ProjectStorage.saveProject(updatedProject);
+    }
+    set({
+      sectionAnalysisSources: updatedSections,
+      ...(updatedProject ? { activeProject: updatedProject } : {}),
+    });
+  },
+  getSectionAnalysisSource: (section: string) => {
+    const s = get();
+    return s.sectionAnalysisSources?.[section] || s.designAnalysisSource || 'ANL_FILE';
+  },
+
   initializeStore: async () => {
     set({ isLoading: true });
     try {
@@ -537,6 +609,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           allowedColumnRebarDiameters: uRebar.longitudinalDiameters,
           allowedBeamRebarDiameters: uRebar.longitudinalDiameters,
           selectedSupportNodeIds: [],
+          designAnalysisSource: first.designAnalysisSource || 'ANL_FILE',
+          sectionAnalysisSources: first.sectionAnalysisSources || {
+            beams: first.designAnalysisSource || 'ANL_FILE',
+            columns: first.designAnalysisSource || 'ANL_FILE',
+            footings: first.designAnalysisSource || 'ANL_FILE',
+            pilecaps: first.designAnalysisSource || 'ANL_FILE',
+            gradebeams: first.designAnalysisSource || 'ANL_FILE',
+          },
         });
       }
     } catch (err) {
@@ -693,6 +773,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           allowedColumnRebarDiameters: uRebar.longitudinalDiameters,
           allowedBeamRebarDiameters: uRebar.longitudinalDiameters,
           selectedSupportNodeIds: [],
+          designAnalysisSource: project.designAnalysisSource || 'ANL_FILE',
+          sectionAnalysisSources: project.sectionAnalysisSources || {
+            beams: project.designAnalysisSource || 'ANL_FILE',
+            columns: project.designAnalysisSource || 'ANL_FILE',
+            footings: project.designAnalysisSource || 'ANL_FILE',
+            pilecaps: project.designAnalysisSource || 'ANL_FILE',
+            gradebeams: project.designAnalysisSource || 'ANL_FILE',
+          },
         });
       }
     } finally {
@@ -875,9 +963,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ isLoading: false });
     }
   },
-  selectMember: (id) => set({ selectedMemberId: id, selectedNodeId: null, selectedPlateId: null }),
-  selectNode: (id) => set({ selectedNodeId: id, selectedMemberId: null, selectedPlateId: null }),
-  selectPlate: (id) => set({ selectedPlateId: id, selectedMemberId: null, selectedNodeId: null }),
+  selectMember: (id) =>
+    set(() => ({
+      selectedMemberId: id,
+      ...(id != null ? { selectedNodeId: null, selectedPlateId: null } : {}),
+    })),
+  selectNode: (id) =>
+    set(() => ({
+      selectedNodeId: id,
+      ...(id != null ? { selectedMemberId: null, selectedPlateId: null } : {}),
+    })),
+  selectPlate: (id) =>
+    set(() => ({
+      selectedPlateId: id,
+      ...(id != null ? { selectedMemberId: null, selectedNodeId: null } : {}),
+    })),
 
   selectSupportNode: (nodeId, multi = false) => {
     if (nodeId === null) {

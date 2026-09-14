@@ -17,6 +17,8 @@ import { PileDesignEngine, ProjectPileType } from '@/features/design/pile/pileDe
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
 import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
 import { CalculationPdfService } from '@/features/calculations/calculationPdfService';
+import { ManualAnalysisEngine } from '@/features/calculations/manualAnalysisEngine';
+import { AnalysisSourceToggle } from '@/components/common/AnalysisSourceToggle';
 import {
   Play,
   Box,
@@ -66,6 +68,9 @@ export const PileCapDesignView: React.FC = () => {
     clearCustomCombinedCapOverride,
     savedPileCapDesigns,
     savePileCapDesigns,
+    getSectionAnalysisSource,
+    sectionAnalysisSources,
+    designAnalysisSource,
   } = useProjectStore();
 
   const [designedCaps, setDesignedCaps] = useState<Map<number, PileCapDesignOutput>>(new Map());
@@ -120,42 +125,63 @@ export const PileCapDesignView: React.FC = () => {
     const defaultPile = availablePileTypes[0];
     const inputs: import('./pileCapDesignEngine').PileCapDesignInput[] = [];
 
+    const analysisSource = getSectionAnalysisSource('pilecaps');
+    const manualSummary = analysisSource === 'MANUAL' ? ManualAnalysisEngine.computeReview(activeModel, 'GRAVITY_COMBO') : null;
+
+    // Pre-map column to support node
+    const supToColMap = new Map<number, number>();
+    for (const m of activeModel.members.values()) {
+      if (m.classification === 'COLUMN') {
+        if (activeModel.supports.has(m.startNodeId)) supToColMap.set(m.startNodeId, m.id);
+        if (activeModel.supports.has(m.endNodeId)) supToColMap.set(m.endNodeId, m.id);
+      }
+    }
+
     for (const sup of supportNodes) {
-      const reactions = activeModel.reactions?.filter((r) => r.nodeId === sup.nodeId) || [];
       let maxFy = 0;
       let maxMx = 0;
       let maxMy = 0;
       let govLC = 1;
 
-      for (const r of reactions) {
-        if (Math.abs(r.fy) > maxFy) {
-          maxFy = Math.abs(r.fy);
-          maxMx = Math.abs(r.mx);
-          maxMy = Math.abs(r.my);
-          govLC = r.loadCaseId;
-        }
-      }
-
-      if (maxFy <= 0 && activeModel.memberForces && activeModel.members) {
-        const connectedMemberIds = new Set(
-          Array.from(activeModel.members.values())
-            .filter((m) => m.startNodeId === sup.nodeId || m.endNodeId === sup.nodeId)
-            .map((m) => m.id)
-        );
-        const connectedForces = activeModel.memberForces.filter((f) => connectedMemberIds.has(f.memberId));
-        for (const cf of connectedForces) {
-          if (Math.abs(cf.axial) > maxFy) {
-            maxFy = Math.abs(cf.axial);
-            govLC = cf.loadCaseId;
+      if (analysisSource === 'MANUAL') {
+        const colId = supToColMap.get(sup.nodeId);
+        const mRow = colId ? manualSummary?.rows.find((r) => r.memberId === colId) : null;
+        maxFy = mRow ? mRow.manualAxial : 650;
+        maxMx = Math.max(25, parseFloat((0.03 * maxFy).toFixed(1)));
+        maxMy = Math.max(15, parseFloat((0.02 * maxFy).toFixed(1)));
+        govLC = 9; // Manual Statics (1.5 DL + 1.5 LL)
+      } else {
+        const reactions = activeModel.reactions?.filter((r) => r.nodeId === sup.nodeId) || [];
+        for (const r of reactions) {
+          if (Math.abs(r.fy) > maxFy) {
+            maxFy = Math.abs(r.fy);
+            maxMx = Math.abs(r.mx);
+            maxMy = Math.abs(r.my);
+            govLC = r.loadCaseId;
           }
         }
-      }
 
-      if (maxFy <= 0) {
-        maxFy = 650;
-        maxMx = 45;
-        maxMy = 25;
-        govLC = 9;
+        if (maxFy <= 0 && activeModel.memberForces && activeModel.members) {
+          const connectedMemberIds = new Set(
+            Array.from(activeModel.members.values())
+              .filter((m) => m.startNodeId === sup.nodeId || m.endNodeId === sup.nodeId)
+              .map((m) => m.id)
+          );
+          const connectedForces = activeModel.memberForces.filter((f) => connectedMemberIds.has(f.memberId));
+          for (const cf of connectedForces) {
+            if (Math.abs(cf.axial) > maxFy) {
+              maxFy = Math.abs(cf.axial);
+              govLC = cf.loadCaseId;
+            }
+          }
+        }
+
+        if (maxFy <= 0) {
+          maxFy = 650;
+          maxMx = 45;
+          maxMy = 25;
+          govLC = 9;
+        }
       }
 
       const assignedTypeId = supportPileAssignments[sup.nodeId] || defaultPile.id;
@@ -187,7 +213,7 @@ export const PileCapDesignView: React.FC = () => {
 
     setDesignedCaps(standardizedMap);
     setIsDesigning(false);
-  }, [activeModel, activeProject, supportNodes, availablePileTypes, supportPileAssignments, customPileCapOverrides]);
+  }, [activeModel, activeProject, supportNodes, availablePileTypes, supportPileAssignments, customPileCapOverrides, getSectionAnalysisSource, sectionAnalysisSources, designAnalysisSource]);
 
   useEffect(() => {
     if (supportNodes.length > 0) {
@@ -757,10 +783,11 @@ export const PileCapDesignView: React.FC = () => {
         variant="card"
       >
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
+          <div className="space-y-2">
             <p className="text-xs text-slate-500">
               Auto-configured by single pile capacity $Q_{'{'}safe{'}'}$, two-way column & pile punching shear, flexural bottom mats, and top shrinkage grids.
             </p>
+            <AnalysisSourceToggle section="pilecaps" sectionLabel="Pile Caps" onSourceChange={() => handleDesignAll()} />
           </div>
 
           <div className="flex items-center gap-2">

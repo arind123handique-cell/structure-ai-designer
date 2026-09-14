@@ -22,6 +22,7 @@ interface EtabsMenuBarProps {
   onExportCsv: () => void;
   onToggle3D: () => void;
   onTogglePlan: () => void;
+  onToggleElevation?: () => void;
   onToggleSplit: () => void;
   onOpenSectionsModal: () => void;
   onOpenLoadsModal: () => void;
@@ -45,6 +46,7 @@ export const EtabsMenuBar: React.FC<EtabsMenuBarProps> = ({
   onExportCsv,
   onToggle3D,
   onTogglePlan,
+  onToggleElevation,
   onToggleSplit,
   onOpenSectionsModal,
   onOpenLoadsModal,
@@ -174,6 +176,15 @@ export const EtabsMenuBar: React.FC<EtabsMenuBarProps> = ({
               >
                 Set 2D Story Plan View
               </button>
+              {onToggleElevation && (
+                <button
+                  onClick={() => { onToggleElevation(); handleClose(); }}
+                  className="w-full px-3 py-1.5 text-left hover:bg-indigo-600 hover:text-white flex items-center justify-between"
+                >
+                  <span>Set 2D Frame Elevation View</span>
+                  <span className="text-[10px] text-amber-400 font-bold">BMD/SFD</span>
+                </button>
+              )}
               <button
                 onClick={() => { onToggleSplit(); handleClose(); }}
                 className="w-full px-3 py-1.5 text-left hover:bg-indigo-600 hover:text-white font-bold text-amber-300"

@@ -10,6 +10,7 @@ export default defineConfig({
     setupFiles: [],
     testTimeout: 120000,
     hookTimeout: 120000,
+    exclude: ['**/node_modules/**', '**/dist/**', '**/desktop-build/**', '**/release-build/**'],
   },
   resolve: {
     alias: {

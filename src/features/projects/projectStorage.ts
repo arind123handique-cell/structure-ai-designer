@@ -145,9 +145,30 @@ export class ProjectStorage {
   }
 
   public static async saveProject(project: StoredProject): Promise<void> {
-    const db = await this.getDB();
-    await db.put('projects', project);
-    // Sync to cloud in background (fire-and-forget)
+    // 1. Native Desktop PC Hard Drive Storage (if running in desktop app)
+    let savedNatively = false;
+    if (typeof window !== 'undefined' && (window as any).__STRUCTURE_AI_DESKTOP__?.saveProjectNative) {
+      try {
+        await (window as any).__STRUCTURE_AI_DESKTOP__.saveProjectNative(project);
+        savedNatively = true;
+      } catch (e) {
+        console.warn('Native desktop disk save failed:', e);
+      }
+    }
+
+    // 2. Local IndexedDB Storage
+    try {
+      const db = await this.getDB();
+      await db.put('projects', project);
+    } catch (err) {
+      console.warn('IndexedDB save failed:', err);
+      // If native disk save succeeded, do not fail the upload!
+      if (!savedNatively) {
+        throw err;
+      }
+    }
+
+    // 3. Sync to cloud in background (fire-and-forget)
     if (this.currentUid) {
       FirestoreProjectStorage.saveProject(this.currentUid, project).catch((e) =>
         console.warn('Cloud sync failed (saved locally):', e)
@@ -156,18 +177,75 @@ export class ProjectStorage {
   }
 
   public static async getProject(id: string): Promise<StoredProject | undefined> {
-    const db = await this.getDB();
-    return await db.get('projects', id);
+    if (typeof window !== 'undefined' && (window as any).__STRUCTURE_AI_DESKTOP__?.getProjectNative) {
+      try {
+        const nativeProj = await (window as any).__STRUCTURE_AI_DESKTOP__.getProjectNative(id);
+        if (nativeProj) return nativeProj;
+      } catch (e) {
+        console.warn('Native getProject failed:', e);
+      }
+    }
+
+    try {
+      const db = await this.getDB();
+      return await db.get('projects', id);
+    } catch (err) {
+      console.warn('IndexedDB getProject failed:', err);
+      return undefined;
+    }
   }
 
   public static async getAllProjects(): Promise<StoredProject[]> {
-    const db = await this.getDB();
-    return await db.getAll('projects');
+    let nativeProjects: StoredProject[] = [];
+    if (typeof window !== 'undefined' && (window as any).__STRUCTURE_AI_DESKTOP__?.getAllProjectsNative) {
+      try {
+        nativeProjects = await (window as any).__STRUCTURE_AI_DESKTOP__.getAllProjectsNative();
+      } catch (e) {
+        console.warn('Native getAllProjects failed:', e);
+      }
+    }
+
+    try {
+      const db = await this.getDB();
+      const idbProjects = await db.getAll('projects');
+      const map = new Map<string, StoredProject>();
+      for (const p of idbProjects) {
+        if (p?.metadata?.id) map.set(p.metadata.id, p);
+      }
+      for (const p of nativeProjects) {
+        if (p?.metadata?.id) {
+          const existing = map.get(p.metadata.id);
+          const existingTime = existing?.metadata?.updatedAt ? new Date(existing.metadata.updatedAt).getTime() : 0;
+          const pTime = p.metadata?.updatedAt ? new Date(p.metadata.updatedAt).getTime() : 0;
+          if (!existing || pTime >= existingTime) {
+            map.set(p.metadata.id, p);
+          }
+        }
+      }
+      return Array.from(map.values());
+    } catch (err) {
+      console.warn('IndexedDB getAllProjects failed:', err);
+      if (nativeProjects.length > 0) return nativeProjects;
+      return [];
+    }
   }
 
   public static async deleteProject(id: string): Promise<void> {
-    const db = await this.getDB();
-    await db.delete('projects', id);
+    if (typeof window !== 'undefined' && (window as any).__STRUCTURE_AI_DESKTOP__?.deleteProjectNative) {
+      try {
+        await (window as any).__STRUCTURE_AI_DESKTOP__.deleteProjectNative(id);
+      } catch (e) {
+        console.warn('Native deleteProject failed:', e);
+      }
+    }
+
+    try {
+      const db = await this.getDB();
+      await db.delete('projects', id);
+    } catch (err) {
+      console.warn('IndexedDB deleteProject failed:', err);
+    }
+
     if (this.currentUid) {
       FirestoreProjectStorage.deleteProject(this.currentUid, id).catch((e) =>
         console.warn('Cloud delete failed:', e)

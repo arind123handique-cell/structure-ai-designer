@@ -29,6 +29,8 @@ import { StaircasePlacementEngine } from '../engines/staircasePlacementEngine';
 import { ArchitecturalIdGenerator } from '../utils/idGenerator';
 import { FloorPlanLevel } from '@/features/drawings/floorPlanEngine';
 import { NormalizedStructuralModel } from '@/features/model/types';
+import { PlotSite, DEFAULT_PLOT_SITE } from '@/features/plot/plotTypes';
+import { useProjectStore } from '@/features/projects/projectStore';
 
 interface FloorPlanCanvasProps {
   activeFloorIndex: number;
@@ -118,6 +120,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
   const activeFloorId = `floor_${activeFloorIndex}`;
   const currentFloorPlan = floorPlans[activeFloorIndex] || null;
+  const plotSite = useProjectStore((s) => s.plotSite) || DEFAULT_PLOT_SITE;
 
   // Filter elements for current floor
   const floorWalls = Object.values(walls).filter((w) => w.floorId === activeFloorId);
@@ -208,6 +211,47 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     // 1. Background
     ctx.fillStyle = '#0f172a'; // Deep Navy Slate
     ctx.fillRect(0, 0, width, height);
+
+    // 1.5 Plot / Site boundary overlay (Stage 1 of the pipeline)
+    const toScreen = (wx: number, wz: number) => ({ x: wx * zoom + panX, y: -wz * zoom + panY });
+    if (plotSite && plotSite.plotLength > 0 && plotSite.plotWidth > 0) {
+      const p0 = toScreen(plotSite.plotOriginX, plotSite.plotOriginZ);
+      const p1 = toScreen(plotSite.plotOriginX + plotSite.plotLength, plotSite.plotOriginZ + plotSite.plotWidth);
+      ctx.save();
+      // Plot boundary (amber dashed)
+      ctx.strokeStyle = 'rgba(251, 191, 36, 0.85)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 6]);
+      ctx.strokeRect(p0.x, p1.y, p1.x - p0.x, p0.y - p1.y);
+      // Setback envelope (green dotted)
+      ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      const env = {
+        x0: plotSite.plotOriginX + plotSite.frontSetback,
+        z0: plotSite.plotOriginZ + plotSite.leftSetback,
+        x1: plotSite.plotOriginX + plotSite.plotLength - plotSite.rearSetback,
+        z1: plotSite.plotOriginZ + plotSite.plotWidth - plotSite.rightSetback,
+      };
+      const e0 = toScreen(env.x0, env.z0);
+      const e1 = toScreen(env.x1, env.z1);
+      ctx.strokeRect(e0.x, e1.y, e1.x - e0.x, e0.y - e1.y);
+      // Building footprint (blue fill)
+      ctx.fillStyle = 'rgba(37, 99, 235, 0.18)';
+      ctx.strokeStyle = 'rgba(96, 165, 250, 0.9)';
+      ctx.setLineDash([]);
+      ctx.lineWidth = 2;
+      const ox = plotSite.plotOriginX || 0;
+      const oz = plotSite.plotOriginZ || 0;
+      const f0 = toScreen(ox + plotSite.buildingOffsetX, oz + plotSite.buildingOffsetZ);
+      const f1 = toScreen(
+        ox + plotSite.buildingOffsetX + plotSite.buildingLength,
+        oz + plotSite.buildingOffsetZ + plotSite.buildingWidth
+      );
+      ctx.fillRect(f0.x, f1.y, f1.x - f0.x, f0.y - f1.y);
+      ctx.strokeRect(f0.x, f1.y, f1.x - f0.x, f0.y - f1.y);
+      ctx.restore();
+    }
 
     // 2. Cartesian Grid
     if (settings.gridSettings.enabled) {
@@ -1039,6 +1083,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     wallThickness,
     doorWidth,
     windowWidth,
+    plotSite,
   ]);
 
   // Mouse & Pointer Event Handlers

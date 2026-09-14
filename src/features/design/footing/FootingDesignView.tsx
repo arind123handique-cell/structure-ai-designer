@@ -9,10 +9,19 @@ import { exportToCsv } from '@/utils/exportUtils';
 import { ColumnNumberingService } from '@/features/model/columnNumbering';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
 import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
+import { ManualAnalysisEngine } from '@/features/calculations/manualAnalysisEngine';
+import { AnalysisSourceToggle } from '@/components/common/AnalysisSourceToggle';
 import { Play, Building, FileText, Download, X, Save, CheckCircle2, Eye, EyeOff, Layers } from 'lucide-react';
 
 export const FootingDesignView: React.FC = () => {
-  const { activeModel, activeProject, saveFootingDesigns } = useProjectStore();
+  const {
+    activeModel,
+    activeProject,
+    saveFootingDesigns,
+    getSectionAnalysisSource,
+    sectionAnalysisSources,
+    designAnalysisSource,
+  } = useProjectStore();
 
   const [designedFootings, setDesignedFootings] = useState<Map<number, FootingDesignOutput>>(() => {
     if (activeProject?.savedFootingDesigns) {
@@ -60,6 +69,8 @@ export const FootingDesignView: React.FC = () => {
     });
   }, [activeModel, columnMapping]);
 
+  const footingAnalysisSource = getSectionAnalysisSource('footings');
+
   const handleDesignAll = () => {
     if (!activeModel || !activeProject) return;
     setIsDesigning(true);
@@ -67,22 +78,43 @@ export const FootingDesignView: React.FC = () => {
     const fck = activeProject.metadata.designSettings.concreteGrade === 'M30' ? 30 : 25;
     const fy = activeProject.metadata.designSettings.steelGrade === 'Fe500D' ? 500 : 500;
 
+    const analysisSource = getSectionAnalysisSource('footings');
+    const manualSummary = analysisSource === 'MANUAL' ? ManualAnalysisEngine.computeReview(activeModel, 'GRAVITY_COMBO') : null;
+
+    // Pre-map column to each support node
+    const supToColMap = new Map<number, number>();
+    for (const m of activeModel.members.values()) {
+      if (m.classification === 'COLUMN') {
+        if (activeModel.supports.has(m.startNodeId)) supToColMap.set(m.startNodeId, m.id);
+        if (activeModel.supports.has(m.endNodeId)) supToColMap.set(m.endNodeId, m.id);
+      }
+    }
+
     const newMap = new Map<number, FootingDesignOutput>();
 
     for (const sup of supportNodes) {
-      const reactions = activeModel.reactions.filter((r) => r.nodeId === sup.nodeId);
       let maxFy = 650;
       let maxMx = 25;
       let maxMy = 15;
       let govLC = 1;
 
-      if (reactions.length > 0) {
-        for (const r of reactions) {
-          if (r.fy > maxFy) {
-            maxFy = r.fy;
-            maxMx = r.mx;
-            maxMy = r.my;
-            govLC = r.loadCaseId;
+      if (analysisSource === 'MANUAL') {
+        const colId = supToColMap.get(sup.nodeId);
+        const mRow = colId ? manualSummary?.rows.find((r) => r.memberId === colId) : null;
+        maxFy = mRow ? mRow.manualAxial : 650;
+        maxMx = Math.max(15, parseFloat((0.03 * maxFy).toFixed(1)));
+        maxMy = Math.max(10, parseFloat((0.02 * maxFy).toFixed(1)));
+        govLC = 9; // Manual Statics (1.5 DL + 1.5 LL)
+      } else {
+        const reactions = activeModel.reactions.filter((r) => r.nodeId === sup.nodeId);
+        if (reactions.length > 0) {
+          for (const r of reactions) {
+            if (r.fy > maxFy) {
+              maxFy = r.fy;
+              maxMx = r.mx;
+              maxMy = r.my;
+              govLC = r.loadCaseId;
+            }
           }
         }
       }
@@ -108,10 +140,10 @@ export const FootingDesignView: React.FC = () => {
   };
 
   React.useEffect(() => {
-    if (designedFootings.size === 0 && supportNodes.length > 0) {
+    if (supportNodes.length > 0) {
       handleDesignAll();
     }
-  }, [supportNodes.length, sbc]);
+  }, [supportNodes.length, sbc, footingAnalysisSource]);
 
   const rows = useMemo(() => {
     return supportNodes.map((sup) => {
@@ -293,7 +325,7 @@ export const FootingDesignView: React.FC = () => {
         variant="card"
       >
         <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
+        <div className="space-y-2">
           <h2 className="font-mono text-base font-bold text-deep-navy flex items-center gap-2">
             <Building className="w-5 h-5 text-amber-600" />
             IS 456:2000 ISOLATED & COMBINED PAD FOOTING DESIGN ENGINE
@@ -301,6 +333,7 @@ export const FootingDesignView: React.FC = () => {
           <p className="text-xs text-slate-500 mt-0.5">
             Allowable soil bearing capacity, no-tension eccentricity checks, two-way punching shear, one-way beam shear, and orthogonal bottom reinforcement.
           </p>
+          <AnalysisSourceToggle section="footings" sectionLabel="Footings" onSourceChange={() => handleDesignAll()} />
         </div>
 
         <div className="flex items-center gap-3">

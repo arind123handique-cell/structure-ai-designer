@@ -58,30 +58,34 @@ export class ANLParser {
     for (const line of tokenizedLines) {
       const upper = line.text.toUpperCase();
 
-      if (upper.startsWith('JOINT COORDINATES')) {
+      if (/^JOINT\s+COORD/i.test(upper)) {
         currentSection = 'JOINTS';
         continue;
-      } else if (upper.startsWith('MEMBER INCIDENCES')) {
+      } else if (/^MEMBER\s+INC/i.test(upper)) {
         currentSection = 'MEMBER_INC';
         continue;
-      } else if (upper.startsWith('ELEMENT INCIDENCES SHELL') || upper.startsWith('ELEMENT INCIDENCES')) {
+      } else if (/^(ELEMENT|PLATE|SHELL)\s+INC/i.test(upper)) {
         currentSection = 'ELEMENT_INC';
         continue;
-      } else if (upper.startsWith('MEMBER PROPERTY')) {
+      } else if (/^MEMBER\s+PROP/i.test(upper)) {
         currentSection = 'MEMBER_PROP';
         continue;
-      } else if (upper.startsWith('ELEMENT PROPERTY')) {
+      } else if (/^(ELEMENT|PLATE|SHELL)\s+PROP/i.test(upper)) {
         currentSection = 'ELEMENT_PROP';
         continue;
-      } else if (upper.startsWith('SUPPORTS')) {
+      } else if (/^SUPPORTS?\b/i.test(upper)) {
         currentSection = 'SUPPORTS';
         continue;
-      } else if (upper.startsWith('LOAD ') || upper.startsWith('LOAD COMB') || upper.startsWith('DEFINE IS1893') || upper.startsWith('DEFINE REFERENCE LOADS')) {
+      } else if (/^(LOAD\s+\d+|LOAD\s+COMB|DEFINE\s+|REFERENCE\s+LOAD)/i.test(upper)) {
         currentSection = 'LOADS';
         loadLines.push(line);
         continue;
-      } else if (upper.startsWith('PERFORM ANALYSIS') || upper.startsWith('START CONCRETE DESIGN') || upper.startsWith('PRINT ')) {
-        currentSection = 'ANALYSIS_CMDS';
+      } else if (
+        /^(PERFORM\s+ANALYSIS|START\s+CONCRETE|CONCRETE\s+DESIGN|PRINT\s+|CONSTANTS|MATERIAL|DEFINE\s+MATERIAL|START\s+GROUP|CUT\s*OFF|MEMBER\s+RELEASE|MEMBER\s+OFFSET|MEMBER\s+TRUSS|MEMBER\s+TENSION|PARAMETRIC|SURFACE|FINISH|UNIT)/i.test(
+          upper
+        )
+      ) {
+        currentSection = 'OTHER_CMDS';
       }
 
       switch (currentSection) {

@@ -30,6 +30,7 @@ import {
   Box,
   HardHat,
   FolderPlus,
+  GitCompare,
 } from 'lucide-react';
 import { ConcreteVolumeEngine } from '@/features/calculations/concreteVolumeEngine';
 
@@ -446,6 +447,28 @@ export const ProjectDashboard: React.FC = () => {
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Axial Pu, shear Vy, bending moments
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div
+            onClick={() => setActiveView('analysis-review')}
+            className="p-4 bg-white border border-indigo-200/80 rounded-xl hover:shadow-xs hover:border-indigo-400 transition-all cursor-pointer group bg-gradient-to-br from-white to-indigo-50/30"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                <GitCompare className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <h3 className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">
+                    Analysis Review
+                  </h3>
+                  <span className="px-1.5 py-0.2 bg-indigo-600 text-white rounded text-[9px] font-bold">NEW</span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Compare STAAD ANL vs In-App FEM forces
                 </p>
               </div>
             </div>

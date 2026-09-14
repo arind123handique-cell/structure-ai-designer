@@ -8,10 +8,19 @@ import { DataTable, ColumnDef } from '@/components/tables/DataTable';
 import { exportToCsv } from '@/utils/exportUtils';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
 import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
+import { ManualAnalysisEngine } from '@/features/calculations/manualAnalysisEngine';
+import { AnalysisSourceToggle } from '@/components/common/AnalysisSourceToggle';
 import { Play, Compass, FileText, Download, X, Layers, ShieldCheck, Activity, Save, CheckCircle2, Eye, EyeOff, Box } from 'lucide-react';
 
 export const GradeBeamDesignView: React.FC = () => {
-  const { activeModel, activeProject, saveGradeBeamDesigns } = useProjectStore();
+  const {
+    activeModel,
+    activeProject,
+    saveGradeBeamDesigns,
+    getSectionAnalysisSource,
+    sectionAnalysisSources,
+    designAnalysisSource,
+  } = useProjectStore();
 
   const [designedGradeBeams, setDesignedGradeBeams] = useState<GradeBeamDesignOutput[]>(() => activeProject?.savedGradeBeamDesigns || []);
   const [selectedReport, setSelectedReport] = useState<DetailedCalculationReport | null>(null);
@@ -26,6 +35,8 @@ export const GradeBeamDesignView: React.FC = () => {
   const [showKpi, setShowKpi] = useState(true);
   const [showTable, setShowTable] = useState(true);
 
+  const gradeBeamAnalysisSource = getSectionAnalysisSource('gradebeams');
+
   const handleDesignAll = () => {
     if (!activeModel || !activeProject) return;
     setIsDesigning(true);
@@ -33,7 +44,29 @@ export const GradeBeamDesignView: React.FC = () => {
     const fck = activeProject.metadata.designSettings.concreteGrade === 'M30' ? 30 : 25;
     const fy = activeProject.metadata.designSettings.steelGrade === 'Fe500D' ? 500 : 500;
 
-    const results = GradeBeamDesignEngine.discoverAndDesignAll(activeModel, fck, fy);
+    const analysisSource = getSectionAnalysisSource('gradebeams');
+    let customReactionMap: Map<number, number> | undefined = undefined;
+
+    if (analysisSource === 'MANUAL') {
+      const manualSummary = ManualAnalysisEngine.computeReview(activeModel, 'GRAVITY_COMBO');
+      customReactionMap = new Map<number, number>();
+
+      const supToColMap = new Map<number, number>();
+      for (const m of activeModel.members.values()) {
+        if (m.classification === 'COLUMN') {
+          if (activeModel.supports.has(m.startNodeId)) supToColMap.set(m.startNodeId, m.id);
+          if (activeModel.supports.has(m.endNodeId)) supToColMap.set(m.endNodeId, m.id);
+        }
+      }
+
+      for (const [nodeId] of activeModel.supports) {
+        const colId = supToColMap.get(nodeId);
+        const mRow = colId ? manualSummary.rows.find((r) => r.memberId === colId) : null;
+        customReactionMap.set(nodeId, mRow ? mRow.manualAxial : 650);
+      }
+    }
+
+    const results = GradeBeamDesignEngine.discoverAndDesignAll(activeModel, fck, fy, customReactionMap);
     setDesignedGradeBeams(results);
     setIsDesigning(false);
   };
@@ -53,10 +86,10 @@ export const GradeBeamDesignView: React.FC = () => {
   };
 
   React.useEffect(() => {
-    if (designedGradeBeams.length === 0 && activeModel) {
+    if (activeModel) {
       handleDesignAll();
     }
-  }, [activeModel]);
+  }, [activeModel, gradeBeamAnalysisSource]);
 
   const columns: ColumnDef<GradeBeamDesignOutput>[] = [
     {
@@ -267,7 +300,7 @@ export const GradeBeamDesignView: React.FC = () => {
         variant="card"
       >
         <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
+        <div className="space-y-2">
           <h2 className="font-mono text-base font-bold text-deep-navy flex items-center gap-2">
             <Compass className="w-5 h-5 text-sky-600" />
             IS 13920:2016 & IS 2911 FOUNDATION GRADE / TIE BEAM DESIGN ENGINE
@@ -275,6 +308,7 @@ export const GradeBeamDesignView: React.FC = () => {
           <p className="text-xs text-slate-500 mt-0.5">
             Ductile seismic foundation ties connecting pile caps for differential settlement, axial tension (10% Pu), plinth brick wall loads, and 2D end confinement zones.
           </p>
+          <AnalysisSourceToggle section="gradebeams" sectionLabel="Grade Beams" onSourceChange={() => handleDesignAll()} />
         </div>
 
         <div className="flex items-center gap-2">

@@ -24,7 +24,7 @@ export class MemberParser {
         const startNodeId = parseInt(tokens[i + 1], 10);
         const endNodeId = parseInt(tokens[i + 2], 10);
 
-        if (!isNaN(id) && !isNaN(startNodeId) && !isNaN(endNodeId)) {
+        if (!isNaN(id) && id > 0 && !isNaN(startNodeId) && startNodeId > 0 && !isNaN(endNodeId) && endNodeId > 0 && startNodeId !== endNodeId) {
           let length = 0;
           const startNode = nodes.get(startNodeId);
           const endNode = nodes.get(endNodeId);
@@ -71,7 +71,13 @@ export class MemberParser {
         const n2 = parseInt(tokens[idx + 2], 10);
         const n3 = parseInt(tokens[idx + 3], 10);
 
-        if (isNaN(id) || isNaN(n1) || isNaN(n2) || isNaN(n3)) {
+        if (isNaN(id) || id <= 0 || isNaN(n1) || n1 <= 0 || isNaN(n2) || n2 <= 0 || isNaN(n3) || n3 <= 0) {
+          idx++;
+          continue;
+        }
+
+        // If nodes map is available, ensure nodes exist
+        if (nodes.size > 0 && (!nodes.has(n1) || !nodes.has(n2) || !nodes.has(n3))) {
           idx++;
           continue;
         }
@@ -82,8 +88,7 @@ export class MemberParser {
         // Check if there's a 4th node
         if (idx < tokens.length) {
           const possibleN4 = parseInt(tokens[idx], 10);
-          // If the next token is a valid node in our model and not an element ID in next sequence
-          if (!isNaN(possibleN4) && nodes.has(possibleN4)) {
+          if (!isNaN(possibleN4) && possibleN4 > 0 && (nodes.size === 0 || nodes.has(possibleN4))) {
             nodeIds.push(possibleN4);
             idx++;
           }

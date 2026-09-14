@@ -5,6 +5,8 @@ import { EtabsToolbar, StoreyElevationItem } from './components/EtabsToolbar';
 import { EtabsToolPalette, EtabsDrawTool } from './components/EtabsToolPalette';
 import { EtabsModelExplorer } from './components/EtabsModelExplorer';
 import { EtabsPlanCanvas } from './components/EtabsPlanCanvas';
+import { EtabsElevationCanvas } from './components/EtabsElevationCanvas';
+import { FrameElevationEngine } from './frameElevationEngine';
 import {
   BuildingWizardModal,
   SaveProjectModal,
@@ -75,6 +77,8 @@ export const EtabsStudioView: React.FC = () => {
   const [isAutoSeismicOpen, setIsAutoSeismicOpen] = useState(false);
   const [isTributaryOpen, setIsTributaryOpen] = useState(false);
   const [diagramType, setDiagramType] = useState<'NONE' | 'BMD' | 'SFD'>('NONE');
+  const [viewMode, setViewMode] = useState<'PLAN' | 'ELEVATION'>('PLAN');
+  const [selectedGridId, setSelectedGridId] = useState<string>('1');
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
@@ -158,6 +162,18 @@ export const EtabsStudioView: React.FC = () => {
       }
     }
   }, [availableElevations]);
+
+  // Available 2D Elevation Frame Grids
+  const availableGrids = useMemo(() => {
+    return FrameElevationEngine.getAvailableGrids(activeModel);
+  }, [activeModel]);
+
+  // Ensure selectedGridId remains valid when model grids change
+  useEffect(() => {
+    if (availableGrids.length > 0 && !availableGrids.some((g) => g.id === selectedGridId)) {
+      setSelectedGridId(availableGrids[0].id);
+    }
+  }, [availableGrids, selectedGridId]);
 
   // Keyboard shortcuts for tool selection and delete
   // Delete Selection
@@ -366,9 +382,16 @@ export const EtabsStudioView: React.FC = () => {
         onRunDesign={() => setIsDesignOpen(true)}
         onSave={() => setIsSaveOpen(true)}
         onExportCsv={handleExportCsv}
-        onToggle3D={() => {}}
-        onTogglePlan={() => {}}
-        onToggleSplit={() => {}}
+        onToggle3D={() => setActiveView('3d-model')}
+        onTogglePlan={() => {
+          setActiveView('etabs-studio');
+          setViewMode('PLAN');
+        }}
+        onToggleElevation={() => {
+          setActiveView('etabs-studio');
+          setViewMode('ELEVATION');
+        }}
+        onToggleSplit={() => setActiveView('3d-model')}
         onOpenSectionsModal={() => setIsSectionsOpen(true)}
         onOpenLoadsModal={() => setIsLoadsOpen(true)}
         onOpenDiaphragmsModal={() => setIsLoadsOpen(true)}
@@ -397,6 +420,13 @@ export const EtabsStudioView: React.FC = () => {
         onOpenWizard={() => setIsWizardOpen(true)}
         onSave={() => setIsSaveOpen(true)}
         isAnalyzing={isAnalyzing}
+        viewMode={viewMode}
+        onChangeViewMode={setViewMode}
+        selectedGridId={selectedGridId}
+        onChangeSelectedGridId={setSelectedGridId}
+        availableGrids={availableGrids}
+        diagramType={diagramType}
+        onChangeDiagramType={setDiagramType}
       />
 
       {/* Main Workspace Area (Tool Palette + Model Explorer + 2D Floor Plan Canvas + Inspector) */}
@@ -449,6 +479,22 @@ export const EtabsStudioView: React.FC = () => {
                 </button>
               </div>
             </div>
+          ) : viewMode === 'ELEVATION' ? (
+            /* Full-Width Smooth 2D Frame Elevation Canvas with BMD & SFD Diagrams */
+            <div className="w-full h-full relative">
+              <EtabsElevationCanvas
+                model={activeModel}
+                selectedGridId={selectedGridId}
+                onChangeGridId={setSelectedGridId}
+                diagramType={diagramType}
+                onSetDiagramType={setDiagramType}
+                onBackToPlan={() => setViewMode('PLAN')}
+                selectedMemberId={selectedMemberId}
+                onSelectMember={(id) => selectMember(id)}
+                selectedNodeId={selectedNodeId}
+                onSelectNode={(id) => selectNode(id)}
+              />
+            </div>
           ) : (
             /* Full-Width Smooth 2D Story Plan Canvas */
             <div className="w-full h-full relative">
@@ -471,6 +517,10 @@ export const EtabsStudioView: React.FC = () => {
                 onSelectNode={(id) => selectNode(id)}
                 diagramType={diagramType}
                 onSetDiagramType={setDiagramType}
+                onOpenElevation={(gridId) => {
+                  if (gridId) setSelectedGridId(gridId);
+                  setViewMode('ELEVATION');
+                }}
               />
             </div>
           )}

@@ -22,6 +22,8 @@ import { IS13920WeakBeamStrongColumn } from '@/features/codes/is13920/weakBeamSt
 import { ColumnNumberingService } from '@/features/model/columnNumbering';
 import { ColumnBarArrangement, ColumnRebarOption } from './barArrangement';
 import { CalculationPdfService } from '@/features/calculations/calculationPdfService';
+import { ManualAnalysisEngine } from '@/features/calculations/manualAnalysisEngine';
+import { AnalysisSourceToggle } from '@/components/common/AnalysisSourceToggle';
 import {
   Play,
   Layers,
@@ -41,6 +43,18 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react';
+
+/** Parse a section label like "450 × 600 mm" or "600 × 450 mm (Rotated)" → breadth in mm. */
+function parseBreadthFromDimensions(label: string | undefined): number {
+  const m = String(label || '').match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
+  return m ? parseFloat(m[1]) : 0;
+}
+
+/** Parse a section label like "450 × 600 mm" → depth (second number) in mm. */
+function parseDepthFromDimensions(label: string | undefined): number {
+  const m = String(label || '').match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
+  return m ? parseFloat(m[2]) : 0;
+}
 
 const QUICK_COL_SIZES = [
   { label: '300 × 450 mm', zd: 0.30, yd: 0.45 },
@@ -70,6 +84,9 @@ export const ColumnDesignView: React.FC = () => {
     rotateColumnOrientation,
     autoOrientAllColumns,
     saveColumnDesigns,
+    getSectionAnalysisSource,
+    sectionAnalysisSources,
+    designAnalysisSource,
   } = useProjectStore();
 
   const [designedColumns, setDesignedColumns] = useState<Map<number, ColumnDesignOutput>>(new Map());
@@ -172,6 +189,10 @@ export const ColumnDesignView: React.FC = () => {
     const cover = activeProject.metadata.designSettings.clearCoverColumn || 40;
     const allowed = allowedColumnRebarDiameters || [12, 16, 20, 25];
 
+    const analysisSource = getSectionAnalysisSource('columns');
+    const manualSummary = analysisSource === 'MANUAL' ? ManualAnalysisEngine.computeReview(activeModel, 'GRAVITY_COMBO') : null;
+    const manualMap = manualSummary ? new Map(manualSummary.rows.filter((r) => r.memberType === 'COLUMN').map((r) => [r.memberId, r])) : null;
+
     // Design each column individually with its own section and forces
     const newMap = new Map<number, ColumnDesignOutput>();
 
@@ -182,32 +203,34 @@ export const ColumnDesignView: React.FC = () => {
       let memberMuy = 0;
       let memberGovLC = 1;
 
-      const forces = activeModel.memberForces.filter((f) => f.memberId === col.id);
-      for (const f of forces) {
-        if (Math.abs(f.axial) > memberPu) {
-          memberPu = Math.abs(f.axial);
-          memberGovLC = f.loadCaseId;
-        }
-        if (Math.abs(f.mz) > memberMux) memberMux = Math.abs(f.mz);
-        if (Math.abs(f.my) > memberMuy) memberMuy = Math.abs(f.my);
-      }
+      const b = Math.round((col.section.zd || 0.45) * 1000);
+      const D = Math.round((col.section.yd || 0.55) * 1000);
 
-      const startSup = activeModel.supports.get(col.startNodeId);
-      const endSup = activeModel.supports.get(col.endNodeId);
-      const supNodeId = startSup ? col.startNodeId : endSup ? col.endNodeId : null;
-      if (supNodeId) {
-        const reactions = activeModel.reactions.filter((r) => r.nodeId === supNodeId);
-        for (const r of reactions) {
-          if (r.fy > memberPu) {
-            memberPu = r.fy;
-            memberGovLC = r.loadCaseId;
+      if (analysisSource === 'MANUAL') {
+        const mRow = manualMap?.get(col.id);
+        memberPu = mRow ? mRow.manualAxial : 650;
+        // Minimum eccentricity per IS 456 Cl 25.4: e_min = max(20mm, L/500 + D/30)
+        const eminX = Math.max(0.02, memberHeight / 500 + (D / 1000) / 30);
+        const eminY = Math.max(0.02, memberHeight / 500 + (b / 1000) / 30);
+        memberMux = parseFloat((memberPu * eminX).toFixed(1));
+        memberMuy = parseFloat((memberPu * eminY).toFixed(1));
+        memberGovLC = 9; // Manual Tributary Statics (IS 456 / SP 16 1.5 DL + 1.5 LL)
+      } else {
+        const forces = activeModel.memberForces.filter((f) => f.memberId === col.id);
+        for (const f of forces) {
+          if (Math.abs(f.axial) > memberPu) {
+            memberPu = Math.abs(f.axial);
+            memberGovLC = f.loadCaseId;
           }
+          if (Math.abs(f.mz) > memberMux) memberMux = Math.abs(f.mz);
+          if (Math.abs(f.my) > memberMuy) memberMuy = Math.abs(f.my);
         }
-      }
-      if (memberPu <= 0) {
-        const colInfo = columnMapping.get(col.id);
-        if (colInfo?.supportNodeId) {
-          const reactions = activeModel.reactions.filter((r) => r.nodeId === colInfo.supportNodeId);
+
+        const startSup = activeModel.supports.get(col.startNodeId);
+        const endSup = activeModel.supports.get(col.endNodeId);
+        const supNodeId = startSup ? col.startNodeId : endSup ? col.endNodeId : null;
+        if (supNodeId) {
+          const reactions = activeModel.reactions.filter((r) => r.nodeId === supNodeId);
           for (const r of reactions) {
             if (r.fy > memberPu) {
               memberPu = r.fy;
@@ -215,11 +238,20 @@ export const ColumnDesignView: React.FC = () => {
             }
           }
         }
+        if (memberPu <= 0) {
+          const colInfo = columnMapping.get(col.id);
+          if (colInfo?.supportNodeId) {
+            const reactions = activeModel.reactions.filter((r) => r.nodeId === colInfo.supportNodeId);
+            for (const r of reactions) {
+              if (r.fy > memberPu) {
+                memberPu = r.fy;
+                memberGovLC = r.loadCaseId;
+              }
+            }
+          }
+        }
+        if (memberPu <= 0) memberPu = 650;
       }
-      if (memberPu <= 0) memberPu = 650;
-
-      const b = Math.round((col.section.zd || 0.45) * 1000);
-      const D = Math.round((col.section.yd || 0.55) * 1000);
 
       let memberDesign = ColumnDesignEngine.design({
         memberId: col.id,
@@ -251,14 +283,16 @@ export const ColumnDesignView: React.FC = () => {
 
     setDesignedColumns(newMap);
     setIsDesigning(false);
-  }, [activeModel, activeProject, allColumns, customRebarOverrides, allowedColumnRebarDiameters, columnMapping]);
+  }, [activeModel, activeProject, allColumns, customRebarOverrides, allowedColumnRebarDiameters, columnMapping, getSectionAnalysisSource, sectionAnalysisSources, designAnalysisSource]);
 
-  // Auto-run if empty or on column update
+  const columnAnalysisSource = getSectionAnalysisSource('columns');
+
+  // Auto-run if empty or on column update or analysis source change
   React.useEffect(() => {
     if (allColumns.length > 0) {
       handleDesignAll();
     }
-  }, [allColumns, handleDesignAll]);
+  }, [allColumns, columnAnalysisSource, handleDesignAll]);
 
   // 1-Click Economical Auto-Design Engine for Columns
   const handleRunAutoDesign = () => {
@@ -487,6 +521,8 @@ export const ColumnDesignView: React.FC = () => {
       wbsc: any;
       design: any;
       count: number;
+      b_mm: number;
+      D_mm: number;
     }[] = [];
 
     for (const row of allRows) {
@@ -499,6 +535,10 @@ export const ColumnDesignView: React.FC = () => {
         wbsc: row.wbsc,
         design: row.design,
         count: 1,
+        // Section dimensions are required by the CONCRETE volume cell — carry them
+        // through the grouping so concrete volume never renders as NaN.
+        b_mm: row.b_mm,
+        D_mm: row.D_mm,
       });
     }
 
@@ -620,10 +660,12 @@ export const ColumnDesignView: React.FC = () => {
       sortable: true,
       align: 'right',
       cell: (r) => {
-        const vol = (r.b_mm / 1000) * (r.D_mm / 1000) * r.height * (r.count || 1);
+        const b = Number.isFinite(r.b_mm) ? r.b_mm : parseBreadthFromDimensions(r.dimensions);
+        const D = Number.isFinite(r.D_mm) ? r.D_mm : parseDepthFromDimensions(r.dimensions);
+        const vol = (b / 1000) * (D / 1000) * (r.height || 0) * (r.count || 1);
         return (
           <span className="font-mono font-bold text-sky-700">
-            {vol.toFixed(3)} m³
+            {Number.isFinite(vol) ? `${vol.toFixed(3)} m³` : '—'}
           </span>
         );
       },
@@ -632,16 +674,23 @@ export const ColumnDesignView: React.FC = () => {
     {
       header: 'AXIAL Pu (kN)',
       align: 'right',
-      cell: (r) => (
-        <div className="font-mono text-right">
-          <span className="font-bold text-slate-900 block">
-            {r.design ? `${r.design.factoredDemandPu.toFixed(1)} kN` : '—'}
-          </span>
-          <span className="text-[10px] text-slate-500">
-            Cap: {r.design ? `${Math.round(r.design.axialCheck.Pu_cap_short)} kN` : '—'}
-          </span>
-        </div>
-      ),
+      cell: (r) => {
+        const isManual = columnAnalysisSource === 'MANUAL';
+        return (
+          <div className="font-mono text-right">
+            <span className="font-bold text-slate-900 block">
+              {r.design ? `${r.design.factoredDemandPu.toFixed(1)} kN` : '—'}
+            </span>
+            <span className="text-[10px] text-slate-500 flex items-center justify-end gap-1">
+              {isManual ? (
+                <span className="text-emerald-700 font-semibold">📐 Manual Trib</span>
+              ) : (
+                <span>Cap: {r.design ? `${Math.round(r.design.axialCheck.Pu_cap_short)} kN` : '—'}</span>
+              )}
+            </span>
+          </div>
+        );
+      },
       width: '130px',
     },
     {
@@ -856,10 +905,11 @@ export const ColumnDesignView: React.FC = () => {
         contentClassName="p-4"
       >
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
+          <div className="space-y-2">
             <p className="text-xs text-slate-500 mt-0.5">
               Biaxial bending interaction (Bresler method), 1-click economical auto-designer, mixed rebar (4-T16 + 4-T12, 4-T20 + 4-T16), 90° orientation optimization, P-M curves, and ductile confining ties.
             </p>
+            <AnalysisSourceToggle section="columns" sectionLabel="Columns" onSourceChange={() => handleDesignAll()} />
           </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -1016,7 +1066,12 @@ export const ColumnDesignView: React.FC = () => {
           <div className="flex items-center gap-2 font-mono text-xs bg-slate-100 px-3 py-1 rounded border border-ui-border">
             <span className="text-slate-500 font-semibold">Total Columns Concrete:</span>
             <span className="font-bold text-sky-700">
-              {rows.reduce((sum: number, r: any) => sum + (r.b_mm / 1000) * (r.D_mm / 1000) * r.height * (r.count || 1), 0).toFixed(2)} m³
+              {rows.reduce((sum: number, r: any) => {
+              const b = Number.isFinite(r.b_mm) ? r.b_mm : parseBreadthFromDimensions(r.dimensions);
+              const D = Number.isFinite(r.D_mm) ? r.D_mm : parseDepthFromDimensions(r.dimensions);
+              const v = (b / 1000) * (D / 1000) * (r.height || 0) * (r.count || 1);
+              return sum + (Number.isFinite(v) ? v : 0);
+            }, 0).toFixed(2)} m³
             </span>
           </div>
         </div>
