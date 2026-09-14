@@ -494,8 +494,8 @@ export class BeamSectionSheetEngine {
     const modelW = Math.max(0.1, maxX - minX);
     const modelH = Math.max(0.1, maxZ - minZ);
 
-    // Scale to fit with 85% fill (matches PDF export)
-    const scale = Math.min(drawW / (modelW * 1000), drawH / (modelH * 1000)) * 0.85;
+    // 0.82 fill — matches FloorPlanSvg exactly
+    const scale = Math.min(drawW / (modelW * 1000), drawH / (modelH * 1000)) * 0.82;
 
     const planCenterX = drawX0 + drawW / 2;
     const planCenterY = drawY0 + drawH / 2;
@@ -505,24 +505,28 @@ export class BeamSectionSheetEngine {
     const toX = (x: number) => planCenterX + (x - modelCenterX) * 1000 * scale;
     const toY = (z: number) => planCenterY + (z - modelCenterZ) * 1000 * scale;
 
-    // 1. Grid Lines (dashed, with circles and labels at ends — matches PDF)
+    // 1. Grid Lines — dashed centerlines with circle bubbles at both ends
     const gridLinesX = level.gridLinesX || [];
     gridLinesX.forEach((gl) => {
       const gx = toX(gl.coord);
-      const gz1 = toY(minZ - 0.5);
-      const gz2 = toY(maxZ + 0.5);
+      const gz1 = toY(minZ - 1.0);
+      const gz2 = toY(maxZ + 1.0);
       b.line(LAYER_GRID.name, gx, gz1, gx, gz2);
-      b.circle(LAYER_GRID.name, gx, gz1 - 350, 300, false);
+      b.circle(LAYER_GRID.name, gx, gz1 - 350, 300, true);
       b.text(LAYER_GRID.name, gx, gz1 - 350, gl.id, TEXT_H.MARK, { anchor: 'middle', bold: true });
+      b.circle(LAYER_GRID.name, gx, gz2 + 350, 300, true);
+      b.text(LAYER_GRID.name, gx, gz2 + 350, gl.id, TEXT_H.MARK, { anchor: 'middle', bold: true });
     });
     const gridLinesZ = level.gridLinesZ || [];
     gridLinesZ.forEach((gl) => {
       const gy = toY(gl.coord);
-      const gx1 = toX(minX - 0.5);
-      const gx2 = toX(maxX + 0.5);
+      const gx1 = toX(minX - 1.0);
+      const gx2 = toX(maxX + 1.0);
       b.line(LAYER_GRID.name, gx1, gy, gx2, gy);
-      b.circle(LAYER_GRID.name, gx1 - 350, gy, 300, false);
+      b.circle(LAYER_GRID.name, gx1 - 350, gy, 300, true);
       b.text(LAYER_GRID.name, gx1 - 350, gy, gl.id, TEXT_H.MARK, { anchor: 'middle', bold: true });
+      b.circle(LAYER_GRID.name, gx2 + 350, gy, 300, true);
+      b.text(LAYER_GRID.name, gx2 + 350, gy, gl.id, TEXT_H.MARK, { anchor: 'middle', bold: true });
     });
 
     // 2. Bay Dimension Chains (between grid lines — matches PDF)
@@ -554,7 +558,7 @@ export class BeamSectionSheetEngine {
       slabs.forEach((s) => {
         if (s.points.length >= 3) {
           const pts: [number, number][] = s.points.map((p) => [toX(p.x), toY(p.z)]);
-          b.poly(LAYER_CONCRETE.name, pts, true);
+          b.solid(LAYER_CONCRETE.name, pts);
           const cx = s.points.reduce((acc, p) => acc + toX(p.x), 0) / s.points.length;
           const cy = s.points.reduce((acc, p) => acc + toY(p.z), 0) / s.points.length;
           b.text(LAYER_LABELS.name, cx, cy - 200, s.label, TEXT_H.CALLOUT - 20, { anchor: 'middle', bold: true });
@@ -579,13 +583,18 @@ export class BeamSectionSheetEngine {
       const ny = dx / len;
       const hw = Math.max(4, ((bm.width || 0.23) / 2) * 1000 * scale);
 
-      b.line(LAYER_BEAM.name, x1 + nx * hw, y1 + ny * hw, x2 + nx * hw, y2 + ny * hw);
-      b.line(LAYER_BEAM.name, x1 - nx * hw, y1 - ny * hw, x2 - nx * hw, y2 - ny * hw);
+      // Filled polygon (4-point double-line rectangle) — matches FloorPlanSvg
+      b.solid(LAYER_BEAM.name, [
+        [x1 + nx * hw, y1 + ny * hw],
+        [x2 + nx * hw, y2 + ny * hw],
+        [x2 - nx * hw, y2 - ny * hw],
+        [x1 - nx * hw, y1 - ny * hw],
+      ]);
 
       const midX = (x1 + x2) / 2;
       const midY = (y1 + y2) / 2;
       const label = beamLabels.get(bm.memberId) || bm.label || `B${bm.memberId}`;
-      if (len >= 15) {
+      if (len >= 25) {
         b.text(LAYER_BEAM.name, midX, midY, label, TEXT_H.CALLOUT - 10, { anchor: 'middle', bold: true });
       }
     });
