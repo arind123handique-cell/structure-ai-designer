@@ -757,7 +757,7 @@ export class BeamSectionSheetEngine {
       pages.push(curPage);
     }
 
-    // PAGE 1: Beam Layout Plan (Plan View)
+    // PAGE 1: Beam Layout Plan — rendered as a viewport of FloorPlanSvg
     const sheets: DrawingSheet[] = [];
     const layoutBuilder = new SheetBuilder(BEAM_SECTION_SHEET_LAYERS);
     drawA3BorderAndTitleBlock(layoutBuilder, {
@@ -767,8 +767,8 @@ export class BeamSectionSheetEngine {
       project: input.project,
     });
     drawA3GeneralNotes(layoutBuilder);
-    this.drawBeamLayoutPlan(layoutBuilder, level, beamLabels);
-    sheets.push(layoutBuilder.build({
+    // No drawBeamLayoutPlan — FloorPlanSvg is embedded as a viewport by DrawingSheetSvg
+    const planSheet = layoutBuilder.build({
       sheetNumber: `STR-${200 + (level.levelIndex || 0)}-PLAN`,
       title: `${level.levelName.toUpperCase()} BEAM LAYOUT PLAN`,
       subtitle: `${designs.length} beams · Plan View`,
@@ -778,7 +778,8 @@ export class BeamSectionSheetEngine {
         'All dimensions in mm',
         'Beam labels shown as B1, B2, B3... (per floor)',
       ],
-    }));
+    });
+    sheets.push(planSheet);
 
     // SUBSEQUENT PAGES: Beam Longitudinal Sections
     const totalPages = Math.max(1, pages.length);

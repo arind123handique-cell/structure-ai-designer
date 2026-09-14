@@ -40,7 +40,9 @@ export type SheetPrimitive =
       anchor?: SheetAnchor;
       underline?: boolean;
       bold?: boolean;
-    };
+    }
+  /** Embedded raster image (data URI or URL). Used for viewporting existing SVG components. */
+  | { t: 'image'; layer: string; x: number; y: number; w: number; h: number; href: string };
 
 export interface SheetBounds {
   minX: number;
@@ -278,6 +280,12 @@ export class SheetBuilder {
       [x - size * Math.cos(angle) - half * Math.sin(angle), y - size * Math.sin(angle) + half * Math.cos(angle)],
     ];
     return this.solid(layer, pts);
+  }
+
+  /** Embed a raster image (data URI or URL) at the given position and size. */
+  public image(layer: string, x: number, y: number, w: number, h: number, href: string) {
+    this.prims.push({ t: 'image', layer: this.use(layer), x, y, w, h, href });
+    return this;
   }
 
   /**

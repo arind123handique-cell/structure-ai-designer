@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useId } from 'react';
 import { DrawingSheet, SheetPrimitive, SheetBounds, layerStroke } from './drawingSheet';
 
 interface DrawingSheetSvgProps {
@@ -14,6 +14,12 @@ interface DrawingSheetSvgProps {
   maxHeight?: number;
   /** Extra scale applied to line weights (1 = default hairlines). */
   lineWeightScale?: number;
+  /**
+   * Optional React component to render inside a foreignObject viewport at the
+   * given sheet coordinates (model mm). Used to embed FloorPlanSvg directly.
+   */
+  viewportChild?: React.ReactNode;
+  viewportRect?: { x: number; y: number; w: number; h: number };
 }
 
 const stripFormatting = (text: string): string =>
@@ -36,6 +42,8 @@ export const DrawingSheetSvg: React.FC<DrawingSheetSvgProps> = ({
   width = 1400,
   maxHeight,
   lineWeightScale = 1,
+  viewportChild,
+  viewportRect,
 }) => {
   const bounds: SheetBounds = sheet.bounds;
   const spanX = Math.max(bounds.maxX - bounds.minX, 1);
@@ -155,10 +163,25 @@ export const DrawingSheetSvg: React.FC<DrawingSheetSvgProps> = ({
         );
       }
 
+      case 'image':
+        return (
+          <image
+            key={i}
+            x={p.x}
+            y={Y(p.y + p.h)}
+            width={p.w}
+            height={p.h}
+            href={p.href}
+            preserveAspectRatio="xMidYMid meet"
+          />
+        );
+
       default:
         return null;
     }
   };
+
+  const clipId = useId();
 
   return (
     <svg
@@ -168,9 +191,31 @@ export const DrawingSheetSvg: React.FC<DrawingSheetSvgProps> = ({
       className="select-none"
       style={{ background: bg, display: 'block' }}
     >
+      <defs>
+        {viewportChild && viewportRect && (
+          <clipPath id={`vp-${clipId}`}>
+            <rect x={viewportRect.x} y={Y(viewportRect.y + viewportRect.h)} width={viewportRect.w} height={viewportRect.h} />
+          </clipPath>
+        )}
+      </defs>
       <g>
         {sheet.primitives.map(renderPrimitive)}
       </g>
+
+      {/* Viewport: embed FloorPlanSvg (or any React node) at sheet coordinates */}
+      {viewportChild && viewportRect && (
+        <foreignObject
+          x={viewportRect.x}
+          y={Y(viewportRect.y + viewportRect.h)}
+          width={viewportRect.w}
+          height={viewportRect.h}
+          clipPath={`url(#vp-${clipId})`}
+        >
+          <div style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+            {viewportChild}
+          </div>
+        </foreignObject>
+      )}
 
       {/* Sheet identity caption drawn in-sheet, like the source drawing's label notes */}
       <text
