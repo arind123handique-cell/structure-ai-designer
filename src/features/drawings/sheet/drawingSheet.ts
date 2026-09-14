@@ -293,8 +293,8 @@ export class SheetBuilder {
   ) {
     const layer = opts.layer || LAYER_DIMENSION.name;
     const h = opts.textHeight ?? TEXT_H.DIM;
-    const ext = opts.ext ?? h * 1.35;
-    const arrow = h * 0.85;
+    const ext = opts.ext ?? Math.min(h * 1.35, 300);
+    const arrow = Math.min(h * 0.85, 120);
     const left = Math.min(x1, x2);
     const right = Math.max(x1, x2);
 

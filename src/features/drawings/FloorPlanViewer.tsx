@@ -198,9 +198,9 @@ export const FloorPlanViewer: React.FC = () => {
     setIsGeneratingSheet(true);
     setTimeout(() => {
       try {
-        // Update TEXT_H.DIM with custom dimension size
-        (TEXT_H as any).DIM = dimensionTextSize;
-        (TEXT_H as any).CALLOUT = Math.round(dimensionTextSize * 0.7);
+        // Update TEXT_H with current dimension size from ref
+        (TEXT_H as any).DIM = dimSizeRef.current;
+        (TEXT_H as any).CALLOUT = Math.round(dimSizeRef.current * 0.7);
 
         let sheets: DrawingSheet[] = [];
         if (sheetMode === 'BEAM_SECTIONS') {
@@ -244,11 +244,17 @@ export const FloorPlanViewer: React.FC = () => {
   };
 
   // Real-time dimension size update — regenerate sheets when dimensionTextSize changes
+  const dimSizeRef = React.useRef(dimensionTextSize);
+  dimSizeRef.current = dimensionTextSize;
+
   React.useEffect(() => {
-    if (sheetMode !== 'FRAMING' && currentSheets.length > 0) {
+    if (sheetMode !== 'FRAMING') {
+      // Update TEXT_H before regeneration
+      (TEXT_H as any).DIM = dimSizeRef.current;
+      (TEXT_H as any).CALLOUT = Math.round(dimSizeRef.current * 0.7);
       handleGenerateSheet(true);
     }
-  }, [dimensionTextSize]);
+  }, [dimensionTextSize, sheetMode]);
 
   // Add / Place Staircase on active level
   const handleAddStaircaseToLevel = () => {
