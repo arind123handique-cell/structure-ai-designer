@@ -74,7 +74,7 @@ export const PLAN_SCALE = 1;
 
 export const TEXT_H = {
   /** Dimension text, zone lengths, clear spans (clearly visible on ISO A3). */
-  DIM: 280,
+  DIM: 350,
   /** Rebar callouts, stirrup notes, bar marks. */
   CALLOUT: 240,
   /** Support labels, column marks, grid text. */
