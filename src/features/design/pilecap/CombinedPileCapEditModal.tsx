@@ -110,9 +110,9 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
 
   return (
     <div className="fixed inset-0 bg-deep-navy/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 font-sans animate-in fade-in">
-      <div className="w-full max-w-2xl bg-surface-card rounded-lg border border-ui-border shadow-2xl overflow-hidden flex flex-col">
+      <div className="w-full max-w-2xl max-h-[90vh] bg-surface-card rounded-lg border border-ui-border shadow-2xl overflow-hidden flex flex-col my-auto">
         {/* Header */}
-        <div className="px-6 py-4 bg-slate-50 border-b border-ui-border flex items-center justify-between">
+        <div className="px-6 py-4 bg-slate-50 border-b border-ui-border flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <Layers className="w-5 h-5 text-indigo-600" />
             <div>
@@ -130,7 +130,7 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-4 text-xs font-mono">
+        <div className="p-6 space-y-4 text-xs font-mono overflow-y-auto flex-1 overscroll-contain">
           {/* Summary Banner */}
           <div className="bg-slate-100/80 border border-slate-300 rounded p-3.5 space-y-2">
             <div className="flex items-center justify-between">
@@ -371,7 +371,7 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 bg-slate-50 border-t border-ui-border flex items-center justify-between font-mono text-xs">
+        <div className="px-6 py-3 bg-slate-50 border-t border-ui-border flex items-center justify-between font-mono text-xs shrink-0">
           <button
             onClick={handleReset}
             className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:text-slate-800 hover:bg-slate-200 rounded transition-colors"
