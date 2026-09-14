@@ -450,8 +450,8 @@ export class CombinedPileCapEngine {
       const availX = Math.max(10, finalDimX - 2 * edgeDist);
       const availZ = Math.max(10, finalDimZ - 2 * edgeDist);
 
-      sX = bestNx > 1 ? Math.min(sMax, Math.max(sMin, availX / (bestNx - 1))) : 0;
-      sZ = bestNz > 1 ? Math.min(sMax, Math.max(sMin, availZ / (bestNz - 1))) : 0;
+      sX = bestNx > 1 ? availX / (bestNx - 1) : 0;
+      sZ = bestNz > 1 ? availZ / (bestNz - 1) : 0;
 
       const gSpanX = bestNx > 1 ? (bestNx - 1) * sX : 0;
       const gSpanZ = bestNz > 1 ? (bestNz - 1) * sZ : 0;
@@ -459,7 +459,7 @@ export class CombinedPileCapEngine {
       finalDimX = Math.round(Math.max(finalDimX, gSpanX + 2 * edgeDist));
       finalDimZ = Math.round(Math.max(finalDimZ, gSpanZ + 2 * edgeDist));
     } else {
-      // User explicitly specified custom dimensions: preserve exact dimensions
+      // User explicitly specified custom dimensions: preserve exact dimensions and maintain edgeDist
       finalDimX = Math.round(dimX);
       finalDimZ = Math.round(dimZ);
 
@@ -468,8 +468,6 @@ export class CombinedPileCapEngine {
 
       sX = bestNx > 1 ? availX / (bestNx - 1) : 0;
       sZ = bestNz > 1 ? availZ / (bestNz - 1) : 0;
-      if (bestNx > 1 && sX > sMax) sX = sMax;
-      if (bestNz > 1 && sZ > sMax) sZ = sMax;
     }
 
     const gridSpanX = bestNx > 1 ? (bestNx - 1) * sX : 0;

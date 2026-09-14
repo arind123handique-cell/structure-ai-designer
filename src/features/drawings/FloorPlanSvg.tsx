@@ -1421,18 +1421,25 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                     ) : (
                       /* Rectangular 4-Pile, 2-Pile, or Standard Rectangular Cap */
                       (() => {
-                        const isRot90or270 = rotDeg === 90 || rotDeg === 270;
-                        const effCapL = isRot90or270 ? capW : capL;
-                        const effCapW = isRot90or270 ? capL : capW;
-                        const effValL = isRot90or270 ? cap.capWidth : cap.capLength;
-                        const effValW = isRot90or270 ? cap.capLength : cap.capWidth;
-
                         const baseOffsets = cap.pileOffsets && cap.pileOffsets.length > 0
                           ? cap.pileOffsets
                           : getPileOffsetsMm(count, cap.pileSpacing, 'UP');
                         const pileOffsets = rotDeg !== 0
                           ? (cap.rotationAngle ? cap.pileOffsets : rotatePoints2D(baseOffsets, rotDeg, { x: 0, y: 0 }))
                           : baseOffsets;
+
+                        // Orient rectangle dimensions strictly matching the pile layout axis (prevent piles protruding on rotation)
+                        const pileXs = pileOffsets.map((p) => p.x);
+                        const pileYs = pileOffsets.map((p) => (p.y !== undefined ? p.y : (p as any).z || 0));
+                        const spanX = pileXs.length > 1 ? Math.max(...pileXs) - Math.min(...pileXs) : 0;
+                        const spanY = pileYs.length > 1 ? Math.max(...pileYs) - Math.min(...pileYs) : 0;
+
+                        const maxDim = Math.max(cap.capLength, cap.capWidth);
+                        const minDim = Math.min(cap.capLength, cap.capWidth);
+                        const effValL = spanX >= spanY ? maxDim : minDim;
+                        const effValW = spanX >= spanY ? minDim : maxDim;
+                        const effCapL = (effValL / 1000) * scale;
+                        const effCapW = (effValW / 1000) * scale;
 
                         return (
                           <g>
@@ -1526,17 +1533,23 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
               const colW = Math.max(8, 0.45 * scale);
               const colD = Math.max(8, 0.55 * scale);
 
-              const combRotDeg = ((grp.rotationAngle ?? (project?.customCombinedCapOverrides as any)?.[grp.groupId]?.rotationAngle ?? 0) % 360 + 360) % 360;
-              const isRot90or270 = combRotDeg === 90 || combRotDeg === 270;
-              const effCapLpx = isRot90or270 ? capBpx : capLpx;
-              const effCapBpx = isRot90or270 ? capLpx : capBpx;
-              const effValL = isRot90or270 ? grp.capWidth : grp.capLength;
-              const effValB = isRot90or270 ? grp.capLength : grp.capWidth;
+              // Orient combined pile cap dimensions strictly matching the pile layout axis
+              const pileXs = grp.pileOffsets.map((p) => p.x);
+              const pileZs = grp.pileOffsets.map((p) => (p.z !== undefined ? p.z : (p as any).y || 0));
+              const pSpanX = pileXs.length > 1 ? Math.max(...pileXs) - Math.min(...pileXs) : 0;
+              const pSpanZ = pileZs.length > 1 ? Math.max(...pileZs) - Math.min(...pileZs) : 0;
+
+              const cMaxDim = Math.max(grp.capLength, grp.capWidth);
+              const cMinDim = Math.min(grp.capLength, grp.capWidth);
+              const effValL = pSpanX > pSpanZ ? cMaxDim : (pSpanZ > pSpanX ? cMinDim : grp.capLength);
+              const effValB = pSpanX > pSpanZ ? cMinDim : (pSpanZ > pSpanX ? cMaxDim : grp.capWidth);
+              const effCapLpx = (effValL / 1000) * scale;
+              const effCapBpx = (effValB / 1000) * scale;
 
               // Unique sorted X coordinates for pile spacing dimension string
               const uniquePileX = Array.from(new Set(grp.pileOffsets.map((p) => Math.round(p.x)))).sort((a, b) => a - b);
               // Unique sorted Z coordinates for pile row spacing dimension string
-              const uniquePileZ = Array.from(new Set(grp.pileOffsets.map((p) => Math.round(p.z)))).sort((a, b) => a - b);
+              const uniquePileZ = Array.from(new Set(grp.pileOffsets.map((p) => Math.round(p.z !== undefined ? p.z : (p as any).y || 0)))).sort((a, b) => a - b);
 
               return (
                 <g key={`cpc_${grp.groupId}`}>
@@ -1744,60 +1757,149 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                     fontSize: 8.5,
                   })}
 
-                  {/* Bottom Pile Spacing Dimension Chain */}
+                  {/* Bottom Pile Spacing Dimension Chain (Left edge dist + Pile Spacings + Right edge dist) */}
                   {(() => {
                     const botDimY = cy + effCapBpx / 2;
                     const dims = [];
-                    for (let i = 0; i < uniquePileX.length - 1; i++) {
-                      const spMm = Math.round(uniquePileX[i + 1] - uniquePileX[i]);
-                      const px1 = cx + (uniquePileX[i] / 1000) * scale;
-                      const px2 = cx + (uniquePileX[i + 1] / 1000) * scale;
-                      dims.push(
-                        renderCadLinearDimension({
-                          key: `cpc_sp_x_${grp.groupId}_${i}`,
-                          x1: px1,
-                          y1: botDimY,
-                          x2: px2,
-                          y2: botDimY,
-                          dimOffset: 16,
-                          valueMm: spMm,
-                          fontSize: 6.8,
-                          tickSize: 3,
-                        })
-                      );
+                    const xLeft = cx - effCapLpx / 2;
+                    const xRight = cx + effCapLpx / 2;
+
+                    if (uniquePileX.length > 0) {
+                      const leftEdgeMm = Math.round(effValL / 2 + uniquePileX[0]);
+                      const pxFirst = cx + (uniquePileX[0] / 1000) * scale;
+                      if (leftEdgeMm > 0) {
+                        dims.push(
+                          renderCadLinearDimension({
+                            key: `cpc_edge_l_${grp.groupId}`,
+                            x1: xLeft,
+                            y1: botDimY,
+                            x2: pxFirst,
+                            y2: botDimY,
+                            dimOffset: 16,
+                            valueMm: leftEdgeMm,
+                            fontSize: 6.8,
+                            tickSize: 3,
+                          })
+                        );
+                      }
+
+                      for (let i = 0; i < uniquePileX.length - 1; i++) {
+                        const spMm = Math.round(uniquePileX[i + 1] - uniquePileX[i]);
+                        const px1 = cx + (uniquePileX[i] / 1000) * scale;
+                        const px2 = cx + (uniquePileX[i + 1] / 1000) * scale;
+                        dims.push(
+                          renderCadLinearDimension({
+                            key: `cpc_sp_x_${grp.groupId}_${i}`,
+                            x1: px1,
+                            y1: botDimY,
+                            x2: px2,
+                            y2: botDimY,
+                            dimOffset: 16,
+                            valueMm: spMm,
+                            fontSize: 6.8,
+                            tickSize: 3,
+                          })
+                        );
+                      }
+
+                      const rightEdgeMm = Math.round(effValL / 2 - uniquePileX[uniquePileX.length - 1]);
+                      const pxLast = cx + (uniquePileX[uniquePileX.length - 1] / 1000) * scale;
+                      if (rightEdgeMm > 0) {
+                        dims.push(
+                          renderCadLinearDimension({
+                            key: `cpc_edge_r_${grp.groupId}`,
+                            x1: pxLast,
+                            y1: botDimY,
+                            x2: xRight,
+                            y2: botDimY,
+                            dimOffset: 16,
+                            valueMm: rightEdgeMm,
+                            fontSize: 6.8,
+                            tickSize: 3,
+                          })
+                        );
+                      }
                     }
                     return dims;
                   })()}
 
-                  {/* Left Pile Row Spacing Dimension Chain */}
+                  {/* Left Pile Row Spacing Dimension Chain (Top edge dist + Row Spacings + Bottom edge dist) */}
                   {(() => {
                     const leftDimX = cx - effCapLpx / 2;
                     const dims = [];
-                    for (let i = 0; i < uniquePileZ.length - 1; i++) {
-                      const spMm = Math.round(Math.abs(uniquePileZ[i + 1] - uniquePileZ[i]));
-                      const pz1 = cy - (uniquePileZ[i] / 1000) * scale;
-                      const pz2 = cy - (uniquePileZ[i + 1] / 1000) * scale;
-                      dims.push(
-                        renderCadLinearDimension({
-                          key: `cpc_sp_z_${grp.groupId}_${i}`,
-                          x1: leftDimX,
-                          y1: pz1,
-                          x2: leftDimX,
-                          y2: pz2,
-                          dimOffset: -16,
-                          isVertical: true,
-                          valueMm: spMm,
-                          fontSize: 6.8,
-                          tickSize: 3,
-                        })
-                      );
+                    const yTop = cy - effCapBpx / 2;
+                    const yBot = cy + effCapBpx / 2;
+
+                    if (uniquePileZ.length > 0) {
+                      // Staad Z is inverted in SVG Y (py = cy - (z/1000)*scale)
+                      // uniquePileZ is sorted ascending, so uniquePileZ[last] is highest in Z (closest to yTop)
+                      const zMax = uniquePileZ[uniquePileZ.length - 1];
+                      const zMin = uniquePileZ[0];
+                      const pzTop = cy - (zMax / 1000) * scale;
+                      const pzBot = cy - (zMin / 1000) * scale;
+
+                      const topEdgeMm = Math.round(effValB / 2 - zMax);
+                      if (topEdgeMm > 0) {
+                        dims.push(
+                          renderCadLinearDimension({
+                            key: `cpc_edge_t_${grp.groupId}`,
+                            x1: leftDimX,
+                            y1: yTop,
+                            x2: leftDimX,
+                            y2: pzTop,
+                            dimOffset: -16,
+                            isVertical: true,
+                            valueMm: topEdgeMm,
+                            fontSize: 6.8,
+                            tickSize: 3,
+                          })
+                        );
+                      }
+
+                      for (let i = uniquePileZ.length - 1; i > 0; i--) {
+                        const spMm = Math.round(uniquePileZ[i] - uniquePileZ[i - 1]);
+                        const pzUpper = cy - (uniquePileZ[i] / 1000) * scale;
+                        const pzLower = cy - (uniquePileZ[i - 1] / 1000) * scale;
+                        dims.push(
+                          renderCadLinearDimension({
+                            key: `cpc_sp_z_${grp.groupId}_${i}`,
+                            x1: leftDimX,
+                            y1: pzUpper,
+                            x2: leftDimX,
+                            y2: pzLower,
+                            dimOffset: -16,
+                            isVertical: true,
+                            valueMm: spMm,
+                            fontSize: 6.8,
+                            tickSize: 3,
+                          })
+                        );
+                      }
+
+                      const botEdgeMm = Math.round(effValB / 2 + zMin);
+                      if (botEdgeMm > 0) {
+                        dims.push(
+                          renderCadLinearDimension({
+                            key: `cpc_edge_b_${grp.groupId}`,
+                            x1: leftDimX,
+                            y1: pzBot,
+                            x2: leftDimX,
+                            y2: yBot,
+                            dimOffset: -16,
+                            isVertical: true,
+                            valueMm: botEdgeMm,
+                            fontSize: 6.8,
+                            tickSize: 3,
+                          })
+                        );
+                      }
                     }
                     return dims;
                   })()}
 
                   {/* Bottom Combined Pile Cap Label */}
-                  <text x={cx} y={cy + capBpx / 2 + 35} fill={theme.capLabelText} fontSize="8.5" fontWeight="bold" textAnchor="middle">
-                    COMBINED PILE CAP ({grp.pileCount}P) · {grp.capLength}×{grp.capWidth}×{grp.capDepth} mm
+                  <text x={cx} y={cy + effCapBpx / 2 + 35} fill={theme.capLabelText} fontSize="8.5" fontWeight="bold" textAnchor="middle">
+                    COMBINED PILE CAP ({grp.pileCount}P) · {effValL}×{effValB}×{grp.capDepth} mm
                   </text>
                 </g>
               );

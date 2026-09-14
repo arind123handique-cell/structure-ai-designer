@@ -636,9 +636,6 @@ export class PdfExportService {
             (fp.absorbedCombinedCapNodeIds && fp.absorbedCombinedCapNodeIds.has(col.nodeId))
           );
           if (isAbsorbedInCombined) return;
-
-          const capL = (cap.capLength / 1000) * scale;
-          const capW = (cap.capWidth / 1000) * scale;
           const count = cap.pileCount;
           const shape = cap.capShape || (count === 3 ? 'TRIANGULAR' : count === 5 ? 'PENTAGONAL' : 'RECTANGULAR');
 
@@ -647,6 +644,22 @@ export class PdfExportService {
           doc.setLineWidth(0.6);
 
           const orientation = determineCapOrientation(col.x, col.z, bounds);
+
+          const offsets = count === 3
+            ? getPileOffsetsMm(3, cap.pileSpacing, orientation)
+            : (cap.pileOffsets || getPileOffsetsMm(count, cap.pileSpacing));
+
+          const pileXs = offsets.map((p) => p.x);
+          const pileYs = offsets.map((p) => (p.y !== undefined ? p.y : (p as any).z || 0));
+          const spanX = pileXs.length > 1 ? Math.max(...pileXs) - Math.min(...pileXs) : 0;
+          const spanY = pileYs.length > 1 ? Math.max(...pileYs) - Math.min(...pileYs) : 0;
+
+          const maxDim = Math.max(cap.capLength, cap.capWidth);
+          const minDim = Math.min(cap.capLength, cap.capWidth);
+          const effDimX = spanX >= spanY ? maxDim : minDim;
+          const effDimY = spanX >= spanY ? minDim : maxDim;
+          const capL = (effDimX / 1000) * scale;
+          const capW = (effDimY / 1000) * scale;
 
           if (shape === 'TRIANGULAR' || count === 3) {
             const polyMm = getTruncated3PilePolygonMm(cap.pileSpacing, cap.edgeDistance, orientation);
@@ -675,10 +688,6 @@ export class PdfExportService {
           } else {
             doc.rect(cx - capL / 2, cy - capW / 2, capL, capW, 'FD');
           }
-
-          const offsets = count === 3
-            ? getPileOffsetsMm(3, cap.pileSpacing, orientation)
-            : (cap.pileOffsets || getPileOffsetsMm(count, cap.pileSpacing));
 
           offsets.forEach((off) => {
             const px = cx + (off.x / 1000) * scale;
@@ -713,8 +722,16 @@ export class PdfExportService {
 
           const cx = toPdfX((effMinX + effMaxX) / 2);
           const cy = toPdfY((effMinZ + effMaxZ) / 2);
-          const capL = (grp.capLength / 1000) * scale;
-          const capW = (grp.capWidth / 1000) * scale;
+          const pileXs = grp.pileOffsets.map((p: any) => p.x);
+          const pileYs = grp.pileOffsets.map((p: any) => (p.z !== undefined ? p.z : p.y || 0));
+          const pSpanX = pileXs.length > 1 ? Math.max(...pileXs) - Math.min(...pileXs) : 0;
+          const pSpanY = pileYs.length > 1 ? Math.max(...pileYs) - Math.min(...pileYs) : 0;
+          const cMaxDim = Math.max(grp.capLength, grp.capWidth);
+          const cMinDim = Math.min(grp.capLength, grp.capWidth);
+          const effCombX = pSpanX > pSpanY ? cMaxDim : (pSpanY > pSpanX ? cMinDim : grp.capLength);
+          const effCombY = pSpanX > pSpanY ? cMinDim : (pSpanY > pSpanX ? cMaxDim : grp.capWidth);
+          const capL = (effCombX / 1000) * scale;
+          const capW = (effCombY / 1000) * scale;
           const fillR = isShearWall ? 69 : 20;
           const fillG = isShearWall ? 10 : 83;
           const fillB = isShearWall ? 10 : 45;

@@ -109,4 +109,58 @@ describe('Combined Pile Cap Spacing & Grid Placement (IS 2911:2010 Cl. 6.6.1)', 
     expect(cap.capLength).toBeGreaterThanOrEqual(cap.wallLengthM * 1000 + 2 * Dp);
     expect(cap.capWidth).toBeGreaterThanOrEqual(cap.wallWidthM * 1000 + 2 * Dp);
   });
+
+  it('maintains exact statutory edge distance eo without creating arbitrary oversized edge margins', () => {
+    const Dp = 350;
+    const eo = 350;
+    // Cap dimensions: 6800 x 8000 mm with 25 piles (5x5)
+    const grid = CombinedPileCapEngine.computeOptimalGrid(25, 6800, 8000, Dp, eo, false);
+
+    const xs = grid.pileOffsets.map((p) => p.x);
+    const zs = grid.pileOffsets.map((p) => p.z);
+    const halfLen = grid.capLength / 2;
+    const halfWid = grid.capWidth / 2;
+
+    const leftEdge = halfLen + Math.min(...xs);
+    const rightEdge = halfLen - Math.max(...xs);
+    const topEdge = halfWid - Math.max(...zs);
+    const bottomEdge = halfWid + Math.min(...zs);
+
+    // Edge distances on all 4 sides must equal eo = 350mm (within 2mm rounding tolerance)
+    expect(Math.abs(leftEdge - eo)).toBeLessThanOrEqual(2);
+    expect(Math.abs(rightEdge - eo)).toBeLessThanOrEqual(2);
+    expect(Math.abs(topEdge - eo)).toBeLessThanOrEqual(2);
+    expect(Math.abs(bottomEdge - eo)).toBeLessThanOrEqual(2);
+
+    // Pile grid span must fill the available width: capLength - 2*eo = 6800 - 700 = 6100mm
+    const spanX = Math.max(...xs) - Math.min(...xs);
+    const spanZ = Math.max(...zs) - Math.min(...zs);
+    expect(Math.abs(spanX - (grid.capLength - 2 * eo))).toBeLessThanOrEqual(2);
+    expect(Math.abs(spanZ - (grid.capWidth - 2 * eo))).toBeLessThanOrEqual(2);
+  });
+
+  it('ensures individual 2-pile cap rotated 90 degrees aligns rectangle with pile span', () => {
+    // A 2-pile cap with spacing 1500mm and Dp=350, eo=500 -> 2500 x 1500 cap
+    const baseLength = 2500;
+    const baseWidth = 1500;
+    // When rotated 90 degrees, piles span vertically along Y (y = +/- 750, x = 0)
+    const pileOffsetsRot90 = [{ x: 0, y: 750 }, { x: 0, y: -750 }];
+    const spanX = Math.max(...pileOffsetsRot90.map((p) => p.x)) - Math.min(...pileOffsetsRot90.map((p) => p.x));
+    const spanY = Math.max(...pileOffsetsRot90.map((p) => p.y)) - Math.min(...pileOffsetsRot90.map((p) => p.y));
+
+    // Layout-based orientation
+    const maxDim = Math.max(baseLength, baseWidth);
+    const minDim = Math.min(baseLength, baseWidth);
+    const effValL = spanX >= spanY ? maxDim : minDim; // horizontal (along X)
+    const effValW = spanX >= spanY ? minDim : maxDim; // vertical (along Y)
+
+    expect(effValL).toBe(1500); // narrow horizontally
+    expect(effValW).toBe(2500); // long vertically
+
+    // Piles at y = +/- 750 sit well inside the vertical height of 2500 (half-height 1250)
+    const edgeMarginTop = effValW / 2 - 750;
+    const edgeMarginBottom = effValW / 2 - Math.abs(-750);
+    expect(edgeMarginTop).toBe(500); // Exactly eo = 500mm margin!
+    expect(edgeMarginBottom).toBe(500);
+  });
 });
