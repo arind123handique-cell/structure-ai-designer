@@ -26,14 +26,14 @@ interface PileCapPlanViewProps {
 }
 
 interface CapPolygon {
-  nodeId: number;
+  nodeId: number | string;
   cx: number;
   cz: number;
   points: string;
   fill: string;
   stroke: string;
   pileCount: number;
-  design: PileCapDesignOutput;
+  design: PileCapDesignOutput | null;
   columnLabel: string;
   isCombined: boolean;
   combinedGroup?: CombinedPileCapGroup;
@@ -50,8 +50,8 @@ export const PileCapPlanView: React.FC<PileCapPlanViewProps> = ({
   onRotationChange,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
-  const [selectedNodeIds, setSelectedNodeIds] = useState<Set<number>>(new Set());
-  const [hoveredNodeId, setHoveredNodeId] = useState<number | null>(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<Set<number | string>>(new Set());
+  const [hoveredNodeId, setHoveredNodeId] = useState<number | string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
@@ -59,6 +59,16 @@ export const PileCapPlanView: React.FC<PileCapPlanViewProps> = ({
 
   // Column numbering
   const columnSupportMapping = useMemo(() => ColumnNumberingService.getColumnSupportMapping(activeModel), [activeModel]);
+
+  // Map absorbed nodes to their combined group
+  const absorbedNodeMap = useMemo(() => {
+    const map = new Map<number, CombinedPileCapGroup>();
+    combinedPileCaps.forEach((grp) => {
+      grp.absorbedIndividualCaps.forEach((id) => map.set(id, grp));
+      grp.nodeIds.forEach((id) => map.set(id, grp));
+    });
+    return map;
+  }, [combinedPileCaps]);
 
   // Support nodes with positions
   const supportNodes = useMemo(() => {
@@ -102,12 +112,14 @@ export const PileCapPlanView: React.FC<PileCapPlanViewProps> = ({
   const toSvgX = (wx: number) => (wx - bounds.minX) * scale + 40 + pan.x;
   const toSvgY = (wz: number) => (wz - bounds.minZ) * scale + 40 + pan.y;
 
-  // Build cap polygons for each support node
+  // Build cap polygons for each support node (skip absorbed) + combined caps
   const capPolygons: CapPolygon[] = useMemo(() => {
     const polys: CapPolygon[] = [];
+    const renderedCombinedGroups = new Set<string>();
 
-    // Individual pile caps
+    // Individual pile caps (skip those absorbed into combined)
     for (const sup of supportNodes) {
+      if (absorbedNodeMap.has(sup.nodeId)) continue;
       const design = designedCaps.get(sup.nodeId);
       if (!design) continue;
 
@@ -121,7 +133,6 @@ export const PileCapPlanView: React.FC<PileCapPlanViewProps> = ({
       const rotDeg = customPileCapOverrides[sup.nodeId]?.rotationAngle ?? design.rotationAngle ?? 0;
       const orientation: CapOrientation = rotDeg !== 0 ? angleToOrientation(rotDeg) : 'UP';
 
-      // Generate cap polygon points in mm relative to center, then scale to meters
       let ptsMm: { x: number; y: number }[] = [];
 
       if (count === 3 || shape === 'TRIANGULAR') {
@@ -135,7 +146,6 @@ export const PileCapPlanView: React.FC<PileCapPlanViewProps> = ({
           ptsMm.push({ x: Rcap * Math.cos(angle), y: Rcap * Math.sin(angle) });
         }
       } else {
-        // Rectangular
         const isRot90 = rotDeg === 90 || rotDeg === 270;
         const baseL = count === 2 ? s + 2 * eo : L;
         const baseB = count === 2 ? Dp + 2 * eo : B;
@@ -151,7 +161,6 @@ export const PileCapPlanView: React.FC<PileCapPlanViewProps> = ({
         ];
       }
 
-      // Convert mm to meters, then to SVG coords
       const svgPoints = ptsMm.map((p) => {
         const wx = sup.x + p.x / 1000;
         const wz = sup.z + p.y / 1000;
@@ -175,25 +184,58 @@ export const PileCapPlanView: React.FC<PileCapPlanViewProps> = ({
       });
     }
 
+    // Combined pile caps (render as single merged rectangle)
+    for (const grp of combinedPileCaps) {
+      if (renderedCombinedGroups.has(grp.groupId)) continue;
+      renderedCombinedGroups.add(grp.groupId);
+
+      const cx = (grp.minX + grp.maxX) / 2;
+      const cz = (grp.minZ + grp.maxZ) / 2;
+      const halfW = ((grp.maxX - grp.minX) / 2);
+      const halfH = ((grp.maxZ - grp.minZ) / 2);
+
+      const svgPoints = [
+        `${toSvgX(cx - halfW).toFixed(1)},${toSvgY(cz - halfH).toFixed(1)}`,
+        `${toSvgX(cx + halfW).toFixed(1)},${toSvgY(cz - halfH).toFixed(1)}`,
+        `${toSvgX(cx + halfW).toFixed(1)},${toSvgY(cz + halfH).toFixed(1)}`,
+        `${toSvgX(cx - halfW).toFixed(1)},${toSvgY(cz + halfH).toFixed(1)}`,
+      ].join(' ');
+
+      const isSelected = grp.nodeIds.some((nid) => selectedNodeIds.has(nid));
+      const isHovered = hoveredNodeId === grp.groupId;
+
+      polys.push({
+        nodeId: grp.groupId,
+        cx: toSvgX(cx),
+        cz: toSvgY(cz),
+        points: svgPoints,
+        fill: isSelected ? '#fce7f3' : isHovered ? '#fdf2f8' : '#fef2f2',
+        stroke: isSelected ? '#be185d' : isHovered ? '#e11d48' : '#f43f5e',
+        pileCount: grp.pileCount,
+        design: null,
+        columnLabel: grp.columnLabels.join('+'),
+        isCombined: true,
+        combinedGroup: grp,
+      });
+    }
+
     return polys;
-  }, [supportNodes, designedCaps, customPileCapOverrides, selectedNodeIds, hoveredNodeId, toSvgX, toSvgY]);
+  }, [supportNodes, designedCaps, combinedPileCaps, absorbedNodeMap, customPileCapOverrides, selectedNodeIds, hoveredNodeId, toSvgX, toSvgY]);
 
   // Click handler
-  const handleCapClick = useCallback((nodeId: number, e: React.MouseEvent) => {
+  const handleCapClick = useCallback((nodeId: number | string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (e.ctrlKey || e.metaKey) {
-      // Multi-select
       setSelectedNodeIds((prev) => {
         const next = new Set(prev);
-        if (next.has(nodeId)) next.delete(nodeId);
-        else next.add(nodeId);
+        if (next.has(nodeId as any)) next.delete(nodeId as any);
+        else next.add(nodeId as any);
         return next;
       });
     } else {
-      // Single select (toggle)
       setSelectedNodeIds((prev) => {
-        if (prev.size === 1 && prev.has(nodeId)) return new Set();
-        return new Set([nodeId]);
+        if (prev.size === 1 && prev.has(nodeId as any)) return new Set();
+        return new Set([nodeId as any]);
       });
     }
   }, []);
@@ -225,11 +267,24 @@ export const PileCapPlanView: React.FC<PileCapPlanViewProps> = ({
   };
 
   // Selected cap details
-  const selectedCaps = useMemo(() => {
-    return Array.from(selectedNodeIds).map((nid) => designedCaps.get(nid)).filter(Boolean) as PileCapDesignOutput[];
+  const selectedIndividualCaps = useMemo(() => {
+    return Array.from(selectedNodeIds)
+      .filter((id): id is number => typeof id === 'number')
+      .map((nid) => designedCaps.get(nid))
+      .filter(Boolean) as PileCapDesignOutput[];
   }, [selectedNodeIds, designedCaps]);
 
-  const singleSelected = selectedCaps.length === 1 ? selectedCaps[0] : null;
+  const selectedCombinedGroups = useMemo(() => {
+    return Array.from(selectedNodeIds)
+      .filter((id): id is string => typeof id === 'string')
+      .map((gid) => combinedPileCaps.find((g) => g.groupId === gid))
+      .filter(Boolean) as CombinedPileCapGroup[];
+  }, [selectedNodeIds, combinedPileCaps]);
+
+  const singleSelected = selectedIndividualCaps.length === 1 && selectedCombinedGroups.length === 0
+    ? selectedIndividualCaps[0] : null;
+  const singleCombined = selectedCombinedGroups.length === 1 && selectedIndividualCaps.length === 0
+    ? selectedCombinedGroups[0] : null;
 
   return (
     <div className="flex h-full bg-slate-50 rounded-lg border border-ui-border overflow-hidden">
@@ -324,21 +379,22 @@ export const PileCapPlanView: React.FC<PileCapPlanViewProps> = ({
                 points={cp.points}
                 fill={cp.fill}
                 stroke={cp.stroke}
-                strokeWidth={selectedNodeIds.has(cp.nodeId) ? 2.5 : 1.5}
+                strokeWidth={(selectedNodeIds.has(cp.nodeId as any)) ? 2.5 : 1.5}
                 strokeLinejoin="round"
+                strokeDasharray={cp.isCombined ? '6,3' : undefined}
                 className="cursor-pointer transition-all"
                 onClick={(e) => handleCapClick(cp.nodeId, e)}
                 onMouseEnter={() => setHoveredNodeId(cp.nodeId)}
                 onMouseLeave={() => setHoveredNodeId(null)}
               />
 
-              {/* Pile positions (small circles) */}
-              {(() => {
+              {/* Pile positions for individual caps */}
+              {!cp.isCombined && cp.design && (() => {
                 const design = cp.design;
                 const count = design.pileCount;
                 const s = design.pileSpacing;
                 const Dp = design.pileDiameter;
-                const rotDeg = customPileCapOverrides[cp.nodeId]?.rotationAngle ?? design.rotationAngle ?? 0;
+                const rotDeg = customPileCapOverrides[cp.nodeId as number]?.rotationAngle ?? design.rotationAngle ?? 0;
                 const orientation: CapOrientation = rotDeg !== 0 ? angleToOrientation(rotDeg) : 'UP';
                 const offsets = getPileOffsetsMm(count, s, orientation);
                 const sup = supportNodes.find((n) => n.nodeId === cp.nodeId);
@@ -357,22 +413,60 @@ export const PileCapPlanView: React.FC<PileCapPlanViewProps> = ({
                 });
               })()}
 
-              {/* Column center marker */}
-              <rect
-                x={cp.cx - 4}
-                y={cp.cz - 4}
-                width={8}
-                height={8}
-                fill="#ca8a04"
-                stroke="#eab308"
-                strokeWidth="1"
-              />
+              {/* Pile positions for combined caps */}
+              {cp.isCombined && cp.combinedGroup && (() => {
+                const grp = cp.combinedGroup;
+                const cx = (grp.minX + grp.maxX) / 2;
+                const cz = (grp.minZ + grp.maxZ) / 2;
+                return grp.pileOffsets.map((off, i) => {
+                  const px = toSvgX(cx + off.x / 1000);
+                  const py = toSvgY(cz + off.z / 1000);
+                  return (
+                    <g key={`cpile_${cp.nodeId}_${i}`}>
+                      <circle cx={px} cy={py} r={4} fill="#1e3a8a" stroke="#ffffff" strokeWidth="1" />
+                      <line x1={px - 3} y1={py} x2={px + 3} y2={py} stroke="#ffffff" strokeWidth="0.5" />
+                      <line x1={px} y1={py - 3} x2={px} y2={py + 3} stroke="#ffffff" strokeWidth="0.5" />
+                    </g>
+                  );
+                });
+              })()}
+
+              {/* Column positions inside combined cap */}
+              {cp.isCombined && cp.combinedGroup && cp.combinedGroup.nodeIds.map((nid) => {
+                const sup = supportNodes.find((n) => n.nodeId === nid);
+                if (!sup) return null;
+                return (
+                  <rect
+                    key={`col_${cp.nodeId}_${nid}`}
+                    x={toSvgX(sup.x) - 3}
+                    y={toSvgY(sup.z) - 3}
+                    width={6}
+                    height={6}
+                    fill="#ca8a04"
+                    stroke="#eab308"
+                    strokeWidth="0.8"
+                  />
+                );
+              })}
+
+              {/* Column center marker (individual) */}
+              {!cp.isCombined && (
+                <rect
+                  x={cp.cx - 4}
+                  y={cp.cz - 4}
+                  width={8}
+                  height={8}
+                  fill="#ca8a04"
+                  stroke="#eab308"
+                  strokeWidth="1"
+                />
+              )}
 
               {/* Label */}
               <text
                 x={cp.cx}
                 y={cp.cz - 10}
-                fill={selectedNodeIds.has(cp.nodeId) ? '#1d4ed8' : '#334155'}
+                fill={(selectedNodeIds.has(cp.nodeId as any)) ? (cp.isCombined ? '#be185d' : '#1d4ed8') : '#334155'}
                 fontSize="8"
                 fontWeight="bold"
                 textAnchor="middle"
@@ -384,13 +478,16 @@ export const PileCapPlanView: React.FC<PileCapPlanViewProps> = ({
               <text
                 x={cp.cx}
                 y={cp.cz + 16}
-                fill={selectedNodeIds.has(cp.nodeId) ? '#1d4ed8' : '#64748b'}
+                fill={(selectedNodeIds.has(cp.nodeId as any)) ? (cp.isCombined ? '#be185d' : '#1d4ed8') : '#64748b'}
                 fontSize="6.5"
                 textAnchor="middle"
                 fontFamily="monospace"
                 className="pointer-events-none"
               >
-                {cp.pileCount}P • {cp.design.capLength}×{cp.design.capWidth}
+                {cp.isCombined
+                  ? `${cp.pileCount}P Combined • ${cp.combinedGroup?.capLength}×${cp.combinedGroup?.capWidth}`
+                  : `${cp.pileCount}P • ${cp.design?.capLength}×${cp.design?.capWidth}`
+                }
               </text>
             </g>
           ))}
@@ -409,15 +506,17 @@ export const PileCapPlanView: React.FC<PileCapPlanViewProps> = ({
         {singleSelected ? (
           <DesignPanel
             design={singleSelected}
-            nodeId={Array.from(selectedNodeIds)[0]}
-            customOverrides={customPileCapOverrides[Array.from(selectedNodeIds)[0]]}
+            nodeId={Array.from(selectedNodeIds)[0] as number}
+            customOverrides={customPileCapOverrides[Array.from(selectedNodeIds)[0] as number]}
             onPileCountChange={onPileCountChange}
             onRotationChange={onRotationChange}
           />
-        ) : selectedCaps.length > 1 ? (
+        ) : singleCombined ? (
+          <CombinedDesignPanel group={singleCombined} />
+        ) : (selectedIndividualCaps.length + selectedCombinedGroups.length) > 1 ? (
           <BatchDesignPanel
-            caps={selectedCaps}
-            nodeIds={Array.from(selectedNodeIds)}
+            caps={selectedIndividualCaps}
+            nodeIds={Array.from(selectedNodeIds).filter((id): id is number => typeof id === 'number')}
             customOverrides={customPileCapOverrides}
             onPileCountChange={onPileCountChange}
           />
@@ -705,6 +804,85 @@ const BatchDesignPanel: React.FC<BatchDesignProps> = ({
                 <span className="text-indigo-600 font-semibold">{cap.pileCount}-Pile</span>
               </div>
               <span className="font-mono text-[9px] text-slate-500">{cap.capLength}×{cap.capWidth}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Combined Cap Design Panel ───────────────────────────────────────────────
+
+interface CombinedDesignProps {
+  group: CombinedPileCapGroup;
+}
+
+const CombinedDesignPanel: React.FC<CombinedDesignProps> = ({ group }) => {
+  const isPass = group.status === 'PASS';
+
+  return (
+    <div className="flex flex-col h-full overflow-y-auto">
+      {/* Header */}
+      <div className="px-4 py-3 bg-rose-50 border-b border-rose-200 shrink-0">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-mono text-sm font-bold text-rose-800">Combined Pile Cap</h3>
+          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${isPass ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+            {group.status}
+          </span>
+        </div>
+        <div className="font-mono text-[10px] text-slate-500">
+          {group.columnLabels.join(', ')} • {group.nodeIds.length} columns
+        </div>
+        <div className="font-mono text-[10px] text-slate-400 mt-0.5">
+          {group.reason === 'SHEAR_WALL' ? 'Shear Wall' : group.reason === 'MERGED_CLOSE_COLUMNS' ? 'Merged Close Columns' : 'Manual Merge'}
+        </div>
+      </div>
+
+      {/* Cap Details */}
+      <div className="px-4 py-3 border-b border-slate-100 shrink-0">
+        <div className="text-[9px] font-mono text-slate-400 uppercase tracking-wider mb-2 font-semibold">Cap Configuration</div>
+        <div className="space-y-2">
+          <DetailRow label="Cap Size" value={`${group.capLength} × ${group.capWidth} × ${group.capDepth} mm`} />
+          <DetailRow label="Pile Count" value={`${group.pileCount} piles (${group.pileRows}×${group.pileCols})`} accent />
+          <DetailRow label="Pile Diameter" value={`${group.pileDiameter} mm`} />
+          <DetailRow label="Pile Spacing X" value={`${group.pileSpacingX || group.pileSpacing} mm`} />
+          <DetailRow label="Pile Spacing Z" value={`${group.pileSpacingZ || group.pileSpacing} mm`} />
+          <DetailRow label="Edge Distance" value={`${group.edgeDistance} mm`} />
+          <DetailRow label="Load / Pile" value={`${group.loadPerPile} kN`} accent />
+        </div>
+      </div>
+
+      {/* Loads */}
+      <div className="px-4 py-3 border-b border-slate-100 shrink-0">
+        <div className="text-[9px] font-mono text-slate-400 uppercase tracking-wider mb-2 font-semibold">Loading</div>
+        <div className="space-y-2">
+          <DetailRow label="Total Pu" value={`${group.totalFactoredLoad} kN`} />
+          <DetailRow label="Total P_work" value={`${group.totalWorkingLoad} kN`} />
+          <DetailRow label="Safe Capacity" value={`${group.safePileCapacity} kN`} />
+        </div>
+      </div>
+
+      {/* Rebar */}
+      <div className="px-4 py-3 border-b border-slate-100 shrink-0">
+        <div className="text-[9px] font-mono text-slate-400 uppercase tracking-wider mb-2 font-semibold">Reinforcement</div>
+        <div className="space-y-2">
+          <DetailRow label="Bottom Mat" value={group.botRebarCallout} />
+          <DetailRow label="Top Mesh" value={group.topRebarCallout} />
+          <DetailRow label="Shear Stirrups" value={group.shearWallStirrupCallout} />
+        </div>
+      </div>
+
+      {/* Columns in group */}
+      <div className="px-4 py-3 flex-1 overflow-y-auto">
+        <div className="text-[9px] font-mono text-slate-400 uppercase tracking-wider mb-2 font-semibold">Columns in Group</div>
+        <div className="space-y-1">
+          {group.nodeIds.map((nid, i) => (
+            <div key={nid} className="flex items-center justify-between bg-slate-50 rounded px-2.5 py-1.5 border border-slate-100">
+              <span className="font-mono text-[11px] font-bold text-slate-700">
+                {group.columnLabels[i] || `C${nid}`}
+              </span>
+              <span className="font-mono text-[9px] text-slate-400">Joint #{nid}</span>
             </div>
           ))}
         </div>
