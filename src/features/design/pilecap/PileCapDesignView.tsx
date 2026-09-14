@@ -11,7 +11,7 @@ import { SplitPileCapModal } from './SplitPileCapModal';
 import { CalculationModal } from '@/features/calculations/CalculationModal';
 import { DetailedCalculationReport } from '@/features/calculations/types';
 import { DataTable, ColumnDef } from '@/components/tables/DataTable';
-import { exportToCsv } from '@/utils/exportUtils';
+import { exportToCsv, exportPileCapDrawingsPdf } from '@/utils/exportUtils';
 import { ColumnNumberingService } from '@/features/model/columnNumbering';
 import { PileDesignEngine, ProjectPileType } from '@/features/design/pile/pileDesignEngine';
 import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
@@ -103,6 +103,13 @@ export const PileCapDesignView: React.FC = () => {
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [isAutoSizing, setIsAutoSizing] = useState(false);
   const [autoSizeFeedback, setAutoSizeFeedback] = useState<string | null>(null);
+
+  // Drawing PDF export state
+  const [dimFontSize, setDimFontSize] = useState(1);
+  const [selectedDrawingCaps, setSelectedDrawingCaps] = useState<Set<number>>(new Set());
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const drawingContainerRef = React.useRef<HTMLDivElement>(null);
+  const batchRenderRef = React.useRef<HTMLDivElement>(null);
 
   // Resolve available project pile types
   const availablePileTypes: ProjectPileType[] = useMemo(() => {
@@ -580,16 +587,24 @@ export const PileCapDesignView: React.FC = () => {
 
   const columns: ColumnDef<any>[] = [
     {
-      header: 'SELECT',
+      header: 'SEL',
       accessorKey: 'nodeIds',
-      cell: (r) => (
-        <div className="flex items-center justify-center">
-          <span className="text-[9px] font-mono text-slate-500">
-            {r.nodeIds.length > 1 ? `${r.nodeIds.length} caps` : `#${r.nodeIds[0]}`}
-          </span>
-        </div>
-      ),
-      width: '60px',
+      cell: (r) => {
+        const nodeId = r.nodeIds[0];
+        const isChecked = selectedDrawingCaps.has(nodeId);
+        return (
+          <div className="flex items-center justify-center">
+            <input
+              type="checkbox"
+              checked={isChecked}
+              onChange={() => toggleDrawingCapSelection(nodeId)}
+              className="w-3.5 h-3.5 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+              title={isChecked ? 'Deselect for Drawing PDF' : 'Select for Drawing PDF'}
+            />
+          </div>
+        );
+      },
+      width: '40px',
       align: 'center',
     },
     {
@@ -865,6 +880,79 @@ export const PileCapDesignView: React.FC = () => {
     );
   };
 
+  const toggleDrawingCapSelection = (nodeId: number) => {
+    setSelectedDrawingCaps((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  };
+
+  const toggleAllDrawingCaps = () => {
+    if (selectedDrawingCaps.size === rows.length) {
+      setSelectedDrawingCaps(new Set());
+    } else {
+      setSelectedDrawingCaps(new Set(rows.map((r) => r.nodeIds[0])));
+    }
+  };
+
+  const handleExportDrawingPdf = async () => {
+    if (selectedDrawingCaps.size === 0) return;
+    setIsExportingPdf(true);
+    try {
+      const capsToExport = Array.from(selectedDrawingCaps).map((nodeId) => designedCaps.get(nodeId)).filter(Boolean) as PileCapDesignOutput[];
+      if (capsToExport.length === 0) return;
+
+      const container = batchRenderRef.current;
+      if (!container) return;
+
+      const { default: jsPDF } = await import('jspdf');
+      const html2canvasModule = await import('html2canvas');
+      const html2canvas = html2canvasModule.default;
+
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const a4W = 297;
+      const a4H = 210;
+      const a3W = 420;
+      const a3H = 297;
+      const margin = 8;
+
+      for (let i = 0; i < capsToExport.length; i++) {
+        const cap = capsToExport[i];
+        const el = container.querySelector<HTMLElement>(`[data-cap-id="${cap.supportNodeId}"]`);
+        if (!el) continue;
+
+        el.style.display = 'block';
+        el.style.position = 'static';
+
+        const canvas = await html2canvas(el, {
+          scale: 2,
+          backgroundColor: '#ffffff',
+          useCORS: true,
+          logging: false,
+        });
+
+        const imgData = canvas.toDataURL('image/png');
+        const ratio = Math.min((a4W - 2 * margin) / canvas.width, (a4H - 2 * margin) / canvas.height);
+        const drawW = canvas.width * ratio;
+        const drawH = canvas.height * ratio;
+        const x = (a4W - drawW) / 2;
+        const y = (a4H - drawH) / 2;
+
+        if (i > 0) doc.addPage('a4', 'landscape');
+        doc.addImage(imgData, 'PNG', x, y, drawW, drawH);
+
+        el.style.display = 'none';
+        el.style.position = 'absolute';
+      }
+
+      doc.save(`PileCap_Drawings_${capsToExport.length}caps_${Date.now()}.pdf`);
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   // Hide toggles for each panel group
   const [showBanner, setShowBanner] = useState(true);
   const [showRebar, setShowRebar] = useState(true);
@@ -954,6 +1042,24 @@ export const PileCapDesignView: React.FC = () => {
                 >
                   <Download className="w-3.5 h-3.5" />
                   Export CSV
+                </button>
+
+                <button
+                  onClick={toggleAllDrawingCaps}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-slate-700 bg-white hover:bg-slate-50 border border-ui-border rounded transition-colors shadow-2xs"
+                  title={selectedDrawingCaps.size === rows.length ? 'Deselect All' : 'Select All for Drawing PDF'}
+                >
+                  {selectedDrawingCaps.size === rows.length ? '☐' : '☑'} Select All ({selectedDrawingCaps.size}/{rows.length})
+                </button>
+
+                <button
+                  onClick={handleExportDrawingPdf}
+                  disabled={selectedDrawingCaps.size === 0 || isExportingPdf}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded transition-colors shadow-2xs disabled:opacity-50"
+                  title="Export selected pile cap drawings as PDF (A4 Plan + A3 Cross Section)"
+                >
+                  <FileText className="w-3.5 h-3.5 text-rose-600" />
+                  {isExportingPdf ? 'Exporting...' : `Drawing PDF (${selectedDrawingCaps.size})`}
                 </button>
               </>
             )}
@@ -1504,20 +1610,62 @@ export const PileCapDesignView: React.FC = () => {
       {/* Calculation Modal */}
       <CalculationModal report={selectedReport} onClose={() => setSelectedReport(null)} />
 
+      {/* Hidden Batch Render Container for PDF Export */}
+      <div ref={batchRenderRef} className="sr-only" style={{ position: 'absolute', left: '-9999px', top: 0, pointerEvents: 'none' }}>
+        {Array.from(selectedDrawingCaps).map((nodeId) => {
+          const cap = designedCaps.get(nodeId);
+          if (!cap) return null;
+          return (
+            <div
+              key={nodeId}
+              data-cap-id={nodeId}
+              style={{ display: 'none', position: 'absolute', left: '-9999px', width: '900px', background: '#fff', padding: '16px' }}
+            >
+              <PileCapDrawingSvg pileCap={cap} dimFontSize={dimFontSize} />
+            </div>
+          );
+        })}
+      </div>
+
       {/* Drawing Modal */}
       {selectedDrawingCap && (
         <div className="fixed inset-0 bg-deep-navy/80 backdrop-blur-2xs z-50 flex items-center justify-center p-4 font-sans animate-in fade-in">
-          <div className="w-full max-w-4xl bg-surface-card rounded-lg border border-ui-border shadow-2xl overflow-hidden flex flex-col">
+          <div className="w-full max-w-5xl bg-surface-card rounded-lg border border-ui-border shadow-2xl overflow-hidden flex flex-col">
             <div className="px-6 py-4 bg-slate-50 border-b border-ui-border flex items-center justify-between">
               <h3 className="font-mono text-sm font-bold text-deep-navy">
                 CAD PILE CAP PLAN & REBAR MESH — CAP PC-{selectedDrawingCap.supportNodeId}
               </h3>
-              <button onClick={() => setSelectedDrawingCap(null)} className="p-1 hover:bg-slate-200 rounded text-slate-500">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-3">
+                {/* Font Size Controls */}
+                <div className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded">
+                  <span className="text-[10px] font-mono text-slate-500 font-semibold">DIM TEXT:</span>
+                  <button
+                    onClick={() => setDimFontSize((f) => Math.max(0.5, f - 0.1))}
+                    className="w-6 h-6 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded text-sm font-bold text-slate-700 transition-colors"
+                    title="Decrease dimension text size"
+                  >
+                    −
+                  </button>
+                  <span className="text-[10px] font-mono text-slate-700 w-8 text-center font-bold">
+                    {Math.round(dimFontSize * 100)}%
+                  </span>
+                  <button
+                    onClick={() => setDimFontSize((f) => Math.min(2, f + 0.1))}
+                    className="w-6 h-6 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded text-sm font-bold text-slate-700 transition-colors"
+                    title="Increase dimension text size"
+                  >
+                    +
+                  </button>
+                </div>
+                <button onClick={() => setSelectedDrawingCap(null)} className="p-1 hover:bg-slate-200 rounded text-slate-500">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
-            <div className="p-6">
-              <PileCapDrawingSvg pileCap={selectedDrawingCap} />
+            <div className="p-6 overflow-auto max-h-[80vh]" ref={drawingContainerRef}>
+              <div data-drawing-element>
+                <PileCapDrawingSvg pileCap={selectedDrawingCap} dimFontSize={dimFontSize} />
+              </div>
             </div>
           </div>
         </div>

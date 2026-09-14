@@ -52,3 +52,69 @@ export function exportToStd(model: any, filename: string, jobInfo?: any): void {
   });
 }
 
+/**
+ * Export pile cap drawings as a multi-page PDF (A4 Plan + A3 Cross Section).
+ * Uses html2canvas to rasterize SVG elements, then composites onto jsPDF pages.
+ */
+export async function exportPileCapDrawingsPdf(
+  drawingElements: HTMLElement[],
+  filenames: string[]
+): Promise<void> {
+  const [{ default: jsPDF }, html2canvasModule] = await Promise.all([
+    import('jspdf'),
+    import('html2canvas'),
+  ]);
+  const html2canvas = html2canvasModule.default;
+
+  if (drawingElements.length === 0) return;
+
+  // A4 landscape for plan view
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const a4W = 297;
+  const a4H = 210;
+  const margin = 8;
+
+  for (let i = 0; i < drawingElements.length; i++) {
+    const el = drawingElements[i];
+    const canvas = await html2canvas(el, {
+      scale: 2,
+      backgroundColor: '#ffffff',
+      useCORS: true,
+      logging: false,
+    });
+
+    const imgData = canvas.toDataURL('image/png');
+    const imgW = canvas.width;
+    const imgH = canvas.height;
+    const ratio = Math.min((a4W - 2 * margin) / imgW, (a4H - 2 * margin) / imgH);
+    const drawW = imgW * ratio;
+    const drawH = imgH * ratio;
+    const x = (a4W - drawW) / 2;
+    const y = (a4H - drawH) / 2;
+
+    if (i > 0) doc.addPage('a4', 'landscape');
+    doc.addImage(imgData, 'PNG', x, y, drawW, drawH);
+
+    // Add cross-section on A3 page
+    const sectionEl = (el.querySelector('[data-section-view]') as HTMLElement) || el;
+    const secCanvas = await html2canvas(sectionEl, {
+      scale: 2,
+      backgroundColor: '#ffffff',
+      useCORS: true,
+      logging: false,
+    });
+    const secImgData = secCanvas.toDataURL('image/png');
+    const a3W = 420;
+    const a3H = 297;
+    doc.addPage('a3', 'landscape');
+    const secRatio = Math.min((a3W - 2 * margin) / secCanvas.width, (a3H - 2 * margin) / secCanvas.height);
+    const secDrawW = secCanvas.width * secRatio;
+    const secDrawH = secCanvas.height * secRatio;
+    const secX = (a3W - secDrawW) / 2;
+    const secY = (a3H - secDrawH) / 2;
+    doc.addImage(secImgData, 'PNG', secX, secY, secDrawW, secDrawH);
+  }
+
+  doc.save(`PileCap_Drawings_${Date.now()}.pdf`);
+}
+

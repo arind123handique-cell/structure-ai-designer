@@ -15,6 +15,8 @@ interface PileCapDrawingSvgProps {
   width?: number;
   height?: number;
   orientation?: CapOrientation;
+  dimFontSize?: number;
+  showSection?: boolean;
 }
 
 export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
@@ -22,6 +24,8 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
   width = 860,
   height = 440,
   orientation = 'UP',
+  dimFontSize = 1,
+  showSection = true,
 }) => {
   const L = pileCap.capLength || 1800;
   const B = pileCap.capWidth || 1800;
@@ -43,6 +47,9 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
   // Dynamic Scale
   const maxDim = Math.max(L, B, count === 3 ? s + 2 * eo : 2400);
   const scale = 180 / maxDim;
+
+  // Dimension font size multiplier
+  const fs = dimFontSize;
 
   // Pile Radius in pixels
   const rPilePx = Math.max(12, (Dp / 2) * scale);
@@ -204,11 +211,11 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
           <polygon points="20,158 10,165 20,172" fill="#4f46e5" />
           <polygon points="330,158 340,165 330,172" fill="#4f46e5" />
           <circle cx="8" cy="165" r="8" fill="#e0e7ff" stroke="#4f46e5" strokeWidth="1.2" />
-          <text x="8" y="168.5" fill="#4f46e5" fontSize="9" fontWeight="bold" textAnchor="middle">
+          <text x="8" y="168.5" fill="#4f46e5" fontSize={9 * fs} fontWeight="bold" textAnchor="middle">
             1
           </text>
           <circle cx="342" cy="165" r="8" fill="#e0e7ff" stroke="#4f46e5" strokeWidth="1.2" />
-          <text x="342" y="168.5" fill="#4f46e5" fontSize="9" fontWeight="bold" textAnchor="middle">
+          <text x="342" y="168.5" fill="#4f46e5" fontSize={9 * fs} fontWeight="bold" textAnchor="middle">
             1
           </text>
 
@@ -288,7 +295,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
           {/* Column Center Crosshairs */}
           <line x1={cx - colW / 2 - 8} y1={cy} x2={cx + colW / 2 + 8} y2={cy} stroke="#ca8a04" strokeWidth="0.8" strokeDasharray="3,2" />
           <line x1={cx} y1={cy - colH / 2 - 8} x2={cx} y2={cy + colH / 2 + 8} stroke="#ca8a04" strokeWidth="0.8" strokeDasharray="3,2" />
-          <text x={cx} y={cy + 3.5} fill="#fef08a" fontSize="8" fontWeight="bold" textAnchor="middle">
+          <text x={cx} y={cy + 3.5} fill="#fef08a" fontSize={8 * fs} fontWeight="bold" textAnchor="middle">
             COL
           </text>
 
@@ -309,7 +316,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
                     <line x1={x2} y1={yEdge} x2={x2} y2={topY - 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
                     <line x1={x1} y1={topY} x2={x2} y2={topY} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
                     <rect x={cx - 16} y={topY - 7} width={32} height={10} fill="#ffffff" rx="2" />
-                    <text x={cx} y={topY} fill="#dc2626" fontSize="8" fontWeight="bold" textAnchor="middle">
+                    <text x={cx} y={topY} fill="#dc2626" fontSize={8 * fs} fontWeight="bold" textAnchor="middle">
                       {dims3p.apexWidthMm}
                     </text>
                   </g>
@@ -337,24 +344,24 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
 
                     {/* Tier 1: eo | s | eo */}
                     <line x1={xLeft} y1={btmDimY1} x2={xP1} y2={btmDimY1} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                    <text x={(xLeft + xP1) / 2} y={btmDimY1 - 2} fill="#dc2626" fontSize="7" fontWeight="bold" textAnchor="middle">
+                    <text x={(xLeft + xP1) / 2} y={btmDimY1 - 2} fill="#dc2626" fontSize={7 * fs} fontWeight="bold" textAnchor="middle">
                       {Math.round(eo)}
                     </text>
 
                     <line x1={xP1} y1={btmDimY1} x2={xP2} y2={btmDimY1} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                    <text x={cx} y={btmDimY1 - 2} fill="#dc2626" fontSize="7.5" fontWeight="bold" textAnchor="middle">
+                    <text x={cx} y={btmDimY1 - 2} fill="#dc2626" fontSize={7.5 * fs} fontWeight="bold" textAnchor="middle">
                       {s}
                     </text>
 
                     <line x1={xP2} y1={btmDimY1} x2={xRight} y2={btmDimY1} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                    <text x={(xP2 + xRight) / 2} y={btmDimY1 - 2} fill="#dc2626" fontSize="7" fontWeight="bold" textAnchor="middle">
+                    <text x={(xP2 + xRight) / 2} y={btmDimY1 - 2} fill="#dc2626" fontSize={7 * fs} fontWeight="bold" textAnchor="middle">
                       {Math.round(eo)}
                     </text>
 
                     {/* Tier 2: Overall Base Width (dims3p.lengthMm) */}
                     <line x1={xLeft} y1={btmDimY2} x2={xRight} y2={btmDimY2} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
                     <rect x={cx - 18} y={btmDimY2 - 6} width={36} height={10} fill="#ffffff" rx="2" />
-                    <text x={cx} y={btmDimY2 + 1.5} fill="#dc2626" fontSize="8" fontWeight="bold" textAnchor="middle">
+                    <text x={cx} y={btmDimY2 + 1.5} fill="#dc2626" fontSize={8 * fs} fontWeight="bold" textAnchor="middle">
                       {dims3p.lengthMm}
                     </text>
                   </g>
@@ -381,32 +388,32 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
 
                     {/* Chain 1: yTop -> yP_apex (eo) */}
                     <line x1={dimX} y1={yTop} x2={dimX} y2={yP_apex} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                    <text x={dimX + 4} y={(yTop + yP_apex) / 2 + 2.5} fill="#dc2626" fontSize="6.5" fontWeight="bold">
+                    <text x={dimX + 4} y={(yTop + yP_apex) / 2 + 2.5} fill="#dc2626" fontSize={6.5 * fs} fontWeight="bold">
                       {Math.round(eo)}
                     </text>
 
                     {/* Chain 2: yP_apex -> yCol (Rp) */}
                     <line x1={dimX} y1={yP_apex} x2={dimX} y2={yCol} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                    <text x={dimX + 4} y={(yP_apex + yCol) / 2 + 2.5} fill="#dc2626" fontSize="6.5" fontWeight="bold">
+                    <text x={dimX + 4} y={(yP_apex + yCol) / 2 + 2.5} fill="#dc2626" fontSize={6.5 * fs} fontWeight="bold">
                       {dims3p.RpMm}
                     </text>
 
                     {/* Chain 3: yCol -> yP_base (halfRp) */}
                     <line x1={dimX} y1={yCol} x2={dimX} y2={yP_base} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                    <text x={dimX + 4} y={(yCol + yP_base) / 2 + 2.5} fill="#dc2626" fontSize="6.5" fontWeight="bold">
+                    <text x={dimX + 4} y={(yCol + yP_base) / 2 + 2.5} fill="#dc2626" fontSize={6.5 * fs} fontWeight="bold">
                       {dims3p.halfRpMm}
                     </text>
 
                     {/* Chain 4: yP_base -> yBtm (eo) */}
                     <line x1={dimX} y1={yP_base} x2={dimX} y2={yBtm} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                    <text x={dimX + 4} y={(yP_base + yBtm) / 2 + 2.5} fill="#dc2626" fontSize="6.5" fontWeight="bold">
+                    <text x={dimX + 4} y={(yP_base + yBtm) / 2 + 2.5} fill="#dc2626" fontSize={6.5 * fs} fontWeight="bold">
                       {Math.round(eo)}
                     </text>
 
                     {/* Overall Height (dims3p.widthMm) */}
                     <line x1={dimX + 18} y1={yTop} x2={dimX + 18} y2={yBtm} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
                     <rect x={dimX + 13} y={cy - 6} width={26} height={10} fill="#ffffff" rx="2" />
-                    <text x={dimX + 22} y={cy + 2} fill="#dc2626" fontSize="8" fontWeight="bold">
+                    <text x={dimX + 22} y={cy + 2} fill="#dc2626" fontSize={8 * fs} fontWeight="bold">
                       {dims3p.widthMm}
                     </text>
                   </g>
@@ -418,7 +425,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
                 x={cx - (dims3p.lengthMm / 4) * scale - 22}
                 y={cy - 12}
                 fill="#dc2626"
-                fontSize="7.5"
+fontSize={7.5 * fs}
                 fontWeight="bold"
                 transform={`rotate(-56 ${cx - (dims3p.lengthMm / 4) * scale - 22} ${cy - 12})`}
               >
@@ -443,7 +450,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
                     <line x1={x2} y1={yEdge} x2={x2} y2={topY - 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
                     <line x1={x1} y1={topY} x2={x2} y2={topY} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
                     <rect x={cx - 18} y={topY - 7} width={36} height={10} fill="#ffffff" rx="2" />
-                    <text x={cx} y={topY} fill="#dc2626" fontSize="8.5" fontWeight="bold" textAnchor="middle">
+                    <text x={cx} y={topY} fill="#dc2626" fontSize={8.5 * fs} fontWeight="bold" textAnchor="middle">
                       {effL}
                     </text>
                   </g>
@@ -465,7 +472,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
                     <line x1={xEdge} y1={y2} x2={rightX + 4} y2={y2} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
                     <line x1={rightX} y1={y1} x2={rightX} y2={y2} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
                     <rect x={rightX - 16} y={cy - 5} width={32} height={10} fill="#ffffff" rx="2" />
-                    <text x={rightX} y={cy + 2.5} fill="#dc2626" fontSize="8.5" fontWeight="bold" textAnchor="middle">
+                    <text x={rightX} y={cy + 2.5} fill="#dc2626" fontSize={8.5 * fs} fontWeight="bold" textAnchor="middle">
                       {effB}
                     </text>
                   </g>
@@ -485,15 +492,15 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
                 return (
                   <g>
                     <line x1={x1} y1={btmY} x2={xP1} y2={btmY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                    <text x={(x1 + xP1) / 2} y={btmY - 2} fill="#dc2626" fontSize="7" fontWeight="bold" textAnchor="middle">
+                    <text x={(x1 + xP1) / 2} y={btmY - 2} fill="#dc2626" fontSize={7 * fs} fontWeight="bold" textAnchor="middle">
                       {Math.round(eo)}
                     </text>
                     <line x1={xP1} y1={btmY} x2={xP2} y2={btmY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                    <text x={cx} y={btmY - 2} fill="#dc2626" fontSize="7.5" fontWeight="bold" textAnchor="middle">
+                    <text x={cx} y={btmY - 2} fill="#dc2626" fontSize={7.5 * fs} fontWeight="bold" textAnchor="middle">
                       {s}
                     </text>
                     <line x1={xP2} y1={btmY} x2={x2} y2={btmY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                    <text x={(xP2 + x2) / 2} y={btmY - 2} fill="#dc2626" fontSize="7" fontWeight="bold" textAnchor="middle">
+                    <text x={(xP2 + x2) / 2} y={btmY - 2} fill="#dc2626" fontSize={7 * fs} fontWeight="bold" textAnchor="middle">
                       {Math.round(eo)}
                     </text>
                   </g>
@@ -505,25 +512,25 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
           {/* Plan View Leader Callouts */}
           <line x1={cx + 30} y1={cy + 35} x2="300" y2="300" stroke="#dc2626" strokeWidth="0.8" />
           <line x1="300" y1="300" x2="335" y2="300" stroke="#dc2626" strokeWidth="0.8" />
-          <text x="302" y="295" fill="#dc2626" fontSize="8" fontWeight="bold">
+          <text x="302" y="295" fill="#dc2626" fontSize={8 * fs} fontWeight="bold">
             {topRebarText}
           </text>
-          <text x="302" y="310" fill="#dc2626" fontSize="8" fontWeight="bold">
+          <text x="302" y="310" fill="#dc2626" fontSize={8 * fs} fontWeight="bold">
             {botRebarText}
           </text>
 
           {/* 150 THK PCC Callout */}
           <line x1={cx - 55} y1={cy - 20} x2="35" y2="35" stroke="#dc2626" strokeWidth="0.8" />
           <line x1="35" y1="35" x2="10" y2="35" stroke="#dc2626" strokeWidth="0.8" />
-          <text x="10" y="30" fill="#dc2626" fontSize="8" fontWeight="bold">
+          <text x="10" y="30" fill="#dc2626" fontSize={8 * fs} fontWeight="bold">
             150THK PCC
           </text>
 
           {/* Plan View Title */}
-          <text x={cx} y="375" fill="#0284c7" fontSize="11" fontWeight="bold" textAnchor="middle">
+          <text x={cx} y="375" fill="#0284c7" fontSize={11 * fs} fontWeight="bold" textAnchor="middle">
             PILE CAP PC{pileCap.supportNodeId} - PLAN{rotDeg !== 0 ? ` (${rotDeg}°)` : ''}
           </text>
-          <text x={cx} y="390" fill="#0284c7" fontSize="8.5" textAnchor="middle">
+          <text x={cx} y="390" fill="#0284c7" fontSize={8.5 * fs} textAnchor="middle">
             (SCALE 1:50)
           </text>
         </g>
@@ -551,7 +558,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
           {[secColY + 12, secColY + 28, secColY + 44, secColY + 60].map((ly, i) => (
             <line key={`clk_${i}`} x1={secColX} y1={ly} x2={secColX + secColW} y2={ly} stroke="#dc2626" strokeWidth="1.2" />
           ))}
-          <text x={secColX + secColW / 2} y={secColY + 22} fill="#dc2626" fontSize="6.5" fontWeight="bold" textAnchor="middle">
+          <text x={secColX + secColW / 2} y={secColY + 22} fill="#dc2626" fontSize={6.5 * fs} fontWeight="bold" textAnchor="middle">
             LINKS
           </text>
 
@@ -667,7 +674,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
                 <line x1={secCapX + secCapW} y1={secCapY} x2={secCapX + secCapW} y2={topDimY - 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
                 <line x1={secCapX} y1={topDimY} x2={secCapX + secCapW} y2={topDimY} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
                 <rect x={secCapX + secCapW / 2 - 18} y={topDimY - 7} width={36} height={10} fill="#ffffff" rx="2" />
-                <text x={secCapX + secCapW / 2} y={topDimY} fill="#dc2626" fontSize="8.5" fontWeight="bold" textAnchor="middle">
+                <text x={secCapX + secCapW / 2} y={topDimY} fill="#dc2626" fontSize={8.5 * fs} fontWeight="bold" textAnchor="middle">
                   {count === 3 && dims3p ? dims3p.lengthMm : L}
                 </text>
               </g>
@@ -683,7 +690,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
                 <line x1={secCapX + secCapW} y1={secCapY + secCapH} x2={rDimX + 4} y2={secCapY + secCapH} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
                 <line x1={rDimX} y1={secCapY} x2={rDimX} y2={secCapY + secCapH} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
                 <rect x={rDimX - 4} y={secCapY + secCapH / 2 - 5} width={28} height={10} fill="#ffffff" rx="2" />
-                <text x={rDimX + 10} y={secCapY + secCapH / 2 + 3} fill="#dc2626" fontSize="8.5" fontWeight="bold">
+                <text x={rDimX + 10} y={secCapY + secCapH / 2 + 3} fill="#dc2626" fontSize={8.5 * fs} fontWeight="bold">
                   {D}
                 </text>
               </g>
@@ -703,19 +710,19 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
 
                 {/* Left Overhang: eo */}
                 <line x1={secCapX} y1={btmDimY} x2={secPile1X} y2={btmDimY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                <text x={(secCapX + secPile1X) / 2} y={btmDimY - 2} fill="#dc2626" fontSize="7" fontWeight="bold" textAnchor="middle">
+                <text x={(secCapX + secPile1X) / 2} y={btmDimY - 2} fill="#dc2626" fontSize={7 * fs} fontWeight="bold" textAnchor="middle">
                   {Math.round(eo)}
                 </text>
 
                 {/* Pile Spacing: s */}
                 <line x1={secPile1X} y1={btmDimY} x2={secPile2X} y2={btmDimY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                <text x={(secPile1X + secPile2X) / 2} y={btmDimY - 2} fill="#dc2626" fontSize="7.5" fontWeight="bold" textAnchor="middle">
+                <text x={(secPile1X + secPile2X) / 2} y={btmDimY - 2} fill="#dc2626" fontSize={7.5 * fs} fontWeight="bold" textAnchor="middle">
                   {s}
                 </text>
 
                 {/* Right Overhang: eo */}
                 <line x1={secPile2X} y1={btmDimY} x2={secCapX + secCapW} y2={btmDimY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                <text x={(secPile2X + secCapX + secCapW) / 2} y={btmDimY - 2} fill="#dc2626" fontSize="7" fontWeight="bold" textAnchor="middle">
+                <text x={(secPile2X + secCapX + secCapW) / 2} y={btmDimY - 2} fill="#dc2626" fontSize={7 * fs} fontWeight="bold" textAnchor="middle">
                   {Math.round(eo)}
                 </text>
               </g>
@@ -724,12 +731,12 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
 
           {/* Clear cover and Embedment annotations */}
           <line x1={secCapX + 16} y1={secCapY + secCapH - 14} x2={secCapX + 16} y2={secCapY + secCapH} stroke="#dc2626" strokeWidth="0.7" />
-          <text x={secCapX + 12} y={secCapY + secCapH - 4} fill="#dc2626" fontSize="6.5" fontWeight="bold" textAnchor="end">
+          <text x={secCapX + 12} y={secCapY + secCapH - 4} fill="#dc2626" fontSize={6.5 * fs} fontWeight="bold" textAnchor="end">
             60 COVER
           </text>
 
           <line x1={secPile1X - rPilePx - 6} y1={secCapY + secCapH} x2={secPile1X - rPilePx - 6} y2={secCapY + secCapH - 6} stroke="#dc2626" strokeWidth="0.7" />
-          <text x={secPile1X - rPilePx - 8} y={secCapY + secCapH - 1} fill="#dc2626" fontSize="6.5" fontWeight="bold" textAnchor="end">
+          <text x={secPile1X - rPilePx - 8} y={secCapY + secCapH - 1} fill="#dc2626" fontSize={6.5 * fs} fontWeight="bold" textAnchor="end">
             50 EMBED
           </text>
 
@@ -737,36 +744,36 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
           {/* Top Mat */}
           <line x1={secCapX + secCapW - 12} y1={secCapY + 10} x2={secCapX + secCapW + 45} y2={secCapY - 20} stroke="#dc2626" strokeWidth="0.8" />
           <line x1={secCapX + secCapW + 45} y1={secCapY - 20} x2={secCapX + secCapW + 85} y2={secCapY - 20} stroke="#dc2626" strokeWidth="0.8" />
-          <text x={secCapX + secCapW + 88} y={secCapY - 23} fill="#dc2626" fontSize="8" fontWeight="bold">
+          <text x={secCapX + secCapW + 88} y={secCapY - 23} fill="#dc2626" fontSize={8 * fs} fontWeight="bold">
             {topRebarText}
           </text>
 
           {/* Bottom Mat */}
           <line x1={secCapX + secCapW - 12} y1={secCapY + secCapH - 14} x2={secCapX + secCapW + 45} y2={secCapY + secCapH + 15} stroke="#dc2626" strokeWidth="0.8" />
           <line x1={secCapX + secCapW + 45} y1={secCapY + secCapH + 15} x2={secCapX + secCapW + 85} y2={secCapY + secCapH + 15} stroke="#dc2626" strokeWidth="0.8" />
-          <text x={secCapX + secCapW + 88} y={secCapY + secCapH + 12} fill="#dc2626" fontSize="8" fontWeight="bold">
+          <text x={secCapX + secCapW + 88} y={secCapY + secCapH + 12} fill="#dc2626" fontSize={8 * fs} fontWeight="bold">
             {botRebarText}
           </text>
 
           {/* Side Ties */}
           <line x1={secCapX + 12} y1={secCapY + secCapH * 0.35} x2={secCapX - 35} y2={secCapY + 25} stroke="#dc2626" strokeWidth="0.8" />
           <line x1={secCapX - 35} y1={secCapY + 25} x2={secCapX - 70} y2={secCapY + 25} stroke="#dc2626" strokeWidth="0.8" />
-          <text x={secCapX - 72} y={secCapY + 22} fill="#dc2626" fontSize="8" fontWeight="bold" textAnchor="end">
+          <text x={secCapX - 72} y={secCapY + 22} fill="#dc2626" fontSize={8 * fs} fontWeight="bold" textAnchor="end">
             {sideRebarText}
           </text>
 
           {/* Pile Diameter */}
           <line x1={secPile1X} y1={secCapY + secCapH + 50} x2={secCapX - 25} y2={secCapY + secCapH + 75} stroke="#dc2626" strokeWidth="0.8" />
           <line x1={secCapX - 25} y1={secCapY + secCapH + 75} x2={secCapX - 70} y2={secCapY + secCapH + 75} stroke="#dc2626" strokeWidth="0.8" />
-          <text x={secCapX - 72} y={secCapY + secCapH + 72} fill="#dc2626" fontSize="8" fontWeight="bold" textAnchor="end">
+          <text x={secCapX - 72} y={secCapY + secCapH + 72} fill="#dc2626" fontSize={8 * fs} fontWeight="bold" textAnchor="end">
             {Dp} Ø BORED PILE
           </text>
 
           {/* Section Title */}
-          <text x={secCapX + secCapW / 2} y="375" fill="#0284c7" fontSize="11" fontWeight="bold" textAnchor="middle">
+          <text x={secCapX + secCapW / 2} y="375" fill="#0284c7" fontSize={11 * fs} fontWeight="bold" textAnchor="middle">
             SECTION 1-1
           </text>
-          <text x={secCapX + secCapW / 2} y="390" fill="#0284c7" fontSize="8.5" fontWeight="bold" textAnchor="middle">
+          <text x={secCapX + secCapW / 2} y="390" fill="#0284c7" fontSize={8.5 * fs} fontWeight="bold" textAnchor="middle">
             DETAIL OF PC{pileCap.supportNodeId} (SCALE 1:50)
           </text>
         </g>
