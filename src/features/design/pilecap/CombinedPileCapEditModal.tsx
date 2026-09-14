@@ -40,13 +40,11 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
   const spanXMm = Math.round(Math.abs(cap.maxX - cap.minX) * 1000);
   const spanZMm = Math.round(Math.abs(cap.maxZ - cap.minZ) * 1000);
   const isXLong = spanXMm >= spanZMm;
-  const minRequiredX = spanXMm + 2 * eo;
-  const minRequiredZ = spanZMm + 2 * eo;
 
   const [safeCapacity, setSafeCapacity] = useState<number>(defaultQsafe);
   const [pileCount, setPileCount] = useState<number>(cap.pileCount || Math.ceil(totalPwork / defaultQsafe));
-  const [capLength, setCapLength] = useState<number>(cap.capLength || Math.max(minRequiredX, 2200));
-  const [capWidth, setCapWidth] = useState<number>(cap.capWidth || Math.max(minRequiredZ, 2200));
+  const [capLength, setCapLength] = useState<number>(cap.capLength || Math.max(spanXMm + 2 * eo, 2200));
+  const [capWidth, setCapWidth] = useState<number>(cap.capWidth || Math.max(spanZMm + 2 * eo, 2200));
   const [capDepth, setCapDepth] = useState<number>(cap.capDepth || 900);
   const [rotationAngle, setRotationAngle] = useState<number>(cap.rotationAngle || 0);
   const [botRebar, setBotRebar] = useState<string>(cap.botRebarCallout || 'T16 @ 100 mm c/c (Long Way Bot)');
@@ -62,12 +60,41 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
     return CombinedPileCapEngine.computeOptimalGrid(pileCount, capLength, capWidth, Dp, eo);
   }, [pileCount, capLength, capWidth, Dp, eo]);
 
+  const sMin = 2.5 * Dp;
+  const sTarget = 3.0 * Dp;
+
+  // Real statutory minimum dimensions to house the pile grid and support columns per IS 2911:2010
+  const minRequiredX = Math.max(
+    spanXMm + 2 * eo,
+    gridPreview.nX > 1 ? (gridPreview.nX - 1) * sMin + 2 * eo : Dp + 2 * eo
+  );
+  const minRequiredZ = Math.max(
+    spanZMm + 2 * eo,
+    gridPreview.nZ > 1 ? (gridPreview.nZ - 1) * sMin + 2 * eo : Dp + 2 * eo
+  );
+  const targetRequiredX = Math.max(
+    spanXMm + 2 * eo,
+    gridPreview.nX > 1 ? (gridPreview.nX - 1) * sTarget + 2 * eo : Dp + 2 * eo
+  );
+  const targetRequiredZ = Math.max(
+    spanZMm + 2 * eo,
+    gridPreview.nZ > 1 ? (gridPreview.nZ - 1) * sTarget + 2 * eo : Dp + 2 * eo
+  );
+
+  const isSpacingCompliant =
+    (gridPreview.nX <= 1 || gridPreview.sX >= sMin) &&
+    (gridPreview.nZ <= 1 || gridPreview.sZ >= sMin) &&
+    capLength >= minRequiredX &&
+    capWidth >= minRequiredZ;
+
   const handleSave = () => {
+    const finalL = Math.max(capLength, minRequiredX);
+    const finalW = Math.max(capWidth, minRequiredZ);
     onSave(cap.groupId, {
-      customPileCount: pileCount,
+      customPileCount: gridPreview.totalPiles,
       customSafePileCapacity: safeCapacity,
-      customCapLength: capLength,
-      customCapWidth: capWidth,
+      customCapLength: finalL,
+      customCapWidth: finalW,
       customCapDepth: capDepth,
       customBottomRebar: botRebar,
       customTopRebar: topRebar,
@@ -136,6 +163,49 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
             </span>
           </div>
 
+          {/* Live Spacing Compliance Banner (IS 2911:2010 Cl. 6.6.1) */}
+          <div
+            className={`p-3 rounded border flex items-center justify-between text-xs ${
+              isSpacingCompliant
+                ? 'bg-blue-50 border-blue-300 text-blue-900'
+                : 'bg-amber-50 border-amber-300 text-amber-900'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <ShieldCheck className={`w-4 h-4 ${isSpacingCompliant ? 'text-blue-600' : 'text-amber-600'}`} />
+              <div>
+                <strong>
+                  Pile Spacing: Sx = {gridPreview.sX} mm, Sz = {gridPreview.sZ} mm
+                </strong>{' '}
+                (IS 2911 Min: {sMin} mm, Target: {sTarget} mm)
+                <div className="text-[10px] text-slate-500 font-sans mt-0.5">
+                  Compliant Enclosing Mat: {gridPreview.capLength} × {gridPreview.capWidth} mm • Edge distance: {eo} mm
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {(!isSpacingCompliant || capLength < targetRequiredX || capWidth < targetRequiredZ) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCapLength(targetRequiredX);
+                    setCapWidth(targetRequiredZ);
+                  }}
+                  className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-xs"
+                >
+                  Auto-Fit ({targetRequiredX} × {targetRequiredZ})
+                </button>
+              )}
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                  isSpacingCompliant ? 'bg-blue-200 text-blue-950' : 'bg-amber-200 text-amber-950'
+                }`}
+              >
+                {isSpacingCompliant ? 'SPACING PASS' : 'ADJUST REQUIRED'}
+              </span>
+            </div>
+          </div>
+
           {/* Form Inputs */}
           <div className="grid grid-cols-2 gap-4">
             {/* Pile Capacity */}
@@ -174,18 +244,20 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
                 <label className="text-slate-600 font-semibold">
                   {isXLong ? 'Cap Length (Long Core Axis / X) (mm):' : 'Cap Width (Transverse / X-axis) (mm):'}
                 </label>
-                <span className="text-[10px] text-slate-400">Min to cover columns: {minRequiredX} mm</span>
+                <span className="text-[10px] text-slate-500">Statutory Min: {minRequiredX} mm</span>
               </div>
               <input
                 type="number"
                 step={50}
                 value={capLength}
                 onChange={(e) => setCapLength(Math.max(500, Number(e.target.value)))}
-                className="w-full px-3 py-1.5 bg-white border border-ui-border rounded focus:outline-none focus:ring-1 focus:ring-secondary-brand"
+                className={`w-full px-3 py-1.5 bg-white border rounded focus:outline-none focus:ring-1 focus:ring-secondary-brand ${
+                  capLength < minRequiredX ? 'border-rose-400 bg-rose-50/50' : 'border-ui-border'
+                }`}
               />
               {capLength < minRequiredX && (
                 <span className="text-[10px] text-rose-600 font-semibold block mt-0.5">
-                  ⚠️ Less than minimum {minRequiredX} mm to cover column boundary!
+                  ⚠️ Less than statutory minimum {minRequiredX} mm for {gridPreview.nX} piles (s ≥ 2.5·Dp)!
                 </span>
               )}
             </div>
@@ -196,18 +268,20 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
                 <label className="text-slate-600 font-semibold">
                   {isXLong ? 'Cap Width (Transverse / Z-axis) (mm):' : 'Cap Length (Long Core Axis / Z) (mm):'}
                 </label>
-                <span className="text-[10px] text-slate-400">Min to cover columns: {minRequiredZ} mm</span>
+                <span className="text-[10px] text-slate-500">Statutory Min: {minRequiredZ} mm</span>
               </div>
               <input
                 type="number"
                 step={50}
                 value={capWidth}
                 onChange={(e) => setCapWidth(Math.max(500, Number(e.target.value)))}
-                className="w-full px-3 py-1.5 bg-white border border-ui-border rounded focus:outline-none focus:ring-1 focus:ring-secondary-brand"
+                className={`w-full px-3 py-1.5 bg-white border rounded focus:outline-none focus:ring-1 focus:ring-secondary-brand ${
+                  capWidth < minRequiredZ ? 'border-rose-400 bg-rose-50/50' : 'border-ui-border'
+                }`}
               />
               {capWidth < minRequiredZ && (
                 <span className="text-[10px] text-rose-600 font-semibold block mt-0.5">
-                  ⚠️ Less than minimum {minRequiredZ} mm to cover column boundary!
+                  ⚠️ Less than statutory minimum {minRequiredZ} mm for {gridPreview.nZ} piles (s ≥ 2.5·Dp)!
                 </span>
               )}
             </div>

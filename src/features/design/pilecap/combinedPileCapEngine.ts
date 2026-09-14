@@ -31,6 +31,8 @@ export interface CombinedPileCapGroup {
   safePileCapacity: number;
   pileDiameter: number;
   pileSpacing: number;
+  pileSpacingX?: number;
+  pileSpacingZ?: number;
   edgeDistance: number;
   pileCount: number;
   pileRows: number;
@@ -259,31 +261,84 @@ export class CombinedPileCapEngine {
     dimX: number,
     dimZ: number,
     Dp: number,
-    eo: number
-  ): { nX: number; nZ: number; pileOffsets: { x: number; z: number }[] } {
-    const sMin = 2.4 * Dp;
+    eo: number,
+    allowExpansion = true
+  ): {
+    nX: number;
+    nZ: number;
+    sX: number;
+    sZ: number;
+    capLength: number;
+    capWidth: number;
+    pileOffsets: { x: number; z: number }[];
+    totalPiles: number;
+  } {
+    // IS 2911:2010 Cl. 6.6.1 Statutory Limits:
+    // Friction piles: spacing >= 3.0 * Dp
+    // End bearing piles: spacing >= 2.5 * Dp
+    // Absolute minimum statutory spacing: 2.5 * Dp
+    const sMin = 2.5 * Dp;
+    const sTarget = 3.0 * Dp;
+    const sMax = 3.5 * Dp;
+    const edgeDist = Math.max(Dp, eo);
+
+    const N = Math.max(2, pileCount);
     let bestNx = 2;
-    let bestNz = Math.ceil(pileCount / 2);
+    let bestNz = Math.ceil(N / 2);
     let bestScore = Infinity;
 
-    for (let nx = 1; nx <= 8; nx++) {
-      const nz = Math.ceil(pileCount / nx);
-      if (nx * nz > pileCount + 3) continue;
+    const dimAspect = dimX / Math.max(1, dimZ);
 
-      const availX = Math.max(100, dimX - 2 * eo);
-      const availZ = Math.max(100, dimZ - 2 * eo);
-      const sx = nx > 1 ? availX / (nx - 1) : 0;
-      const sz = nz > 1 ? availZ / (nz - 1) : 0;
-
-      let penalty = 0;
-      if (nx > 1 && sx < sMin) penalty += (sMin - sx) * 15;
-      if (nz > 1 && sz < sMin) penalty += (sMin - sz) * 15;
+    // Search for optimal grid columns (nx) and rows (nz)
+    for (let nx = 1; nx <= 12; nx++) {
+      const nz = Math.ceil(N / nx);
+      const totalP = nx * nz;
+      // Disallow excessive pile over-allocation
+      if (totalP > N + 4 && N > 3) continue;
+      if (nx === 1 && nz > 4) continue; // single line of >4 piles is unstable for a 2D foundation mat
+      if (nz === 1 && nx > 4) continue;
 
       const gridAspect = nx / nz;
-      const dimAspect = dimX / dimZ;
-      const aspectDiff = Math.abs(gridAspect - dimAspect);
 
-      const score = penalty + aspectDiff * 2 + (nx * nz - pileCount) * 5;
+      // Desired dimensions to achieve target spacing
+      const reqX = nx > 1 ? (nx - 1) * sTarget + 2 * edgeDist : Dp + 2 * edgeDist;
+      const reqZ = nz > 1 ? (nz - 1) * sTarget + 2 * edgeDist : Dp + 2 * edgeDist;
+
+      // Evaluated dimensions (with expansion if allowed)
+      const candDimX = allowExpansion ? Math.max(dimX, reqX) : dimX;
+      const candDimZ = allowExpansion ? Math.max(dimZ, reqZ) : dimZ;
+
+      const availX = Math.max(10, candDimX - 2 * edgeDist);
+      const availZ = Math.max(10, candDimZ - 2 * edgeDist);
+
+      const candSx = nx > 1 ? availX / (nx - 1) : sTarget;
+      const candSz = nz > 1 ? availZ / (nz - 1) : sTarget;
+
+      // Check statutory compliance: spacing must NEVER be below sMin
+      let penalty = 0;
+      if (allowExpansion) {
+        if (nx > 1 && candSx < sMin) penalty += (sMin - candSx) * 1000 + 10000;
+        if (nz > 1 && candSz < sMin) penalty += (sMin - candSz) * 1000 + 10000;
+      }
+
+      // Penalty for aspect ratio mismatch
+      const aspectDiff = Math.abs(Math.log(gridAspect) - Math.log(dimAspect));
+
+      // Penalty for uneven pile spacing in X vs Z (prefer sx ~= sz)
+      const spacingDiff = Math.abs(candSx - candSz) / Dp;
+
+      // Penalty for excess piles: strong penalty for unnecessary piles, bonus for exact factorization
+      const excessPiles = totalP - N;
+      const exactBonus = totalP === N ? -30 : 0;
+      const excessPenalty = excessPiles * 40;
+
+      // Prefer configurations where orientation aligns with cap aspect
+      let orientationMismatch = 0;
+      if ((dimX >= dimZ && nx < nz) || (dimZ > dimX && nz < nx)) {
+        orientationMismatch = 25;
+      }
+
+      const score = penalty + aspectDiff * 20 + spacingDiff * 8 + excessPenalty + exactBonus + orientationMismatch;
       if (score < bestScore) {
         bestScore = score;
         bestNx = nx;
@@ -291,25 +346,69 @@ export class CombinedPileCapEngine {
       }
     }
 
-    const availX = Math.max(100, dimX - 2 * eo);
-    const availZ = Math.max(100, dimZ - 2 * eo);
-    const sX = bestNx > 1 ? Math.min(3.5 * Dp, availX / (bestNx - 1)) : 0;
-    const sZ = bestNz > 1 ? Math.min(3.5 * Dp, availZ / (bestNz - 1)) : 0;
+    let finalDimX: number;
+    let finalDimZ: number;
+    let sX: number;
+    let sZ: number;
 
-    const startX = bestNx === 1 ? 0 : -((bestNx - 1) * sX) / 2;
-    const startZ = bestNz === 1 ? 0 : -((bestNz - 1) * sZ) / 2;
+    if (allowExpansion) {
+      // Auto-expand dimensions to guarantee IS 2911 Cl. 6.6.1 compliance
+      const targetReqDimX = bestNx > 1 ? (bestNx - 1) * sTarget + 2 * edgeDist : Dp + 2 * edgeDist;
+      const targetReqDimZ = bestNz > 1 ? (bestNz - 1) * sTarget + 2 * edgeDist : Dp + 2 * edgeDist;
+
+      finalDimX = Math.max(dimX, targetReqDimX);
+      finalDimZ = Math.max(dimZ, targetReqDimZ);
+
+      const availX = Math.max(10, finalDimX - 2 * edgeDist);
+      const availZ = Math.max(10, finalDimZ - 2 * edgeDist);
+
+      sX = bestNx > 1 ? Math.min(sMax, Math.max(sMin, availX / (bestNx - 1))) : 0;
+      sZ = bestNz > 1 ? Math.min(sMax, Math.max(sMin, availZ / (bestNz - 1))) : 0;
+
+      const gSpanX = bestNx > 1 ? (bestNx - 1) * sX : 0;
+      const gSpanZ = bestNz > 1 ? (bestNz - 1) * sZ : 0;
+
+      finalDimX = Math.round(Math.max(finalDimX, gSpanX + 2 * edgeDist));
+      finalDimZ = Math.round(Math.max(finalDimZ, gSpanZ + 2 * edgeDist));
+    } else {
+      // User explicitly specified custom dimensions: preserve exact dimensions
+      finalDimX = Math.round(dimX);
+      finalDimZ = Math.round(dimZ);
+
+      const availX = Math.max(10, finalDimX - 2 * edgeDist);
+      const availZ = Math.max(10, finalDimZ - 2 * edgeDist);
+
+      sX = bestNx > 1 ? availX / (bestNx - 1) : 0;
+      sZ = bestNz > 1 ? availZ / (bestNz - 1) : 0;
+      if (bestNx > 1 && sX > sMax) sX = sMax;
+      if (bestNz > 1 && sZ > sMax) sZ = sMax;
+    }
+
+    const gridSpanX = bestNx > 1 ? (bestNx - 1) * sX : 0;
+    const gridSpanZ = bestNz > 1 ? (bestNz - 1) * sZ : 0;
+
+    const startX = -gridSpanX / 2;
+    const startZ = -gridSpanZ / 2;
 
     const pileOffsets: { x: number; z: number }[] = [];
     for (let r = 0; r < bestNz; r++) {
       for (let c = 0; c < bestNx; c++) {
-        if (pileOffsets.length >= pileCount) break;
         const px = Math.round(startX + c * sX);
         const pz = Math.round(startZ + r * sZ);
         pileOffsets.push({ x: px, z: pz });
       }
     }
 
-    return { nX: bestNx, nZ: bestNz, pileOffsets };
+    return {
+      nX: bestNx,
+      nZ: bestNz,
+      sX: Math.round(sX),
+      sZ: Math.round(sZ),
+      capLength: finalDimX,
+      capWidth: finalDimZ,
+      pileOffsets,
+      totalPiles: pileOffsets.length,
+    };
   }
 
   public static designShearWallCap(
@@ -379,8 +478,15 @@ export class CombinedPileCapEngine {
     const capDepth = override?.customCapDepth || Math.max(900, Math.round(1.5 * Dp));
 
     // Dynamic optimal grid placement strictly bounded within cap dimensions
-    const grid = CombinedPileCapEngine.computeOptimalGrid(pileCount, capLength, capWidth, Dp, eo);
+    const hasCustomDim = Boolean(override?.customCapLength || override?.customCapWidth);
+    const allowExpansion = !hasCustomDim;
+    const grid = CombinedPileCapEngine.computeOptimalGrid(pileCount, capLength, capWidth, Dp, eo, allowExpansion);
     let pileOffsets = grid.pileOffsets;
+    if (allowExpansion) {
+      capLength = grid.capLength;
+      capWidth = grid.capWidth;
+    }
+    pileCount = grid.totalPiles;
     const nCols = longIsX ? grid.nX : grid.nZ;
     const nRows = longIsX ? grid.nZ : grid.nX;
 
@@ -475,7 +581,9 @@ export class CombinedPileCapEngine {
       totalWorkingLoad,
       safePileCapacity,
       pileDiameter: Dp,
-      pileSpacing: s,
+      pileSpacing: Math.min(grid.sX || grid.sZ, grid.sZ || grid.sX) || s,
+      pileSpacingX: grid.sX,
+      pileSpacingZ: grid.sZ,
       edgeDistance: eo,
       pileCount,
       pileRows: nRows,
@@ -609,8 +717,15 @@ export class CombinedPileCapEngine {
     const capDepth = override?.customCapDepth || Math.max(900, Math.round(1.5 * Dp));
 
     // Dynamic optimal grid placement strictly bounded within cap dimensions
-    const grid = CombinedPileCapEngine.computeOptimalGrid(pileCount, capLength, capWidth, Dp, eo);
+    const hasCustomDim = Boolean(override?.customCapLength || override?.customCapWidth);
+    const allowExpansion = !hasCustomDim;
+    const grid = CombinedPileCapEngine.computeOptimalGrid(pileCount, capLength, capWidth, Dp, eo, allowExpansion);
     let pileOffsets = grid.pileOffsets;
+    if (allowExpansion) {
+      capLength = grid.capLength;
+      capWidth = grid.capWidth;
+    }
+    pileCount = grid.totalPiles;
     const nLongGrid = isXDir ? grid.nX : grid.nZ;
     const nShortGrid = isXDir ? grid.nZ : grid.nX;
 
@@ -709,7 +824,9 @@ export class CombinedPileCapEngine {
       totalWorkingLoad,
       safePileCapacity,
       pileDiameter: Dp,
-      pileSpacing: s,
+      pileSpacing: Math.min(grid.sX || grid.sZ, grid.sZ || grid.sX) || s,
+      pileSpacingX: grid.sX,
+      pileSpacingZ: grid.sZ,
       edgeDistance: eo,
       pileCount,
       pileRows: nShortGrid,
