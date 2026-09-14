@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RotateCcw, Eye, Play, Pause, Sparkles, Box } from 'lucide-react';
+import { getTruncated3PilePolygonMm } from '@/features/design/pilecap/pileCapGeometryUtils';
 
 export type RebarElementType = 'BEAM' | 'COLUMN' | 'PILE_CAP' | 'PILE' | 'FOOTING' | 'SLAB';
 
@@ -277,15 +278,146 @@ export const ElementRebar3DCanvas: React.FC<ElementRebar3DProps> = ({
         rootGroup.add(ring);
       }
     } else if (elementType === 'PILE_CAP') {
-      // Pile Cap concrete block (width X, depth Y, length Z)
-      const capW = b;
-      const capD = D; // thickness/depth
-      const capL = length_m;
-      const concGeom = new THREE.BoxGeometry(capW, capD, capL);
-      const concMesh = new THREE.Mesh(concGeom, concreteMat);
-      rootGroup.add(concMesh);
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(concGeom), edgeMat);
-      rootGroup.add(edges);
+      // ══════════════════════════════════════════════════════════
+      // 0. RESOLVE PILE GEOMETRY, OFFSETS & CAP ORIENTATION FIRST
+      // ══════════════════════════════════════════════════════════
+      const pDia = pileDiameter_m || 0.4;
+      const pRad = pDia / 2;
+      const overhangMin = pRad + 0.15; // standard min overhang (150mm clear concrete beyond pile edge)
+      const toMeters = (v: number) => (Math.abs(v) > 5 ? v / 1000 : v);
+
+      const dimLong = Math.max(b, length_m);
+      const dimShort = Math.min(b, length_m);
+      const s_est = Math.max(0.6, dimLong - 2 * overhangMin);
+
+      const defaultOffsets: { x: number; y: number }[] = pileCount === 2
+        ? [{ x: -s_est / 2, y: 0 }, { x: s_est / 2, y: 0 }]
+        : pileCount === 3
+        ? [
+            { x: 0,          y:  s_est / Math.sqrt(3) },
+            { x: -s_est / 2, y: -s_est / (2 * Math.sqrt(3)) },
+            { x:  s_est / 2, y: -s_est / (2 * Math.sqrt(3)) },
+          ]
+        : pileCount === 6
+        ? [
+            { x: -s_est / 2, y: -s_est / 4 },
+            { x: 0,          y: -s_est / 4 },
+            { x:  s_est / 2, y: -s_est / 4 },
+            { x: -s_est / 2, y:  s_est / 4 },
+            { x: 0,          y:  s_est / 4 },
+            { x:  s_est / 2, y:  s_est / 4 },
+          ]
+        : [ // 4-pile default
+            { x: -s_est / 2, y: -s_est / 2 },
+            { x:  s_est / 2, y: -s_est / 2 },
+            { x: -s_est / 2, y:  s_est / 2 },
+            { x:  s_est / 2, y:  s_est / 2 },
+          ];
+
+      const resolvedOffsets = (pileOffsets && pileOffsets.length > 0)
+        ? pileOffsets.map((po) => ({ x: toMeters(po.x), y: toMeters(po.y) }))
+        : defaultOffsets;
+
+      const pileXs = resolvedOffsets.map((p) => p.x);
+      const pileZs = resolvedOffsets.map((p) => p.y);
+      const minPileX = Math.min(...pileXs);
+      const maxPileX = Math.max(...pileXs);
+      const minPileZ = Math.min(...pileZs);
+      const maxPileZ = Math.max(...pileZs);
+      const spanX = maxPileX - minPileX;
+      const spanZ = maxPileZ - minPileZ;
+
+      // Ensure cap dimensions along X and Z strictly enclose the piles with proper overhang
+      const capD = D; // thickness/depth (Y)
+      let capW: number; // size along X
+      let capL: number; // size along Z
+
+      if (pileCount === 2) {
+        if (spanX >= spanZ) {
+          // Piles along X axis -> cap long along X, short along Z
+          capW = Math.max(dimLong, spanX + 2 * overhangMin);
+          capL = Math.max(dimShort, pDia + 2 * 0.15);
+        } else {
+          // Piles along Z axis -> cap short along X, long along Z
+          capW = Math.max(dimShort, pDia + 2 * 0.15);
+          capL = Math.max(dimLong, spanZ + 2 * overhangMin);
+        }
+      } else if (pileCount === 3) {
+        capW = Math.max(dimLong, spanX + 2 * overhangMin);
+        capL = Math.max(dimShort, spanZ + 2 * overhangMin);
+      } else if (pileCount === 6) {
+        if (spanX >= spanZ) {
+          capW = Math.max(dimLong, spanX + 2 * overhangMin);
+          capL = Math.max(dimShort, spanZ + 2 * overhangMin);
+        } else {
+          capW = Math.max(dimShort, spanX + 2 * overhangMin);
+          capL = Math.max(dimLong, spanZ + 2 * overhangMin);
+        }
+      } else {
+        // 4-pile square or other
+        capW = Math.max(dimLong, spanX + 2 * overhangMin);
+        capL = Math.max(dimLong, spanZ + 2 * overhangMin);
+      }
+
+      // ══════════════════════════════════════════════════════════
+      // 1. CONCRETE BODY & PCC BEDDING
+      // ══════════════════════════════════════════════════════════
+      const pccH = 0.15; // 150mm thickness
+      const pccMat = new THREE.MeshStandardMaterial({
+        color: 0x78350f, // dark brown
+        roughness: 0.9,
+        metalness: 0.0,
+        opacity: 0.85,
+        transparent: true,
+      });
+
+      if (pileCount === 3) {
+        // Authentic truncated trapezoidal 3-pile cap matching AutoCAD standard
+        const s_mm = Math.max(600, (spanX > 0.1 ? spanX : s_est) * 1000);
+        const eo_mm = 300;
+        const polyMm = getTruncated3PilePolygonMm(s_mm, eo_mm, 'UP');
+        const capShape = new THREE.Shape();
+        polyMm.forEach((pt, idx) => {
+          if (idx === 0) capShape.moveTo(pt.x / 1000, pt.y / 1000);
+          else capShape.lineTo(pt.x / 1000, pt.y / 1000);
+        });
+        capShape.closePath();
+
+        const concGeom = new THREE.ExtrudeGeometry(capShape, { depth: capD, bevelEnabled: false });
+        concGeom.rotateX(-Math.PI / 2);
+        concGeom.translate(0, capD / 2, 0);
+        const concMesh = new THREE.Mesh(concGeom, concreteMat);
+        rootGroup.add(concMesh);
+        const edges = new THREE.LineSegments(new THREE.EdgesGeometry(concGeom), edgeMat);
+        rootGroup.add(edges);
+
+        // Truncated PCC bedding
+        const pccPolyMm = getTruncated3PilePolygonMm(s_mm, eo_mm, 'UP', 150);
+        const pccShape = new THREE.Shape();
+        pccPolyMm.forEach((pt, idx) => {
+          if (idx === 0) pccShape.moveTo(pt.x / 1000, pt.y / 1000);
+          else pccShape.lineTo(pt.x / 1000, pt.y / 1000);
+        });
+        pccShape.closePath();
+        const pccGeom = new THREE.ExtrudeGeometry(pccShape, { depth: pccH, bevelEnabled: false });
+        pccGeom.rotateX(-Math.PI / 2);
+        pccGeom.translate(0, -capD / 2, 0);
+        const pccMesh = new THREE.Mesh(pccGeom, pccMat);
+        rootGroup.add(pccMesh);
+      } else {
+        // Rectangular pile cap (2-pile, 4-pile, 6-pile)
+        const concGeom = new THREE.BoxGeometry(capW, capD, capL);
+        const concMesh = new THREE.Mesh(concGeom, concreteMat);
+        rootGroup.add(concMesh);
+        const edges = new THREE.LineSegments(new THREE.EdgesGeometry(concGeom), edgeMat);
+        rootGroup.add(edges);
+
+        const pccExtension = 0.15; // 150mm extension beyond cap on all sides
+        const pccGeom = new THREE.BoxGeometry(capW + 2 * pccExtension, pccH, capL + 2 * pccExtension);
+        const pccMesh = new THREE.Mesh(pccGeom, pccMat);
+        pccMesh.position.set(0, -capD / 2 - pccH / 2, 0);
+        rootGroup.add(pccMesh);
+      }
 
       const hw = capW / 2 - cover;
       const hl = capL / 2 - cover;
@@ -325,12 +457,11 @@ export const ElementRebar3DCanvas: React.FC<ElementRebar3DProps> = ({
       });
 
       // ══════════════════════════════════════════════════════════
-      // 1. BOTTOM JALI (Two-way bottom mesh with 90° UPWARD hooks)
+      // 2. BOTTOM JALI (Two-way bottom mesh with 90° UPWARD hooks)
       // ══════════════════════════════════════════════════════════
-      const gridCountX = Math.max(5, Math.min(12, Math.round((capL - 2 * cover) / 0.18)));
-      const gridCountZ = Math.max(5, Math.min(12, Math.round((capW - 2 * cover) / 0.18)));
+      const gridCountX = Math.max(4, Math.min(12, Math.round((capL - 2 * cover) / 0.18)));
+      const gridCountZ = Math.max(4, Math.min(12, Math.round((capW - 2 * cover) / 0.18)));
 
-      // Shared cylinder geometries for bottom jali
       const botHorizGeomX = new THREE.CylinderGeometry(botBarRadius, botBarRadius, capW - 2 * cover, 8);
       botHorizGeomX.rotateZ(Math.PI / 2);
       const botHorizGeomZ = new THREE.CylinderGeometry(botBarRadius, botBarRadius, capL - 2 * cover, 8);
@@ -339,18 +470,15 @@ export const ElementRebar3DCanvas: React.FC<ElementRebar3DProps> = ({
 
       // Bottom Jali X-direction bars + vertical upward legs at both ends
       for (let i = 0; i < gridCountX; i++) {
-        const z = -hl + (2 * hl * i) / (gridCountX - 1);
-        // Horizontal bar along X
+        const z = -hl + (2 * hl * i) / Math.max(1, gridCountX - 1);
         const bar = new THREE.Mesh(botHorizGeomX, botJaliMat);
         bar.position.set(0, yBottom, z);
         rootGroup.add(bar);
 
-        // Left upward hook at x = -hw
         const leftHook = new THREE.Mesh(botVertHookGeom, botJaliMat);
         leftHook.position.set(-hw, yBottom + jaliHookHeight / 2, z);
         rootGroup.add(leftHook);
 
-        // Right upward hook at x = +hw
         const rightHook = new THREE.Mesh(botVertHookGeom, botJaliMat);
         rightHook.position.set(hw, yBottom + jaliHookHeight / 2, z);
         rootGroup.add(rightHook);
@@ -358,28 +486,25 @@ export const ElementRebar3DCanvas: React.FC<ElementRebar3DProps> = ({
 
       // Bottom Jali Z-direction bars + vertical upward legs at both ends
       for (let i = 0; i < gridCountZ; i++) {
-        const x = -hw + (2 * hw * i) / (gridCountZ - 1);
-        // Horizontal bar along Z (resting just above the X-bars)
+        const x = -hw + (2 * hw * i) / Math.max(1, gridCountZ - 1);
         const bar = new THREE.Mesh(botHorizGeomZ, botJaliMat);
         bar.position.set(x, yBottom + 0.018, 0);
         rootGroup.add(bar);
 
-        // Back upward hook at z = -hl
         const backHook = new THREE.Mesh(botVertHookGeom, botJaliMat);
         backHook.position.set(x, yBottom + 0.018 + jaliHookHeight / 2, -hl);
         rootGroup.add(backHook);
 
-        // Front upward hook at z = +hl
         const frontHook = new THREE.Mesh(botVertHookGeom, botJaliMat);
         frontHook.position.set(x, yBottom + 0.018 + jaliHookHeight / 2, hl);
         rootGroup.add(frontHook);
       }
 
       // ══════════════════════════════════════════════════════════
-      // 2. TOP JALI (Two-way top mesh with 90° DOWNWARD hooks)
+      // 3. TOP JALI (Two-way top mesh with 90° DOWNWARD hooks)
       // ══════════════════════════════════════════════════════════
-      const topCountX = Math.max(4, Math.min(10, Math.round((capL - 2 * cover) / 0.22)));
-      const topCountZ = Math.max(4, Math.min(10, Math.round((capW - 2 * cover) / 0.22)));
+      const topCountX = Math.max(3, Math.min(10, Math.round((capL - 2 * cover) / 0.22)));
+      const topCountZ = Math.max(3, Math.min(10, Math.round((capW - 2 * cover) / 0.22)));
 
       const topHorizGeomX = new THREE.CylinderGeometry(topBarRadius, topBarRadius, capW - 2 * cover, 8);
       topHorizGeomX.rotateZ(Math.PI / 2);
@@ -387,48 +512,39 @@ export const ElementRebar3DCanvas: React.FC<ElementRebar3DProps> = ({
       topHorizGeomZ.rotateX(Math.PI / 2);
       const topVertHookGeom = new THREE.CylinderGeometry(topBarRadius, topBarRadius, jaliHookHeight, 8);
 
-      // Top Jali X-direction bars + vertical downward legs at both ends
       for (let i = 0; i < topCountX; i++) {
-        const z = -hl + (2 * hl * i) / (topCountX - 1);
-        // Horizontal bar along X
+        const z = -hl + (2 * hl * i) / Math.max(1, topCountX - 1);
         const bar = new THREE.Mesh(topHorizGeomX, topJaliMat);
         bar.position.set(0, yTop, z);
         rootGroup.add(bar);
 
-        // Left downward hook at x = -hw
         const leftHook = new THREE.Mesh(topVertHookGeom, topJaliMat);
         leftHook.position.set(-hw, yTop - jaliHookHeight / 2, z);
         rootGroup.add(leftHook);
 
-        // Right downward hook at x = +hw
         const rightHook = new THREE.Mesh(topVertHookGeom, topJaliMat);
         rightHook.position.set(hw, yTop - jaliHookHeight / 2, z);
         rootGroup.add(rightHook);
       }
 
-      // Top Jali Z-direction bars + vertical downward legs at both ends
       for (let i = 0; i < topCountZ; i++) {
-        const x = -hw + (2 * hw * i) / (topCountZ - 1);
-        // Horizontal bar along Z (just below the X-bars)
+        const x = -hw + (2 * hw * i) / Math.max(1, topCountZ - 1);
         const bar = new THREE.Mesh(topHorizGeomZ, topJaliMat);
         bar.position.set(x, yTop - 0.016, 0);
         rootGroup.add(bar);
 
-        // Back downward hook at z = -hl
         const backHook = new THREE.Mesh(topVertHookGeom, topJaliMat);
         backHook.position.set(x, yTop - 0.016 - jaliHookHeight / 2, -hl);
         rootGroup.add(backHook);
 
-        // Front downward hook at z = +hl
         const frontHook = new THREE.Mesh(topVertHookGeom, topJaliMat);
         frontHook.position.set(x, yTop - 0.016 - jaliHookHeight / 2, hl);
         rootGroup.add(frontHook);
       }
 
       // ══════════════════════════════════════════════════════════
-      // 3. FACE REINFORCEMENT (Side Face Rebar & Closed Links: 2-T10)
+      // 4. FACE REINFORCEMENT (Side Face Rebar & Closed Links)
       // ══════════════════════════════════════════════════════════
-      // Standard IS 456 / IS 2911 side face reinforcement placed along depth
       const sideFaceLayers = Math.max(2, Math.min(5, Math.round((capD - 2 * cover) / 0.22)));
       const sideBarGeomX = new THREE.CylinderGeometry(faceBarRadius, faceBarRadius, capW - 2 * cover, 8);
       sideBarGeomX.rotateZ(Math.PI / 2);
@@ -438,27 +554,22 @@ export const ElementRebar3DCanvas: React.FC<ElementRebar3DProps> = ({
       for (let i = 1; i <= sideFaceLayers; i++) {
         const y = yBottom + (i / (sideFaceLayers + 1)) * (yTop - yBottom);
 
-        // Front face bar (Z = +hl)
         const frontBar = new THREE.Mesh(sideBarGeomX, faceBarMat);
         frontBar.position.set(0, y, hl);
         rootGroup.add(frontBar);
 
-        // Back face bar (Z = -hl)
         const backBar = new THREE.Mesh(sideBarGeomX, faceBarMat);
         backBar.position.set(0, y, -hl);
         rootGroup.add(backBar);
 
-        // Left face bar (X = -hw)
         const leftBar = new THREE.Mesh(sideBarGeomZ, faceBarMat);
         leftBar.position.set(-hw, y, 0);
         rootGroup.add(leftBar);
 
-        // Right face bar (X = +hw)
         const rightBar = new THREE.Mesh(sideBarGeomZ, faceBarMat);
         rightBar.position.set(hw, y, 0);
         rootGroup.add(rightBar);
 
-        // Continuous perimeter closed stirrup tie loop at this layer
         const ringPts = [
           new THREE.Vector3(-hw, y, -hl),
           new THREE.Vector3( hw, y, -hl),
@@ -472,7 +583,7 @@ export const ElementRebar3DCanvas: React.FC<ElementRebar3DProps> = ({
       }
 
       // ══════════════════════════════════════════════════════════
-      // 4. COLUMN STARTER DOWELS (Anchored to Bottom Jali with 90° feet)
+      // 5. COLUMN STARTER DOWELS (Anchored to Bottom Jali with 90° feet)
       // ══════════════════════════════════════════════════════════
       const colBarRadius = 0.011; // 22mm display column starter
       const colFootLen = 0.25; // 250mm anchor foot
@@ -489,12 +600,10 @@ export const ElementRebar3DCanvas: React.FC<ElementRebar3DProps> = ({
       ];
 
       starterOffsets.forEach(({ dx, dz, footDir }) => {
-        // Vertical column starter shaft
         const dowel = new THREE.Mesh(colDowelGeom, botJaliMat);
         dowel.position.set(dx, yBottom + colDowelHeight / 2, dz);
         rootGroup.add(dowel);
 
-        // 90° horizontal bend / foot resting on bottom jali
         const foot = new THREE.Mesh(colFootGeomX, botJaliMat);
         foot.position.set(dx + (footDir * colFootLen) / 2, yBottom + 0.01, dz);
         rootGroup.add(foot);
@@ -516,27 +625,8 @@ export const ElementRebar3DCanvas: React.FC<ElementRebar3DProps> = ({
       }
 
       // ══════════════════════════════════════════════════════════
-      // 5. 150mm THK PCC BEDDING LAYER (extending 150mm beyond cap)
-      // ══════════════════════════════════════════════════════════
-      const pccH = 0.15; // 150mm thickness
-      const pccExtension = 0.15; // 150mm extension beyond cap on all sides
-      const pccGeom = new THREE.BoxGeometry(capW + 2 * pccExtension, pccH, capL + 2 * pccExtension);
-      const pccMat = new THREE.MeshStandardMaterial({
-        color: 0x78350f, // dark brown
-        roughness: 0.9,
-        metalness: 0.0,
-        opacity: 0.85,
-        transparent: true,
-      });
-      const pccMesh = new THREE.Mesh(pccGeom, pccMat);
-      pccMesh.position.set(0, -capD / 2 - pccH / 2, 0);
-      rootGroup.add(pccMesh);
-
-      // ══════════════════════════════════════════════════════════
       // 6. BORED PILES & PROJECTING DOWELS (400Ø PILE)
       // ══════════════════════════════════════════════════════════
-      const pDia = pileDiameter_m || 0.4;
-      const pRad = pDia / 2;
       const pileShaftH = 1.2; // visible shaft length hanging below PCC
       const pGeom = new THREE.CylinderGeometry(pRad, pRad, pileShaftH, 24);
       const pMat = new THREE.MeshPhysicalMaterial({
@@ -554,38 +644,6 @@ export const ElementRebar3DCanvas: React.FC<ElementRebar3DProps> = ({
         roughness: 0.3,
         metalness: 0.6,
       });
-
-      // Default offsets spread to corners (38% of dimension)
-      const pileSpacingEst = Math.min(capW, capL) * 0.38;
-      const defaultOffsets: { x: number; y: number }[] = pileCount === 2
-        ? [{ x: -pileSpacingEst, y: 0 }, { x: pileSpacingEst, y: 0 }]
-        : pileCount === 3
-        ? [
-            { x: 0,               y:  pileSpacingEst },
-            { x: -pileSpacingEst, y: -pileSpacingEst * 0.577 },
-            { x:  pileSpacingEst, y: -pileSpacingEst * 0.577 },
-          ]
-        : pileCount === 6
-        ? [
-            { x: -pileSpacingEst, y: -pileSpacingEst },
-            { x: 0,               y: -pileSpacingEst },
-            { x:  pileSpacingEst, y: -pileSpacingEst },
-            { x: -pileSpacingEst, y:  pileSpacingEst },
-            { x: 0,               y:  pileSpacingEst },
-            { x:  pileSpacingEst, y:  pileSpacingEst },
-          ]
-        : [ // 4-pile default
-            { x: -pileSpacingEst, y: -pileSpacingEst },
-            { x:  pileSpacingEst, y: -pileSpacingEst },
-            { x: -pileSpacingEst, y:  pileSpacingEst },
-            { x:  pileSpacingEst, y:  pileSpacingEst },
-          ];
-
-      // Robust unit converter: handles both meters (e.g. 0.6) and mm (e.g. 600)
-      const toMeters = (v: number) => (Math.abs(v) > 5 ? v / 1000 : v);
-      const resolvedOffsets = (pileOffsets && pileOffsets.length > 0)
-        ? pileOffsets.map((po) => ({ x: toMeters(po.x), y: toMeters(po.y) }))
-        : defaultOffsets;
 
       const pccYBase = -capD / 2 - pccH;
       const pileYCenter = pccYBase - pileShaftH / 2;

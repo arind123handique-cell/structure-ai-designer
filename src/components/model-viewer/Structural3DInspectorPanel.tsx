@@ -964,9 +964,9 @@ export const Structural3DInspectorPanel: React.FC<Structural3DInspectorPanelProp
                     <ElementRebar3DCanvas
                       elementType="PILE_CAP"
                       title={`PILE CAP PC-${activeSupportNodeId}`}
-                      width_m={(pileCapResult.capWidth || 1800) / 1000}
+                      width_m={(pileCapResult.capLength || 1800) / 1000}
                       depth_m={(pileCapResult.capDepth || 750) / 1000}
-                      length_m={(pileCapResult.capLength || 1800) / 1000}
+                      length_m={(pileCapResult.capWidth || 1800) / 1000}
                       cover_mm={50}
                       pileCount={pileCapResult.pileCount || 4}
                       pileDiameter_m={assignedPile.diameter / 1000}

@@ -1617,9 +1617,17 @@ export const Structural3DViewer: React.FC = () => {
               isSelected ? edgeSelectedPileCapMaterial : edgePileCapMaterial
             );
           } else {
-            // Standard rectangular pile cap: uses shared unitBox & unitEdges with 0 geometry allocation
+            // Standard rectangular pile cap: orient dimensions to match pile layout
+            const pileXs = pileOffsets.map((p) => p.x);
+            const pileZs = pileOffsets.map((p) => p.z);
+            const spanX = pileXs.length > 1 ? Math.max(...pileXs) - Math.min(...pileXs) : 0;
+            const spanZ = pileZs.length > 1 ? Math.max(...pileZs) - Math.min(...pileZs) : 0;
+
+            const dimX = spanX >= spanZ ? Math.max(capLength, capWidth) : Math.min(capLength, capWidth);
+            const dimZ = spanX >= spanZ ? Math.min(capLength, capWidth) : Math.max(capLength, capWidth);
+
             capMesh = new THREE.Mesh(sharedGeoms.unitBox, isSelected ? selectedPileCapMaterial : pileCapMaterial);
-            capMesh.scale.set(capWidth, capDepth, capLength);
+            capMesh.scale.set(dimX, capDepth, dimZ);
             capMesh.position.set(0, -capDepth / 2, 0);
 
             capLine = new THREE.LineSegments(
