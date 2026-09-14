@@ -185,8 +185,9 @@ export const Structural3DViewer: React.FC = () => {
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
-  const initialCameraFramedRef = useRef(false);
-  const plotBoundaryGroupRef = useRef<THREE.Group | null>(null);
+const initialCameraFramedRef = useRef(false);
+   const plotBoundaryGroupRef = useRef<THREE.Group | null>(null);
+   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
 
   // Dynamic mesh tracking
   const dynamicGroupRef = useRef<THREE.Group | null>(null);
@@ -520,11 +521,12 @@ export const Structural3DViewer: React.FC = () => {
     return { hex: '#ef4444', int: 0xef4444 };
   }, []);
 
-  const [showLabels, setShowLabels] = useState(false);
-  const [showWallLabels, setShowWallLabels] = useState(false);
-  const [showSlabLabels, setShowSlabLabels] = useState(false);
-  const [showPileCaps, setShowPileCaps] = useState(true);
-  const [showGradeBeams, setShowGradeBeams] = useState(true);
+const [showGrid, setShowGrid] = useState(true);
+   const [showLabels, setShowLabels] = useState(false);
+   const [showWallLabels, setShowWallLabels] = useState(false);
+   const [showSlabLabels, setShowSlabLabels] = useState(false);
+   const [showPileCaps, setShowPileCaps] = useState(true);
+   const [showGradeBeams, setShowGradeBeams] = useState(true);
   const [showSlabs, setShowSlabs] = useState(true);
   const [showWalls, setShowWalls] = useState(true);
   const [showArchWalls, setShowArchWalls] = useState(true);
@@ -706,6 +708,10 @@ export const Structural3DViewer: React.FC = () => {
       powerPreference: 'high-performance',
       precision: 'mediump',
     });
+
+    // Add grid helper
+    const gridHelper = showGrid ? new THREE.GridHelper(100, 50, isLight ? 0x2563EB : 0x00f0ff, isLight ? 0xCBD5E1 : 0x1e293b) : null;
+    if (showGrid) scene.add(gridHelper);
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     rendererRef.current = renderer;
@@ -852,10 +858,11 @@ export const Structural3DViewer: React.FC = () => {
     dirLight2.position.set(-50, -30, -50);
     scene.add(dirLight2);
 
-    // Tactical Ground Grid Helper
-    const gridHelper = new THREE.GridHelper(100, 50, isLight ? 0x2563EB : 0x00f0ff, isLight ? 0xCBD5E1 : 0x1e293b);
-    gridHelper.position.y = -0.01;
-    scene.add(gridHelper);
+// Tactical Ground Grid Helper
+     const gridHelper = new THREE.GridHelper(100, 50, isLight ? 0x2563EB : 0x00f0ff, isLight ? 0xCBD5E1 : 0x1e293b);
+     gridHelper.position.y = -0.01;
+     gridHelperRef.current = gridHelper;
+     scene.add(gridHelper);
 
     // Plot / Site boundary ring (Stage 1 of the pipeline) — rebuilt whenever the plot changes
     const plotGroup = new THREE.Group();
@@ -1045,6 +1052,12 @@ export const Structural3DViewer: React.FC = () => {
       spriteMaterialCache.clear();
     };
   }, []);
+
+  useEffect(() => {
+    if (gridHelperRef.current) {
+      gridHelperRef.current.visible = showGrid;
+    }
+  }, [showGrid]);
 
   // Trigger re-render when bloom is toggled
   useEffect(() => {
@@ -2013,6 +2026,7 @@ export const Structural3DViewer: React.FC = () => {
     conceptColor,
     selectedStoryElevation,
     sectionColorMap,
+    showGrid,
   ]);
 
   // High-Performance Instant Selection Highlighter (0.01ms - zero mesh reallocation)
@@ -2382,6 +2396,8 @@ export const Structural3DViewer: React.FC = () => {
             onTakeSnapshot={handleTakeSnapshot}
             onSelectMember={(id) => selectMember(id)}
             selectedMemberId={selectedMemberId}
+            showGrid={showGrid}
+            onToggleGrid={() => setShowGrid(!showGrid)}
           />
         </div>
       )}

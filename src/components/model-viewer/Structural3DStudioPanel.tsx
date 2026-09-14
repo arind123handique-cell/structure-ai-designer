@@ -23,6 +23,7 @@ import {
   ChevronDown,
   ChevronRight,
   Maximize2,
+  Grid3x3,
 } from 'lucide-react';
 
 interface Structural3DStudioPanelProps {
@@ -54,6 +55,8 @@ interface Structural3DStudioPanelProps {
     showFootings: boolean;
   };
   onToggleFilterLayer: (layer: string) => void;
+  showGrid: boolean;
+  onToggleGrid: () => void;
   showLabels: boolean;
   onToggleLabels: () => void;
   onSelectAllColumns: () => void;
@@ -97,6 +100,8 @@ export const Structural3DStudioPanel: React.FC<Structural3DStudioPanelProps> = (
   onTakeSnapshot,
   onSelectMember,
   selectedMemberId,
+  showGrid,
+  onToggleGrid,
 }) => {
   const [activeTab, setActiveTab] = useState<'DISPLAY' | 'EXPLORER' | 'TOOLS'>('DISPLAY');
   const [searchQuery, setSearchQuery] = useState('');
@@ -372,6 +377,24 @@ export const Structural3DStudioPanel: React.FC<Structural3DStudioPanelProps> = (
               >
                 <span>Column ID & Dimensions</span>
                 {showLabels ? <Eye className="w-3.5 h-3.5 text-indigo-400" /> : <EyeOff className="w-3.5 h-3.5 text-slate-500" />}
+              </button>
+            </div>
+
+            {/* 6. GRID TOGGLE */}
+            <div className="space-y-1.5 pt-2 border-t border-slate-800">
+              <button
+                onClick={onToggleGrid}
+                className={`w-full p-2 rounded border flex items-center justify-between text-xs transition-colors ${
+                  showGrid
+                    ? 'bg-indigo-600/30 border-indigo-500 text-white font-bold'
+                    : 'bg-slate-800/40 border-slate-700 text-slate-300'
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <Grid3x3 className="w-3.5 h-3.5" />
+                  Grid Overlay
+                </span>
+                {showGrid ? <Eye className="w-3.5 h-3.5 text-indigo-400" /> : <EyeOff className="w-3.5 h-3.5 text-slate-500" />}
               </button>
             </div>
           </>
