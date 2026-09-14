@@ -479,12 +479,13 @@ export class BeamSectionSheetEngine {
     const bounds = level.bounds;
     if (beams.length === 0 && columns.length === 0) return;
 
-    // Drawing area — must stay above title block (title block top = A3_HEIGHT - A3_MARGIN - 3500)
-    const tbTop = A3_HEIGHT - A3_MARGIN - 3500;
-    const drawX0 = A3_MARGIN;
-    const drawY0 = A3_MARGIN;
-    const drawW = A3_WIDTH - 2 * A3_MARGIN;
-    const drawH = tbTop - A3_MARGIN;
+    // Drawing area — above title block at bottom of sheet
+    // Title block: y0=A3_MARGIN(1000) to y0+A3_TITLE_BLOCK_H(4500)
+    const tbTop = A3_MARGIN + 3500; // top edge of title block = 4500
+    const drawX0 = A3_MARGIN + 500;
+    const drawY0 = tbTop + 500;     // 500 above title block = 5000
+    const drawW = A3_WIDTH - 2 * A3_MARGIN - 1000;
+    const drawH = A3_HEIGHT - A3_MARGIN - drawY0 - 500;  // from drawY0 to near top border
 
     const minX = bounds.minX - 1.0;
     const maxX = bounds.maxX + 1.0;
