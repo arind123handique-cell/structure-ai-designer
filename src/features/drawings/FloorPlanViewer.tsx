@@ -58,6 +58,9 @@ export const FloorPlanViewer: React.FC = () => {
     customStaircaseLandingEntry,
     rotatePileCap,
     setPileCapRotation,
+    setCustomPileCapOverride,
+    clearCustomPileCapOverride,
+    savedPileCapDesigns,
     setActiveView,
   } = useProjectStore();
 
@@ -134,6 +137,11 @@ export const FloorPlanViewer: React.FC = () => {
       0
     );
   }, [selectedPileCapNodeId, customPileCapOverrides, selectedCapCol]);
+
+  const selectedCapDesign = useMemo(() => {
+    if (!selectedPileCapNodeId) return null;
+    return savedPileCapDesigns?.[selectedPileCapNodeId] ?? null;
+  }, [selectedPileCapNodeId, savedPileCapDesigns]);
 
   // Active floor staircase helper
   const activeFloorId = `floor_${activePlan?.levelIndex || 0}`;
@@ -844,60 +852,123 @@ export const FloorPlanViewer: React.FC = () => {
         </div>
       )}
 
-      {/* Foundation Level: Interactive Pile Cap Rotation Control Bar */}
+      {/* Foundation Level: Interactive Pile Cap Control Bar */}
       {activePlan.isFoundationLevel && showPileCaps && (
-        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-lg shadow-2xs font-mono text-xs">
-          <div className="flex items-center gap-2">
-            <RotateCw className="w-4 h-4 text-blue-600 shrink-0" />
-            {selectedCapCol ? (
-              <span className="text-slate-800">
-                Selected Pile Cap: <strong className="text-blue-700">PC-{selectedCapCol.nodeId} (Col {selectedCapCol.label})</strong>
-                {' • '}Current Orientation: <strong className="text-indigo-700">{selectedCapRot}°</strong>
-              </span>
-            ) : (
-              <span className="text-slate-600">
-                <strong>Pile Cap Rotator:</strong> Click any pile cap on the plan to rotate with its bored piles.
-              </span>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg shadow-2xs font-mono text-xs overflow-hidden">
+          {/* Main Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
+            <div className="flex items-center gap-2">
+              <RotateCw className="w-4 h-4 text-blue-600 shrink-0" />
+              {selectedCapCol ? (
+                <span className="text-slate-800">
+                  Selected: <strong className="text-blue-700">{selectedCapCol.label}</strong>
+                  {' • '}
+                  <span className="text-indigo-600 font-semibold">{selectedCapCol.pileCap?.pileCount || 4}-Pile</span>
+                  {' • '}
+                  {selectedCapCol.pileCap?.capLength}×{selectedCapCol.pileCap?.capWidth}×{selectedCapCol.pileCap?.capDepth} mm
+                  {' • Orient: '}<strong className="text-indigo-700">{selectedCapRot}°</strong>
+                </span>
+              ) : (
+                <span className="text-slate-600">
+                  <strong>Pile Cap Config:</strong> Click any pile cap on the plan to configure pile count, rotation, and view details.
+                </span>
+              )}
+            </div>
+
+            {selectedCapCol && (
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Pile Count Selector */}
+                <div className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-blue-300">
+                  <span className="text-[10px] text-slate-500 font-bold">PILES:</span>
+                  <select
+                    value={selectedCapCol.pileCap?.pileCount || 4}
+                    onChange={(e) => {
+                      const newCount = parseInt(e.target.value, 10);
+                      setCustomPileCapOverride(selectedCapCol.nodeId, {
+                        customPileCount: newCount,
+                      });
+                    }}
+                    className="bg-blue-600 text-white text-[11px] font-bold px-2 py-0.5 rounded border-0 cursor-pointer shadow-xs"
+                  >
+                    {[2, 3, 4, 5, 6].map((n) => (
+                      <option key={n} value={n}>{n} Pile{n !== 1 ? 's' : ''}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Rotation Controls */}
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => rotatePileCap(selectedCapCol.nodeId, 'CCW')}
+                    className="flex items-center gap-1 px-2 py-1 bg-white hover:bg-blue-100 text-blue-700 border border-blue-300 rounded font-bold transition-colors shadow-2xs"
+                    title="Rotate 90° Counter-Clockwise"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>CCW</span>
+                  </button>
+                  <button
+                    onClick={() => rotatePileCap(selectedCapCol.nodeId, 'CW')}
+                    className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors shadow-2xs"
+                    title="Rotate 90° Clockwise"
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                    <span>CW</span>
+                  </button>
+                  {selectedCapRot !== 0 && (
+                    <button
+                      onClick={() => setPileCapRotation(selectedCapCol.nodeId, 0)}
+                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-semibold transition-colors"
+                      title="Reset rotation to 0°"
+                    >
+                      0°
+                    </button>
+                  )}
+                </div>
+
+                {/* Reset to Auto */}
+                {customPileCapOverrides[selectedCapCol.nodeId] && (
+                  <button
+                    onClick={() => clearCustomPileCapOverride(selectedCapCol.nodeId)}
+                    className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 rounded text-[11px] font-semibold transition-colors"
+                    title="Reset to auto-designed configuration"
+                  >
+                    Reset Auto
+                  </button>
+                )}
+
+                {/* Deselect */}
+                <button
+                  onClick={() => setSelectedPileCapNodeId(null)}
+                  className="p-1 hover:bg-slate-200 rounded text-slate-500"
+                  title="Deselect"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             )}
           </div>
 
-          {selectedCapCol && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => rotatePileCap(selectedCapCol.nodeId, 'CCW')}
-                className="flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-blue-100 text-blue-700 border border-blue-300 rounded font-bold transition-colors shadow-2xs"
-                title="Rotate 90 degrees Counter-Clockwise (Anticlockwise)"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Rotate CCW (-90°)</span>
-              </button>
-
-              <button
-                onClick={() => rotatePileCap(selectedCapCol.nodeId, 'CW')}
-                className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors shadow-2xs"
-                title="Rotate 90 degrees Clockwise"
-              >
-                <RotateCw className="w-3.5 h-3.5" />
-                <span>Rotate CW (+90°)</span>
-              </button>
-
-              {selectedCapRot !== 0 && (
-                <button
-                  onClick={() => setPileCapRotation(selectedCapCol.nodeId, 0)}
-                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-semibold transition-colors"
-                  title="Reset rotation to 0 degrees"
-                >
-                  Reset 0°
-                </button>
+          {/* Design Info Panel (shown when cap is selected) */}
+          {selectedCapCol && selectedCapCol.pileCap && (
+            <div className="px-4 py-2 bg-white border-t border-blue-200 flex items-center gap-4 text-[10px] text-slate-600">
+              <span>
+                <strong className="text-slate-700">Load:</strong>{' '}
+                Pu = {selectedCapCol.pileCap.factoredVerticalLoad?.toFixed(1) || '—'} kN
+                {selectedCapCol.pileCap.pileCount > 0 && (
+                  <> • {selectedCapCol.pileCap.loadPerPile?.toFixed(1) || '—'} kN/pile</>
+                )}
+              </span>
+              <span>
+                <strong className="text-slate-700">Rebar:</strong>{' '}
+                Bot: {selectedCapCol.pileCap.rebarCalloutX?.split(' (')[0] || '—'}
+              </span>
+              <span>
+                <strong className="text-slate-700">Pile:</strong>{' '}
+                Ø{selectedCapCol.pileCap.pileDiameter}mm
+              </span>
+              {selectedCapDesign && (
+                <span className="text-emerald-600 font-semibold">✓ Designed</span>
               )}
-
-              <button
-                onClick={() => setSelectedPileCapNodeId(null)}
-                className="p-1 hover:bg-slate-200 rounded text-slate-500"
-                title="Deselect Pile Cap"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
             </div>
           )}
         </div>

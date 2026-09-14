@@ -3,7 +3,6 @@ import { useProjectStore } from '@/features/projects/projectStore';
 import { PileCapDesignEngine, PileCapDesignOutput } from './pileCapDesignEngine';
 import { CombinedPileCapEngine, CombinedPileCapGroup } from './combinedPileCapEngine';
 import { PileCapDrawingSvg } from './PileCapDrawingSvg';
-import { PileCapPlanView } from './PileCapPlanView';
 import { PileCapOptimizationEngine, BatchPileCapOptimizationSummary } from './pileCapOptimizationEngine';
 import { PileCapAutoDesignModal } from './PileCapAutoDesignModal';
 import { PileCapEditModal } from './PileCapEditModal';
@@ -989,7 +988,6 @@ export const PileCapDesignView: React.FC = () => {
   const [showRebar, setShowRebar] = useState(true);
   const [showCombined, setShowCombined] = useState(true);
   const [showTable, setShowTable] = useState(true);
-  const [planViewMode, setPlanViewMode] = useState<'table' | 'plan'>('table');
 
   return (
     <div className="flex flex-col h-full space-y-4 p-5 bg-ui-background overflow-y-auto font-sans">
@@ -1543,9 +1541,9 @@ export const PileCapDesignView: React.FC = () => {
         </CollapsiblePanel>
       )}
 
-      {/* Main Table / Plan View */}
+      {/* Main Table View */}
       <CollapsiblePanel
-        title={planViewMode === 'table' ? tableTitle : '2D STRUCTURAL GA PLAN — PILE CAP LAYOUT'}
+        title={tableTitle}
         icon={<Layers className="w-4 h-4 text-sky-700" />}
         storageKey="pilecap-table"
         open={showTable}
@@ -1553,42 +1551,9 @@ export const PileCapDesignView: React.FC = () => {
         contentClassName="p-0"
         className="flex-1 flex flex-col min-h-[420px]"
         variant="card"
-        headerActions={
-          <div className="flex items-center gap-1 bg-white rounded border border-slate-200 p-0.5">
-            <button
-              onClick={() => setPlanViewMode('table')}
-              className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded transition-all ${
-                planViewMode === 'table' ? 'bg-sky-600 text-white shadow' : 'text-slate-500 hover:bg-slate-50'
-              }`}
-            >
-              Table
-            </button>
-            <button
-              onClick={() => setPlanViewMode('plan')}
-              className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded transition-all ${
-                planViewMode === 'plan' ? 'bg-sky-600 text-white shadow' : 'text-slate-500 hover:bg-slate-50'
-              }`}
-            >
-              2D Plan
-            </button>
-          </div>
-        }
       >
         <div className="flex-1 min-h-[380px] flex flex-col overflow-hidden">
-        {planViewMode === 'plan' ? (
-          <div className="flex-1 min-h-[400px]">
-            <PileCapPlanView
-              activeModel={activeModel!}
-              designedCaps={designedCaps}
-              combinedPileCaps={combinedPileCaps}
-              customPileCapOverrides={customPileCapOverrides}
-              projectPileTypes={availablePileTypes}
-              supportPileAssignments={supportPileAssignments}
-              onPileCountChange={handleQuickPileCountChange}
-              onRotationChange={(nodeId, dir) => rotatePileCap(nodeId, dir)}
-            />
-          </div>
-        ) : filterPileGroup === 'COMBINED' ? (
+        {filterPileGroup === 'COMBINED' ? (
           <div className="p-8 text-center bg-slate-50/50 flex flex-col items-center justify-center space-y-2">
             <Layers className="w-8 h-8 text-rose-500" />
             <div className="font-mono font-bold text-sm text-slate-800">
