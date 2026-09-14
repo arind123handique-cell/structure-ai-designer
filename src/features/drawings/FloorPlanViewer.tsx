@@ -2,6 +2,10 @@ import React, { useState, useMemo } from 'react';
 import { useProjectStore } from '@/features/projects/projectStore';
 import { FloorPlanEngine, FloorPlanLevel } from './floorPlanEngine';
 import { FloorPlanSvg } from './FloorPlanSvg';
+import { DrawingSheetSvg } from './sheet/DrawingSheetSvg';
+import { BeamSectionSheetEngine } from './sheet/beamSectionSheetEngine';
+import { SlabDetailSheetEngine } from './sheet/slabDetailSheetEngine';
+import type { DrawingSheet } from './sheet/drawingSheet';
 import { PdfExportService } from './pdfExportService';
 import { exportToCsv } from '@/utils/exportUtils';
 import { StaircasePlacementEngine } from '@/features/architectural/engines/staircasePlacementEngine';
@@ -15,6 +19,8 @@ import {
   Building,
   Box,
   Compass,
+  Grid3x3,
+  Layers3,
   ArrowRight,
   Sparkles,
   FileSpreadsheet,
@@ -61,6 +67,8 @@ export const FloorPlanViewer: React.FC = () => {
     setCustomPileCapOverride,
     clearCustomPileCapOverride,
     savedPileCapDesigns,
+    savedBeamDesigns,
+    savedSlabDesigns,
     setActiveView,
   } = useProjectStore();
 
@@ -158,6 +166,42 @@ export const FloorPlanViewer: React.FC = () => {
   }, [architecturalStaircases, activeFloorId, activePlan]);
 
   const selectedStair = activeLevelStaircases[0] || null;
+
+  // ---------------------------------------------------------------------
+  // Detail drawing sheets — beam reinforcement sections and slab detailing,
+  // generated per floor in the conventions of the source CAD drawings
+  // (see DXF_DRAWING_ANALYSIS.md).
+  // ---------------------------------------------------------------------
+  const [sheetMode, setSheetMode] = useState<'FRAMING' | 'BEAM_SECTIONS' | 'SLAB_DETAILS'>('FRAMING');
+
+  const fckGrade = activeProject?.metadata.designSettings.concreteGrade === 'M30' ? 30 : 25;
+  const fyGrade = activeProject?.metadata.designSettings.steelGrade === 'Fe500D' ? 500 : 500;
+
+  const detailSheet: DrawingSheet | null = useMemo(() => {
+    if (sheetMode === 'FRAMING' || !activePlan) return null;
+    try {
+      if (sheetMode === 'BEAM_SECTIONS') {
+        return BeamSectionSheetEngine.buildSheet({
+          level: activePlan,
+          project: {
+            savedBeamDesigns: savedBeamDesigns || {},
+            savedSlabDesigns: savedSlabDesigns || {},
+            universalRebarSelection: (activeProject as any)?.universalRebarSelection,
+            allowedColumnRebarDiameters: (activeProject as any)?.allowedColumnRebarDiameters,
+          },
+          fck: fckGrade,
+          fy: fyGrade,
+        });
+      }
+      return SlabDetailSheetEngine.buildSheet({
+        level: activePlan,
+        project: { savedSlabDesigns: savedSlabDesigns || {} },
+      });
+    } catch (err) {
+      console.error('Detail sheet generation failed:', err);
+      return null;
+    }
+  }, [sheetMode, activePlan, savedBeamDesigns, savedSlabDesigns, activeProject, fckGrade, fyGrade]);
 
   // Add / Place Staircase on active level
   const handleAddStaircaseToLevel = () => {
@@ -322,7 +366,7 @@ export const FloorPlanViewer: React.FC = () => {
           {/* Export Current Level PDF */}
           <button
             onClick={handleExportCurrentPdf}
-            disabled={isExportingPdf}
+            disabled={isExportingPdf || !!detailSheet}
             className="flex items-center gap-1.5 px-3.5 py-1.5 bg-secondary-brand hover:bg-blue-700 text-white font-mono text-xs font-semibold rounded shadow-2xs transition-all disabled:opacity-50"
             title="Export the currently active 2D floor plan as a vector A3 PDF drawing sheet"
           >
@@ -333,7 +377,7 @@ export const FloorPlanViewer: React.FC = () => {
           {/* Export Complete Multi-Page PDF Set */}
           <button
             onClick={handleExportAllPdf}
-            disabled={isExportingPdf}
+            disabled={isExportingPdf || !!detailSheet}
             className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-mono text-xs font-bold rounded shadow-2xs transition-all disabled:opacity-50"
             title="Export all floor plans from foundation to roof into a complete multi-page PDF set"
           >
@@ -344,7 +388,9 @@ export const FloorPlanViewer: React.FC = () => {
           {/* Export CSV Schedule */}
           <button
             onClick={handleExportCsv}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-xs font-mono font-semibold shadow-2xs transition-colors"
+            disabled={!!detailSheet}
+            title={detailSheet ? 'CSV schedule export applies to the GA framing plan — switch to GA Framing Plan' : 'Export element schedule as CSV'}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-xs font-mono font-semibold shadow-2xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-slate-600" />
             <span>Export CSV</span>
@@ -422,6 +468,40 @@ export const FloorPlanViewer: React.FC = () => {
         {/* Row 2: CAD Sheet Setup (A3 Landscape / Portrait) & Cross-Sections Controls */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200">
           <div className="flex items-center gap-2 flex-wrap">
+            {/* 0. Drawing Sheet Type: GA framing plan vs generated detail sheets */}
+            <div className="inline-flex items-center bg-slate-100 p-0.5 rounded border border-slate-300 text-xs font-mono">
+              {([
+                { id: 'FRAMING' as const, label: 'GA Framing Plan', icon: Grid3x3 },
+                { id: 'BEAM_SECTIONS' as const, label: 'Beam Sections', icon: Compass },
+                { id: 'SLAB_DETAILS' as const, label: 'Slab Details', icon: Layers3 },
+              ]).map((mode) => {
+                const Icon = mode.icon;
+                const isActive = sheetMode === mode.id;
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => setSheetMode(mode.id)}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-colors ${
+                      isActive
+                        ? 'bg-deep-navy text-white shadow-xs'
+                        : 'text-slate-700 hover:text-slate-900 hover:bg-white'
+                    }`}
+                    title={
+                      mode.id === 'FRAMING'
+                        ? 'AutoCAD-style 2D GA framing and foundation plan'
+                        : mode.id === 'BEAM_SECTIONS'
+                          ? 'Per-floor beam reinforcement cross-sections and stirrup zone schedule (1:25 / 1:50)'
+                          : 'Per-floor slab reinforcement plan and thickness section'
+                    }
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{mode.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
             {/* 1. Sheet Orientation Toggle: A3 Landscape vs Portrait */}
             <div className="inline-flex items-center bg-slate-100 p-0.5 rounded border border-slate-300 text-xs font-mono">
               <button
@@ -852,131 +932,17 @@ export const FloorPlanViewer: React.FC = () => {
         </div>
       )}
 
-      {/* Foundation Level: Interactive Pile Cap Control Bar */}
-      {activePlan.isFoundationLevel && showPileCaps && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg shadow-2xs font-mono text-xs overflow-hidden">
-          {/* Main Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
-            <div className="flex items-center gap-2">
-              <RotateCw className="w-4 h-4 text-blue-600 shrink-0" />
-              {selectedCapCol ? (
-                <span className="text-slate-800">
-                  Selected: <strong className="text-blue-700">{selectedCapCol.label}</strong>
-                  {' • '}
-                  <span className="text-indigo-600 font-semibold">{selectedCapCol.pileCap?.pileCount || 4}-Pile</span>
-                  {' • '}
-                  {selectedCapCol.pileCap?.capLength}×{selectedCapCol.pileCap?.capWidth}×{selectedCapCol.pileCap?.capDepth} mm
-                  {' • Orient: '}<strong className="text-indigo-700">{selectedCapRot}°</strong>
-                </span>
-              ) : (
-                <span className="text-slate-600">
-                  <strong>Pile Cap Config:</strong> Click any pile cap on the plan to configure pile count, rotation, and view details.
-                </span>
-              )}
-            </div>
-
-            {selectedCapCol && (
-              <div className="flex items-center gap-2 flex-wrap">
-                {/* Pile Count Selector */}
-                <div className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-blue-300">
-                  <span className="text-[10px] text-slate-500 font-bold">PILES:</span>
-                  <select
-                    value={selectedCapCol.pileCap?.pileCount || 4}
-                    onChange={(e) => {
-                      const newCount = parseInt(e.target.value, 10);
-                      setCustomPileCapOverride(selectedCapCol.nodeId, {
-                        customPileCount: newCount,
-                      });
-                    }}
-                    className="bg-blue-600 text-white text-[11px] font-bold px-2 py-0.5 rounded border-0 cursor-pointer shadow-xs"
-                  >
-                    {[2, 3, 4, 5, 6].map((n) => (
-                      <option key={n} value={n}>{n} Pile{n !== 1 ? 's' : ''}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Rotation Controls */}
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => rotatePileCap(selectedCapCol.nodeId, 'CCW')}
-                    className="flex items-center gap-1 px-2 py-1 bg-white hover:bg-blue-100 text-blue-700 border border-blue-300 rounded font-bold transition-colors shadow-2xs"
-                    title="Rotate 90° Counter-Clockwise"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>CCW</span>
-                  </button>
-                  <button
-                    onClick={() => rotatePileCap(selectedCapCol.nodeId, 'CW')}
-                    className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors shadow-2xs"
-                    title="Rotate 90° Clockwise"
-                  >
-                    <RotateCw className="w-3.5 h-3.5" />
-                    <span>CW</span>
-                  </button>
-                  {selectedCapRot !== 0 && (
-                    <button
-                      onClick={() => setPileCapRotation(selectedCapCol.nodeId, 0)}
-                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-semibold transition-colors"
-                      title="Reset rotation to 0°"
-                    >
-                      0°
-                    </button>
-                  )}
-                </div>
-
-                {/* Reset to Auto */}
-                {customPileCapOverrides[selectedCapCol.nodeId] && (
-                  <button
-                    onClick={() => clearCustomPileCapOverride(selectedCapCol.nodeId)}
-                    className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 rounded text-[11px] font-semibold transition-colors"
-                    title="Reset to auto-designed configuration"
-                  >
-                    Reset Auto
-                  </button>
-                )}
-
-                {/* Deselect */}
-                <button
-                  onClick={() => setSelectedPileCapNodeId(null)}
-                  className="p-1 hover:bg-slate-200 rounded text-slate-500"
-                  title="Deselect"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Design Info Panel (shown when cap is selected) */}
-          {selectedCapCol && selectedCapCol.pileCap && (
-            <div className="px-4 py-2 bg-white border-t border-blue-200 flex items-center gap-4 text-[10px] text-slate-600">
-              <span>
-                <strong className="text-slate-700">Load:</strong>{' '}
-                Pu = {selectedCapCol.pileCap.factoredVerticalLoad?.toFixed(1) || '—'} kN
-                {selectedCapCol.pileCap.pileCount > 0 && (
-                  <> • {selectedCapCol.pileCap.loadPerPile?.toFixed(1) || '—'} kN/pile</>
-                )}
-              </span>
-              <span>
-                <strong className="text-slate-700">Rebar:</strong>{' '}
-                Bot: {selectedCapCol.pileCap.rebarCalloutX?.split(' (')[0] || '—'}
-              </span>
-              <span>
-                <strong className="text-slate-700">Pile:</strong>{' '}
-                Ø{selectedCapCol.pileCap.pileDiameter}mm
-              </span>
-              {selectedCapDesign && (
-                <span className="text-emerald-600 font-semibold">✓ Designed</span>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Main 2D CAD SVG Canvas Plan — Fully Scrollable Responsive Container */}
       <div className="w-full flex justify-center items-center p-1 pb-28">
         <div className="w-full max-w-[1680px] flex justify-center items-center">
+          {detailSheet ? (
+            <DrawingSheetSvg
+              sheet={detailSheet}
+              theme={cadTheme === 'BLUEPRINT_DARK' ? 'dark' : 'light'}
+              width={sheetOrientation === 'PORTRAIT' ? 1188 : 1680}
+              maxHeight={zoomFit ? 820 : undefined}
+            />
+          ) : (
           <FloorPlanSvg
             floorPlan={activePlan}
             project={activeProject}
@@ -1004,9 +970,13 @@ export const FloorPlanViewer: React.FC = () => {
             selectedPileCapNodeId={selectedPileCapNodeId}
             onSelectPileCap={setSelectedPileCapNodeId}
             onRotatePileCap={rotatePileCap}
+            onPileCountChange={(nodeId, count) => setCustomPileCapOverride(nodeId, { customPileCount: count })}
+            onResetOverrides={clearCustomPileCapOverride}
+            customPileCapOverrides={customPileCapOverrides}
             width={sheetOrientation === 'PORTRAIT' ? 1188 : 1680}
             height={sheetOrientation === 'PORTRAIT' ? 1680 : 1188}
           />
+          )}
         </div>
       </div>
     </div>

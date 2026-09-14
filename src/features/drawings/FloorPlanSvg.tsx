@@ -52,6 +52,9 @@ interface FloorPlanSvgProps {
   onSelectPileCap?: (nodeId: number | null) => void;
   onRotatePileCap?: (nodeId: number, direction: 'CW' | 'CCW') => void;
   onRotateCombinedPileCap?: (groupId: string, direction: 'CW' | 'CCW') => void;
+  onPileCountChange?: (nodeId: number, count: number) => void;
+  onResetOverrides?: (nodeId: number) => void;
+  customPileCapOverrides?: Record<number, any>;
 }
 
 export interface UniquePileCapType {
@@ -105,6 +108,9 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
   onSelectPileCap,
   onRotatePileCap,
   onRotateCombinedPileCap,
+  onPileCountChange,
+  onResetOverrides,
+  customPileCapOverrides = {},
 }) => {
   const bounds = floorPlan.bounds;
   const modelW = Math.max(bounds.width, 10);
@@ -1556,9 +1562,10 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                       })()
                     )}
 
-                    {/* Interactive On-Canvas Rotation Overlay when Selected */}
-                    {isSelected && onRotatePileCap && (
-                      <g className="cursor-pointer select-none">
+                    {/* Interactive On-Canvas Configuration Panel when Selected */}
+                    {isSelected && (
+                      <g className="select-none">
+                        {/* Selection highlight border */}
                         <rect
                           x={cx - Math.max(capL, capW) / 2 - 12}
                           y={cy - Math.max(capL, capW) / 2 - 12}
@@ -1570,28 +1577,78 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                           strokeDasharray="5 3"
                           rx="6"
                         />
-                        {/* Mini Rotate CCW Button */}
-                        <g
-                          transform={`translate(${cx - 32}, ${cy + Math.max(capL, capW) / 2 + 20})`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRotatePileCap(col.nodeId, 'CCW');
-                          }}
+                        {/* Config Panel — positioned below the cap */}
+                        <foreignObject
+                          x={cx - 140}
+                          y={cy + Math.max(capL, capW) / 2 + 16}
+                          width="280"
+                          height="110"
                         >
-                          <rect x="-18" y="-9" width="36" height="18" rx="4" fill="#1d4ed8" stroke="#3b82f6" strokeWidth="1" />
-                          <text x="0" y="3.5" fill="#ffffff" fontSize="8.5" fontWeight="bold" textAnchor="middle">⟲ -90°</text>
-                        </g>
-                        {/* Mini Rotate CW Button */}
-                        <g
-                          transform={`translate(${cx + 32}, ${cy + Math.max(capL, capW) / 2 + 20})`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRotatePileCap(col.nodeId, 'CW');
-                          }}
-                        >
-                          <rect x="-18" y="-9" width="36" height="18" rx="4" fill="#1d4ed8" stroke="#3b82f6" strokeWidth="1" />
-                          <text x="0" y="3.5" fill="#ffffff" fontSize="8.5" fontWeight="bold" textAnchor="middle">⟳ +90°</text>
-                        </g>
+                          <div style={{ fontFamily: 'monospace', fontSize: '10px' }}>
+                            <div style={{ background: '#eff6ff', border: '1px solid #93c5fd', borderRadius: '6px', padding: '6px 8px', boxShadow: '0 2px 6px rgba(0,0,0,0.15)' }}>
+                              {/* Header row */}
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                <span style={{ fontWeight: 'bold', color: '#1e40af', fontSize: '11px' }}>
+                                  {pcLabel} — Col {col.label}
+                                </span>
+                                {onSelectPileCap && (
+                                  <span
+                                    onClick={(e) => { e.stopPropagation(); onSelectPileCap(null); }}
+                                    style={{ cursor: 'pointer', color: '#64748b', fontSize: '12px', padding: '0 4px' }}
+                                  >
+                                    ✕
+                                  </span>
+                                )}
+                              </div>
+                              {/* Info row */}
+                              <div style={{ color: '#475569', marginBottom: '4px', fontSize: '9px' }}>
+                                {count}-Pile • {capL.toFixed(0)}×{capW.toFixed(0)}×{(cap.capDepth || 500).toFixed(0)} mm • Orient: {rotDeg}°
+                              </div>
+                              {/* Controls row */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                                {/* Pile Count Selector */}
+                                {onPileCountChange && (
+                                  <select
+                                    value={count}
+                                    onChange={(e) => { e.stopPropagation(); onPileCountChange(col.nodeId, parseInt(e.target.value, 10)); }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ background: '#1d4ed8', color: '#fff', fontWeight: 'bold', padding: '2px 6px', borderRadius: '3px', border: '0', fontSize: '10px', cursor: 'pointer' }}
+                                  >
+                                    {[2, 3, 4, 5, 6].map((n) => (
+                                      <option key={n} value={n}>{n} Piles</option>
+                                    ))}
+                                  </select>
+                                )}
+                                {/* Rotation buttons */}
+                                {onRotatePileCap && (
+                                  <>
+                                    <span
+                                      onClick={(e) => { e.stopPropagation(); onRotatePileCap(col.nodeId, 'CCW'); }}
+                                      style={{ background: '#fff', border: '1px solid #93c5fd', color: '#1d4ed8', padding: '2px 8px', borderRadius: '3px', cursor: 'pointer', fontWeight: 'bold', fontSize: '10px' }}
+                                    >
+                                      ⟲ CCW
+                                    </span>
+                                    <span
+                                      onClick={(e) => { e.stopPropagation(); onRotatePileCap(col.nodeId, 'CW'); }}
+                                      style={{ background: '#1d4ed8', color: '#fff', padding: '2px 8px', borderRadius: '3px', cursor: 'pointer', fontWeight: 'bold', fontSize: '10px' }}
+                                    >
+                                      ⟳ CW
+                                    </span>
+                                  </>
+                                )}
+                                {/* Reset */}
+                                {onResetOverrides && customPileCapOverrides[col.nodeId] && (
+                                  <span
+                                    onClick={(e) => { e.stopPropagation(); onResetOverrides(col.nodeId); }}
+                                    style={{ background: '#fef3c7', border: '1px solid #fbbf24', color: '#92400e', padding: '2px 6px', borderRadius: '3px', cursor: 'pointer', fontSize: '9px', fontWeight: 'bold' }}
+                                  >
+                                    Reset Auto
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </foreignObject>
                       </g>
                     )}
                   </g>
