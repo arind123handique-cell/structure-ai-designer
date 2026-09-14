@@ -8,6 +8,7 @@ import { SlabDetailSheetEngine } from './sheet/slabDetailSheetEngine';
 import type { DrawingSheet } from './sheet/drawingSheet';
 import { TEXT_H } from './sheet/drawingSheet';
 import { PdfExportService } from './pdfExportService';
+import { exportSheetDxf, exportFloorPlanDxf } from './dxf/dxfExportService';
 import { exportToCsv } from '@/utils/exportUtils';
 import { StaircasePlacementEngine } from '@/features/architectural/engines/staircasePlacementEngine';
 import {
@@ -43,6 +44,7 @@ import {
   Minimize2,
   Settings2,
   Info,
+  FileDown,
 } from 'lucide-react';
 
 export const FloorPlanViewer: React.FC = () => {
@@ -388,6 +390,61 @@ export const FloorPlanViewer: React.FC = () => {
     }
   };
 
+  // Handle DXF Export — exports current sheet as .dxf file with layer-wise organization
+  const handleExportDxf = () => {
+    try {
+      if (sheetMode === 'FRAMING') {
+        if (!activePlan) return;
+        // Build beam labels for the floor plan
+        const beamLabels = new Map<number, string>();
+        (activePlan.beams || []).forEach((bm, idx) => {
+          beamLabels.set(bm.memberId, `B${idx + 1}`);
+        });
+        exportFloorPlanDxf(activePlan, beamLabels, activeProject?.metadata?.name);
+        return;
+      }
+
+      // BEAM_SECTIONS or SLAB_DETAILS — export the active sheet
+      let sheetsToExport = currentSheets;
+      if (sheetsToExport.length === 0 && activePlan) {
+        if (sheetMode === 'BEAM_SECTIONS') {
+          sheetsToExport = BeamSectionSheetEngine.buildSheets({
+            level: activePlan,
+            project: {
+              ...(activeProject || {}),
+              savedBeamDesigns: savedBeamDesigns || {},
+              savedSlabDesigns: savedSlabDesigns || {},
+              universalRebarSelection: (activeProject as any)?.universalRebarSelection,
+              allowedColumnRebarDiameters: (activeProject as any)?.allowedColumnRebarDiameters,
+            },
+            fck: fckGrade,
+            fy: fyGrade,
+            includePlanSheet: true,
+            staircases: architecturalStaircases,
+          });
+        } else {
+          sheetsToExport = [
+            SlabDetailSheetEngine.buildSheet({
+              level: activePlan,
+              project: {
+                ...(activeProject || {}),
+                savedSlabDesigns: savedSlabDesigns || {},
+              },
+            }),
+          ];
+        }
+      }
+
+      if (sheetsToExport.length > 0) {
+        // Export the active page as DXF
+        const sheet = sheetsToExport[Math.min(currentPageIdx, sheetsToExport.length - 1)];
+        exportSheetDxf(sheet, activeProject?.metadata?.name);
+      }
+    } catch (err) {
+      console.error('DXF export failed:', err);
+    }
+  };
+
   // Handle Export All Levels to PDF — uses current toggle state for every level
   const handleExportAllPdf = () => {
     if (floorPlans.length === 0) return;
@@ -566,6 +623,16 @@ export const FloorPlanViewer: React.FC = () => {
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-slate-600" />
             <span>Export CSV</span>
+          </button>
+
+          {/* Export DXF (DWG-compatible) */}
+          <button
+            onClick={handleExportDxf}
+            title="Export drawing as AutoCAD DXF file with layer-wise organization"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-xs font-mono font-semibold shadow-2xs transition-colors"
+          >
+            <FileDown className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Export DXF</span>
           </button>
 
           {/* Print Button */}
