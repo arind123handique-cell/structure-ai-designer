@@ -460,13 +460,13 @@ export class BeamSectionSheetEngine {
   // -------------------------------------------------------------------------
 
   // -------------------------------------------------------------------------
-  // Beam Layout Plan (Plan View) — First Page per Floor
+  // Beam Layout Plan (GA Framing Plan) — First Page per Floor
   // -------------------------------------------------------------------------
 
   /**
-   * Draws a proper GA framing plan showing columns, slabs, beams,
-   * grid lines with circles, and bay dimension chains — matching
-   * the PDF export's renderFloorPlanPage style.
+   * Draws the GA Framing Plan for this floor with beam names B1, B2...
+   * Matches the PDF export's renderFloorPlanPage style exactly.
+   * Plan is clipped to stay within the title block boundary.
    */
   private static drawBeamLayoutPlan(
     b: SheetBuilder,
@@ -479,69 +479,68 @@ export class BeamSectionSheetEngine {
     const bounds = level.bounds;
     if (beams.length === 0 && columns.length === 0) return;
 
-    // Use level bounds (already computed by floorPlanEngine)
+    // Drawing area — must stay above title block (title block top = A3_HEIGHT - A3_MARGIN - 3500)
+    const tbTop = A3_HEIGHT - A3_MARGIN - 3500;
+    const drawX0 = A3_MARGIN;
+    const drawY0 = A3_MARGIN;
+    const drawW = A3_WIDTH - 2 * A3_MARGIN;
+    const drawH = tbTop - A3_MARGIN;
+
     const minX = bounds.minX - 1.0;
     const maxX = bounds.maxX + 1.0;
     const minZ = bounds.minZ - 1.0;
     const maxZ = bounds.maxZ + 1.0;
     const modelW = Math.max(0.1, maxX - minX);
     const modelH = Math.max(0.1, maxZ - minZ);
-    const modelMidX = (minX + maxX) / 2;
-    const modelMidZ = (minZ + maxZ) / 2;
 
-    // Drawing area: inside A3 border with margins
-    const drawX0 = A3_MARGIN + 1500;
-    const drawY0 = A3_MARGIN + 1500;
-    const drawW = A3_WIDTH - 2 * A3_MARGIN - 3000;
-    const drawH = A3_HEIGHT - 2 * A3_MARGIN - 5000;
+    // Scale to fit with 85% fill (matches PDF export)
+    const scale = Math.min(drawW / (modelW * 1000), drawH / (modelH * 1000)) * 0.85;
 
-    // Scale to fit
-    const scaleX = drawW / (modelW * 1000);
-    const scaleZ = drawH / (modelH * 1000);
-    const S = Math.min(scaleX, scaleZ, 0.85);
+    const planCenterX = drawX0 + drawW / 2;
+    const planCenterY = drawY0 + drawH / 2;
+    const modelCenterX = (minX + maxX) / 2;
+    const modelCenterZ = (minZ + maxZ) / 2;
 
-    const toX = (x: number) => drawX0 + drawW / 2 + (x - modelMidX) * 1000 * S;
-    const toY = (z: number) => drawY0 + drawH / 2 - (z - modelMidZ) * 1000 * S;
+    const toX = (x: number) => planCenterX + (x - modelCenterX) * 1000 * scale;
+    const toY = (z: number) => planCenterY + (z - modelCenterZ) * 1000 * scale;
 
-    // 1. Grid Lines (dashed, with circles and labels at ends)
+    // 1. Grid Lines (dashed, with circles and labels at ends — matches PDF)
     const gridLinesX = level.gridLinesX || [];
-    gridLinesX.forEach((g) => {
-      const gx = toX(g.coord);
-      b.line(LAYER_GRID.name, gx, drawY0, gx, drawY0 + drawH);
-      // Grid circle at top
-      b.text(LAYER_GRID.name, gx, drawY0 - 400, g.id, TEXT_H.MARK, { anchor: 'middle', bold: true });
-      // Grid circle at bottom
-      b.text(LAYER_GRID.name, gx, drawY0 + drawH + 600, g.id, TEXT_H.MARK, { anchor: 'middle', bold: true });
+    gridLinesX.forEach((gl) => {
+      const gx = toX(gl.coord);
+      const gz1 = toY(minZ - 0.5);
+      const gz2 = toY(maxZ + 0.5);
+      b.line(LAYER_GRID.name, gx, gz1, gx, gz2);
+      b.circle(LAYER_GRID.name, gx, gz1 - 350, 300, false);
+      b.text(LAYER_GRID.name, gx, gz1 - 350, gl.id, TEXT_H.MARK, { anchor: 'middle', bold: true });
     });
     const gridLinesZ = level.gridLinesZ || [];
-    gridLinesZ.forEach((g) => {
-      const gy = toY(g.coord);
-      b.line(LAYER_GRID.name, drawX0, gy, drawX0 + drawW, gy);
-      // Grid circle at left
-      b.text(LAYER_GRID.name, drawX0 - 400, gy, g.id, TEXT_H.MARK, { anchor: 'end', bold: true });
-      // Grid circle at right
-      b.text(LAYER_GRID.name, drawX0 + drawW + 600, gy, g.id, TEXT_H.MARK, { anchor: 'start', bold: true });
+    gridLinesZ.forEach((gl) => {
+      const gy = toY(gl.coord);
+      const gx1 = toX(minX - 0.5);
+      const gx2 = toX(maxX + 0.5);
+      b.line(LAYER_GRID.name, gx1, gy, gx2, gy);
+      b.circle(LAYER_GRID.name, gx1 - 350, gy, 300, false);
+      b.text(LAYER_GRID.name, gx1 - 350, gy, gl.id, TEXT_H.MARK, { anchor: 'middle', bold: true });
     });
 
-    // 2. Bay Dimension Chains (between grid lines)
-    // X bays (top)
+    // 2. Bay Dimension Chains (between grid lines — matches PDF)
     gridLinesX.slice(0, -1).forEach((g1, i) => {
       const g2 = gridLinesX[i + 1];
       const x1 = toX(g1.coord);
       const x2 = toX(g2.coord);
-      const dimY = drawY0 - 800;
+      const dimY = drawY0 - 200;
       b.line(LAYER_DIMENSION.name, x1, dimY, x2, dimY);
       b.arrowHead(LAYER_DIMENSION.name, x1, dimY, Math.PI, 60);
       b.arrowHead(LAYER_DIMENSION.name, x2, dimY, 0, 60);
       const baySpan = ((g2.coord - g1.coord) * 1000).toFixed(0);
       b.text(LAYER_DIMENSION.name, (x1 + x2) / 2, dimY - 250, baySpan, TEXT_H.CALLOUT - 20, { anchor: 'middle' });
     });
-    // Z bays (left)
     gridLinesZ.slice(0, -1).forEach((g1, i) => {
       const g2 = gridLinesZ[i + 1];
       const y1 = toY(g1.coord);
       const y2 = toY(g2.coord);
-      const dimX = drawX0 - 800;
+      const dimX = drawX0 - 200;
       b.line(LAYER_DIMENSION.name, dimX, y1, dimX, y2);
       b.arrowHead(LAYER_DIMENSION.name, dimX, y1, Math.PI / 2, 60);
       b.arrowHead(LAYER_DIMENSION.name, dimX, y2, -Math.PI / 2, 60);
@@ -549,13 +548,12 @@ export class BeamSectionSheetEngine {
       b.text(LAYER_DIMENSION.name, dimX - 250, (y1 + y2) / 2, baySpan, TEXT_H.CALLOUT - 20, { anchor: 'middle' });
     });
 
-    // 3. Slabs (light fill with labels)
+    // 3. Slabs (light fill with labels — matches PDF)
     if (!level.isFoundationLevel && slabs.length > 0) {
       slabs.forEach((s) => {
         if (s.points.length >= 3) {
           const pts: [number, number][] = s.points.map((p) => [toX(p.x), toY(p.z)]);
           b.poly(LAYER_CONCRETE.name, pts, true);
-          // Slab label at centroid
           const cx = s.points.reduce((acc, p) => acc + toX(p.x), 0) / s.points.length;
           const cy = s.points.reduce((acc, p) => acc + toY(p.z), 0) / s.points.length;
           b.text(LAYER_LABELS.name, cx, cy - 200, s.label, TEXT_H.CALLOUT - 20, { anchor: 'middle', bold: true });
@@ -564,7 +562,7 @@ export class BeamSectionSheetEngine {
       });
     }
 
-    // 4. Beams (double lines with labels)
+    // 4. Beams (double lines with B1, B2 labels — matches PDF)
     beams.forEach((bm) => {
       const x1 = toX(bm.startX);
       const y1 = toY(bm.startZ);
@@ -578,31 +576,28 @@ export class BeamSectionSheetEngine {
 
       const nx = -dy / len;
       const ny = dx / len;
-      const hw = Math.max(4, ((bm.width || 0.23) / 2) * 1000 * S);
+      const hw = Math.max(4, ((bm.width || 0.23) / 2) * 1000 * scale);
 
-      // Draw beam double lines
       b.line(LAYER_BEAM.name, x1 + nx * hw, y1 + ny * hw, x2 + nx * hw, y2 + ny * hw);
       b.line(LAYER_BEAM.name, x1 - nx * hw, y1 - ny * hw, x2 - nx * hw, y2 - ny * hw);
 
-      // Beam label badge at midpoint
       const midX = (x1 + x2) / 2;
       const midY = (y1 + y2) / 2;
       const label = beamLabels.get(bm.memberId) || bm.label || `B${bm.memberId}`;
-      const fullLabel = `${label}`;
-      b.text(LAYER_BEAM.name, midX, midY, fullLabel, TEXT_H.CALLOUT - 20, { anchor: 'middle', bold: true });
+      if (len >= 15) {
+        b.text(LAYER_BEAM.name, midX, midY, label, TEXT_H.CALLOUT - 10, { anchor: 'middle', bold: true });
+      }
     });
 
-    // 5. Columns (filled rectangles with X hatch and labels)
+    // 5. Columns (filled rectangles with labels — matches PDF)
     columns.forEach((col) => {
       const cx = toX(col.x);
       const cy = toY(col.z);
-      const cw = Math.max(8, (col.width || 0.45) * 1000 * S);
-      const cd = Math.max(8, (col.depth || 0.55) * 1000 * S);
+      const cw = Math.max(8, (col.width || 0.45) * 1000 * scale);
+      const cd = Math.max(8, (col.depth || 0.55) * 1000 * scale);
       b.rect(LAYER_CONCRETE.name, cx - cw / 2, cy - cd / 2, cw, cd, 1.2);
-      // X hatch
       b.line(LAYER_CONCRETE.name, cx - cw / 2, cy - cd / 2, cx + cw / 2, cy + cd / 2);
       b.line(LAYER_CONCRETE.name, cx - cw / 2, cy + cd / 2, cx + cw / 2, cy - cd / 2);
-      // Column label below
       b.text(LAYER_LABELS_SUPPORT.name, cx, cy + cd / 2 + 400, col.label, TEXT_H.MARK, { anchor: 'middle', bold: true });
     });
   }
