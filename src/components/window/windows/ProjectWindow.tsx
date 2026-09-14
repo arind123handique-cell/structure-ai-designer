@@ -23,10 +23,17 @@ export const ProjectWindow: React.FC<WindowContentProps> = ({ close, setDirty })
   const [name, setName] = useState(meta?.name || '');
   const [code, setCode] = useState(meta?.code || '');
   const [client, setClient] = useState(meta?.client || '');
+  const [clientAddress, setClientAddress] = useState(meta?.clientAddress || '');
   const [location, setLocation] = useState(meta?.location || '');
   const [engineer, setEngineer] = useState(meta?.engineer || '');
   const [description, setDescription] = useState(meta?.description || '');
-  const [concreteCode, setConcreteCode] = useState(meta?.designSettings.code === 'IS13920_2016' ? 'IS13920_2016' : 'IS456_2000');
+  const [dagNo, setDagNo] = useState(meta?.dagNo || '');
+  const [pattaNo, setPattaNo] = useState(meta?.pattaNo || '');
+  const [wardNo, setWardNo] = useState(meta?.wardNo || '');
+  const [drawnBy, setDrawnBy] = useState(meta?.drawnBy || meta?.engineer || '');
+  const [checkedBy, setCheckedBy] = useState(meta?.checkedBy || '');
+  const [jobDwgNo, setJobDwgNo] = useState(meta?.jobDwgNo || '1');
+  const [concreteCode, setConcreteCode] = useState(meta?.designSettings?.code === 'IS13920_2016' ? 'IS13920_2016' : 'IS456_2000');
   const [unitSystem] = useState('kN-m');
 
   const mark = () => setDirty(true);
@@ -36,9 +43,16 @@ export const ProjectWindow: React.FC<WindowContentProps> = ({ close, setDirty })
       name,
       code,
       client,
+      clientAddress,
       location,
       engineer,
       description,
+      dagNo,
+      pattaNo,
+      wardNo,
+      drawnBy,
+      checkedBy,
+      jobDwgNo,
       designSettings: {
         ...meta?.designSettings,
         code: concreteCode === 'IS13920_2016' ? 'IS13920_2016' : ('IS456_2000' as any),
@@ -64,6 +78,20 @@ export const ProjectWindow: React.FC<WindowContentProps> = ({ close, setDirty })
               onChange={(e) => { setDescription(e.target.value); mark(); }}
               className="w-full h-16 px-2 py-1.5 bg-slate-950 border border-slate-700 rounded text-slate-100 text-xs outline-none focus:border-sky-500"
             />
+          </div>
+        </WindowSection>
+
+        <WindowSection title="CAD Title Block (ISO A3 Drawings)">
+          <TxtField label="Site / Client Address" value={clientAddress} onChange={(v) => { setClientAddress(v); mark(); }} />
+          <div className="grid grid-cols-3 gap-2">
+            <TxtField label="Dag No." value={dagNo} onChange={(v) => { setDagNo(v); mark(); }} />
+            <TxtField label="Patta No." value={pattaNo} onChange={(v) => { setPattaNo(v); mark(); }} />
+            <TxtField label="Ward No." value={wardNo} onChange={(v) => { setWardNo(v); mark(); }} />
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <TxtField label="Drawn By" value={drawnBy} onChange={(v) => { setDrawnBy(v); mark(); }} />
+            <TxtField label="Checked By" value={checkedBy} onChange={(v) => { setCheckedBy(v); mark(); }} />
+            <TxtField label="Job / Dwg No." value={jobDwgNo} onChange={(v) => { setJobDwgNo(v); mark(); }} />
           </div>
         </WindowSection>
 

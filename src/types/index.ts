@@ -52,4 +52,12 @@ export interface ProjectMetadata {
   designSettings: DesignParameters;
   createdAt: string;
   updatedAt: string;
+  // Drawing Sheet & Title Block Metadata (ISO A3 CAD Detailing)
+  clientAddress?: string;
+  dagNo?: string;
+  pattaNo?: string;
+  wardNo?: string;
+  drawnBy?: string;
+  checkedBy?: string;
+  jobDwgNo?: string;
 }

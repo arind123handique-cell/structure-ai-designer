@@ -73,16 +73,21 @@ export const STRIP_SCALE = 2;
 export const PLAN_SCALE = 1;
 
 export const TEXT_H = {
-  /** Beam / column marks in plans, dimension text. */
-  MARK: 200,
-  /** Rebar callouts, scale notes, bar-length dims. */
-  CALLOUT: 225,
-  /** Grid references, support labels. */
-  GRID: 250,
+  /** Dimension text, zone lengths, small notes (1.4 mm on A3). */
+  DIM: 140,
+  /** Rebar callouts, stirrup notes, bar marks (1.6 mm on A3). */
+  CALLOUT: 160,
+  /** Support labels, column marks, grid text (1.8 mm on A3). */
+  MARK: 180,
+  GRID: 180,
+  /** Beam size labels (B1:230x450), slab labels (2.2 mm on A3). */
+  LABEL: 220,
   /** Grid bubbles in plans. */
-  GRID_BUBBLE: 300,
-  /** Beam size labels (B1:230x450) and title notes. */
-  LABEL: 325,
+  GRID_BUBBLE: 250,
+  /** Major section titles (e.g. SECTION AA). */
+  SECTION_TITLE: 300,
+  /** Sheet titles. */
+  SHEET_TITLE: 420,
 } as const;
 
 /** Nominal cover used across the detailing sheets, in mm. */
@@ -467,6 +472,7 @@ export interface A3TitleBlockOptions {
   title: string;
   sheetNumber: string;
   levelName?: string;
+  project?: any;
   client?: string;
   address?: string;
   dagNo?: string;
@@ -489,6 +495,17 @@ export function drawA3BorderAndTitleBlock(b: SheetBuilder, opts: A3TitleBlockOpt
   const layerText = LAYER_TEXT.name;
   const layerHeader = LAYER_SCHEDULE_HEADER.name;
   const layerLabels = LAYER_LABELS.name;
+
+  // Extract from user project metadata if provided
+  const meta = opts.project?.metadata;
+  const clientName = opts.client || meta?.client || 'CLIENT NAME';
+  const clientAddr = opts.address || meta?.clientAddress || meta?.location || 'SITE ADDRESS / LOCATION';
+  const dag = opts.dagNo || meta?.dagNo || '---';
+  const patta = opts.pattaNo || meta?.pattaNo || '---';
+  const ward = opts.wardNo || meta?.wardNo || '---';
+  const drawn = opts.drawnBy || meta?.drawnBy || meta?.engineer || 'ENGINEER';
+  const checked = opts.checkedBy || meta?.checkedBy || '';
+  const jobDwg = opts.jobDwgNo || meta?.jobDwgNo || '1';
 
   // 1. Outer Border (thick line around 420x297 mm paper extents)
   b.rect(layerBorder, 0, 0, A3_WIDTH, A3_HEIGHT, 3.5);
@@ -526,12 +543,10 @@ export function drawA3BorderAndTitleBlock(b: SheetBuilder, opts: A3TitleBlockOpt
 
   // --- COL 1: Client & Print Reduction Bar ---
   b.text(layerHeader, col1X + 300, tbY1 - 450, 'CLIENT:', 180, { bold: true });
-  const clientName = opts.client || 'Mrs Ila Kumar, House No. 3,';
-  const clientAddr = opts.address || 'Panjabari, Bagharbari, Tarali\nPath/Opp Gate No.2 Kalakhetra, Guwahati, Assam.';
   b.text(layerText, col1X + 1300, tbY1 - 450, clientName, 170, { bold: true });
 
   const addrLines = clientAddr.split('\n');
-  addrLines.forEach((line, idx) => {
+  addrLines.forEach((line: string, idx: number) => {
     b.text(layerText, col1X + 1300, tbY1 - 750 - idx * 280, line, 150);
   });
 
@@ -549,15 +564,12 @@ export function drawA3BorderAndTitleBlock(b: SheetBuilder, opts: A3TitleBlockOpt
   b.text(layerText, col1X + 300, tbY0 + 200, 'ALL RIGHTS RESERVED. NO REPRODUCTION UNLESS WRITTEN CONSENT GIVEN', 105);
 
   // --- COL 2: DAG / PATTA / WARD / CHECKED_BY ---
-  const dag = opts.dagNo || '436';
-  const patta = opts.pattaNo || '547';
-  const ward = opts.wardNo || '31';
   b.text(layerHeader, col2X + 400, tbY1 - 600, `DAG NO- ${dag}`, 240, { bold: true });
   b.text(layerHeader, col2X + 400, tbY1 - 1200, `PATTA NO: ${patta}`, 240, { bold: true });
   b.text(layerHeader, col2X + 400, tbY1 - 1800, `WARD NO-${ward}`, 240, { bold: true });
 
   b.line(layerLine, col2X, tbY0 + 1000, col3X, tbY0 + 1000, 1.0);
-  b.text(layerText, col2X + 400, tbY0 + 400, `CHECKED_BY: ${opts.checkedBy || ''}`, 200, { bold: true });
+  b.text(layerText, col2X + 400, tbY0 + 400, `CHECKED_BY: ${checked}`, 200, { bold: true });
 
   // --- COL 3: Revision Table ---
   b.line(layerLine, col3X, tbY1 - 650, col4X, tbY1 - 650, 1.2);
@@ -595,13 +607,13 @@ export function drawA3BorderAndTitleBlock(b: SheetBuilder, opts: A3TitleBlockOpt
   b.text(layerHeader, col4X + 1600, tbY1 - 2200, opts.scale || 'N.T.S', 200, { bold: true });
 
   b.text(layerText, col4Sub2 + 300, tbY1 - 2200, 'JOB-DRAWING No.', 150);
-  b.text(layerHeader, col4Sub2 + 1000, tbY1 - 2550, opts.jobDwgNo || '1', 260, { bold: true });
+  b.text(layerHeader, col4Sub2 + 1000, tbY1 - 2550, jobDwg, 260, { bold: true });
 
   b.text(layerText, col4Sub2 + 3800, tbY1 - 2200, 'SHEET NO:', 150);
   b.text(layerHeader, col4Sub2 + 4500, tbY1 - 2550, opts.sheetNumber, 280, { bold: true });
 
   b.text(layerText, col4X + 300, tbY0 + 400, 'DRAWN', 160);
-  b.text(layerHeader, col4X + 1600, tbY0 + 400, opts.drawnBy || 'ER. ROGERS', 190, { bold: true });
+  b.text(layerHeader, col4X + 1600, tbY0 + 400, drawn, 190, { bold: true });
 }
 
 /**

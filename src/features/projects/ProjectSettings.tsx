@@ -4,7 +4,7 @@ import { DesignParameters, ConcreteGrade, SteelGrade } from '@/types';
 import { Save, Check, Settings as SettingsIcon } from 'lucide-react';
 
 export const ProjectSettings: React.FC = () => {
-  const { activeProject, updateDesignSettings } = useProjectStore();
+  const { activeProject, updateDesignSettings, updateProjectMetadata } = useProjectStore();
   const [saved, setSaved] = useState(false);
 
   const currentSettings = activeProject?.metadata.designSettings || {
@@ -28,9 +28,29 @@ export const ProjectSettings: React.FC = () => {
 
   const [form, setForm] = useState<DesignParameters>(currentSettings);
 
+  // Drawing Sheet & Title Block state
+  const [client, setClient] = useState(activeProject?.metadata.client || '');
+  const [clientAddress, setClientAddress] = useState(activeProject?.metadata.clientAddress || '');
+  const [dagNo, setDagNo] = useState(activeProject?.metadata.dagNo || '');
+  const [pattaNo, setPattaNo] = useState(activeProject?.metadata.pattaNo || '');
+  const [wardNo, setWardNo] = useState(activeProject?.metadata.wardNo || '');
+  const [drawnBy, setDrawnBy] = useState(activeProject?.metadata.drawnBy || activeProject?.metadata.engineer || '');
+  const [checkedBy, setCheckedBy] = useState(activeProject?.metadata.checkedBy || '');
+  const [jobDwgNo, setJobDwgNo] = useState(activeProject?.metadata.jobDwgNo || '1');
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     await updateDesignSettings(form);
+    await updateProjectMetadata({
+      client,
+      clientAddress,
+      dagNo,
+      pattaNo,
+      wardNo,
+      drawnBy,
+      checkedBy,
+      jobDwgNo,
+    });
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -218,6 +238,104 @@ export const ProjectSettings: React.FC = () => {
                   type="number"
                   value={form.windSpeed}
                   onChange={(e) => setForm({ ...form, windSpeed: Number(e.target.value) })}
+                  className="w-full px-3 py-2 text-xs font-mono border border-ui-border rounded focus:outline-none focus:border-secondary-brand"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 4. Drawing Sheet & Title Block Information (ISO A3 CAD Detailing) */}
+          <div className="bg-surface-card p-5 rounded-md border border-ui-border shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-ui-border pb-2">
+              <h3 className="font-mono text-xs font-bold text-deep-navy uppercase">
+                4. Drawing Sheet & Title Block Metadata (AutoCAD / ISO A3)
+              </h3>
+              <span className="text-[10px] font-mono text-slate-500">
+                Populates Client, Dag No, Patta No on A3 sheets
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-mono font-semibold text-slate-700 mb-1">CLIENT NAME</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Mrs Ila Kumar, House No. 3"
+                  value={client}
+                  onChange={(e) => setClient(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-mono border border-ui-border rounded focus:outline-none focus:border-secondary-brand"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-mono font-semibold text-slate-700 mb-1">CLIENT / SITE ADDRESS</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Panjabari, Bagharbari, Guwahati, Assam"
+                  value={clientAddress}
+                  onChange={(e) => setClientAddress(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-mono border border-ui-border rounded focus:outline-none focus:border-secondary-brand"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs font-mono font-semibold text-slate-700 mb-1">DAG NO.</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 436"
+                  value={dagNo}
+                  onChange={(e) => setDagNo(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-mono border border-ui-border rounded focus:outline-none focus:border-secondary-brand"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-mono font-semibold text-slate-700 mb-1">PATTA NO.</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 547"
+                  value={pattaNo}
+                  onChange={(e) => setPattaNo(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-mono border border-ui-border rounded focus:outline-none focus:border-secondary-brand"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-mono font-semibold text-slate-700 mb-1">WARD NO.</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 31"
+                  value={wardNo}
+                  onChange={(e) => setWardNo(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-mono border border-ui-border rounded focus:outline-none focus:border-secondary-brand"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-mono font-semibold text-slate-700 mb-1">JOB / DWG NO.</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 1"
+                  value={jobDwgNo}
+                  onChange={(e) => setJobDwgNo(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-mono border border-ui-border rounded focus:outline-none focus:border-secondary-brand"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-mono font-semibold text-slate-700 mb-1">DRAWN BY</label>
+                <input
+                  type="text"
+                  placeholder="e.g. ER. ROGERS"
+                  value={drawnBy}
+                  onChange={(e) => setDrawnBy(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-mono border border-ui-border rounded focus:outline-none focus:border-secondary-brand"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-mono font-semibold text-slate-700 mb-1">CHECKED BY</label>
+                <input
+                  type="text"
+                  placeholder="e.g. ER. ARINDAM"
+                  value={checkedBy}
+                  onChange={(e) => setCheckedBy(e.target.value)}
                   className="w-full px-3 py-2 text-xs font-mono border border-ui-border rounded focus:outline-none focus:border-secondary-brand"
                 />
               </div>

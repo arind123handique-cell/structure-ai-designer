@@ -31,8 +31,10 @@ import {
   LAYER_CONCRETE,
   LAYER_CUT_LINE,
   LAYER_DIMENSION,
+  LAYER_GRID,
   LAYER_LABELS,
   LAYER_LABELS_SUPPORT,
+  LAYER_LINK,
   LAYER_REBAR,
   LAYER_SCHEDULE_BORDER,
   LAYER_SCHEDULE_HEADER,
@@ -375,6 +377,7 @@ export class SlabDetailSheetEngine {
       levelName: level.levelName,
       scale: 'PLAN 1:100 / SEC 1:50',
       jobDwgNo: '2',
+      project: input.project,
     });
 
     // Divider line between Left Half (Plan) and Right Half (Section + Schedule)
@@ -383,7 +386,7 @@ export class SlabDetailSheetEngine {
     b.line(LAYER_SCHEDULE_BORDER.name, 21000, 16000, 41000, 16000, 1.5);
 
     // -------------------------------------------------------------------------
-    // Left Half: Floor Slab Bent-up Reinforcement Plan View
+    // Left Half: Floor Slab Framing Plan View (Blue Slab Design - Image 5 Parity)
     // -------------------------------------------------------------------------
     let minModelX = Infinity;
     let maxModelX = -Infinity;
@@ -413,26 +416,7 @@ export class SlabDetailSheetEngine {
       planCenterY - (p.z - modelMidZ) * 1000 * fitPlanScale,
     ];
 
-    panels.forEach((panel) => {
-      const pts = panel.points.map(mm);
-      b.poly(LAYER_CONCRETE.name, pts, true);
-    });
-
-    panels.forEach((panel) => this.drawPanel(b, panel, mm));
-
-    // Plan Title Below
-    const planBottomY = planCenterY - (modelSpanZ * 1000 * fitPlanScale) / 2 - 1400;
-    b.text(
-      LAYER_LABELS.name,
-      planCenterX,
-      planBottomY,
-      `BENTUP REINFORCEMENT LAYOUT - ${level.levelName.toUpperCase()}`,
-      360,
-      { anchor: 'middle', underline: true, bold: true }
-    );
-    b.text(LAYER_TEXT_SCALE.name, planCenterX, planBottomY - 450, '(SCALE 1:100)', TEXT_H.CALLOUT, {
-      anchor: 'middle',
-    });
+    this.drawBlueSlabFramingPlan(b, level, panels, mm, planCenterX, planCenterY, modelSpanX, modelSpanZ, fitPlanScale);
 
     // Section cut line across the plan
     const planLeftX = planCenterX - (modelSpanX * 1000 * fitPlanScale) / 2;
@@ -475,121 +459,142 @@ export class SlabDetailSheetEngine {
     });
   }
 
-  private static drawPanel(
+  private static drawBlueSlabFramingPlan(
     b: SheetBuilder,
-    panel: SlabPanelDesign,
-    mm: (p: { x: number; z: number }) => [number, number]
+    level: FloorPlanLevel,
+    panels: SlabPanelDesign[],
+    mm: (p: { x: number; z: number }) => [number, number],
+    planCenterX: number,
+    planCenterY: number,
+    modelSpanX: number,
+    modelSpanZ: number,
+    fitPlanScale: number
   ) {
-    const pts = panel.points.map(mm);
-    const xs = pts.map((p) => p[0]);
-    const ys = pts.map((p) => p[1]);
-    const x0 = Math.min(...xs);
-    const x1 = Math.max(...xs);
-    const y0 = Math.min(...ys);
-    const y1 = Math.max(...ys);
-    const cx = (x0 + x1) / 2;
-    const cy = (y0 + y1) / 2;
+    // 1. Slab Panels with clean blue CAD appearance (Image 5 style)
+    panels.forEach((panel) => {
+      const pts = panel.points.map(mm);
+      b.poly(LAYER_CONCRETE.name, pts, true);
+      const xs = pts.map((p) => p[0]);
+      const ys = pts.map((p) => p[1]);
+      const x0 = Math.min(...xs);
+      const x1 = Math.max(...xs);
+      const y0 = Math.min(...ys);
+      const y1 = Math.max(...ys);
+      const cx = (x0 + x1) / 2;
+      const cy = (y0 + y1) / 2;
 
-    // Bars running in the main direction (drawn across the panel at design spacing)
-    const drawBars = (bars: SlabBarLayer, layer: string) => {
-      const spanPx = bars.dir === 'Y' ? x1 - x0 : y1 - y0;
-      const count = Math.min(MAX_BAR_LINES, Math.max(2, Math.round(spanPx / bars.spacing)));
-      if (count < 2) return;
-      const step = spanPx / count;
-      for (let i = 0; i <= count; i++) {
-        if (bars.dir === 'Y') {
-          const x = x0 + step * i;
-          b.line(layer, x, y0, x, y1);
-        } else {
-          const y = y0 + step * i;
-          b.line(layer, x0, y, x1, y);
-        }
+      // Inset dashed border (LAYER_LINK) for the blue slab look
+      const inset = Math.min(80, (x1 - x0) * 0.08, (y1 - y0) * 0.08);
+      if (x1 - x0 > inset * 2 && y1 - y0 > inset * 2) {
+        b.rect(LAYER_LINK.name, x0 + inset, y0 + inset, (x1 - x0) - 2 * inset, (y1 - y0) - 2 * inset, 0.8);
       }
-    };
 
-    drawBars(panel.bottomMain, LAYER_REBAR.name);
-    drawBars(panel.bottomSecond, LAYER_REBAR.name);
-
-    // Panel mark and type note
-    b.text(LAYER_LABELS.name, cx, cy + TEXT_H.LABEL * 1.6, panel.label, TEXT_H.LABEL, {
-      anchor: 'middle',
-      underline: true,
-      bold: true,
-    });
-    b.text(
-      LAYER_TEXT.name,
-      cx,
-      cy,
-      `${panel.oneWay ? '(ONE WAY)' : '(TWO WAY)'} (${panel.thickness} THK)`,
-      TEXT_H.CALLOUT,
-      { anchor: 'middle' }
-    );
-
-    // Reinforcement callouts with leaders, source vocabulary `T8@150 C/C`
-    const calloutY1 = cy - TEXT_H.CALLOUT * 3;
-    const calloutY2 = cy - TEXT_H.CALLOUT * 6;
-    b.text(
-      LAYER_TEXT.name,
-      cx,
-      calloutY1,
-      `T${panel.bottomMain.dia}@${panel.bottomMain.spacing} C/C (BOTTOM ${panel.bottomMain.dir})`,
-      TEXT_H.CALLOUT,
-      { anchor: 'middle' }
-    );
-    b.leader(
-      LAYER_TEXT.name,
-      cx + TEXT_H.CALLOUT * 6,
-      calloutY1 - TEXT_H.CALLOUT * 0.2,
-      cx + (x1 - x0) * 0.22,
-      cy - (y1 - y0) * 0.2,
-      {}
-    );
-    b.text(
-      LAYER_TEXT.name,
-      cx,
-      calloutY2,
-      `T${panel.bottomSecond.dia}@${panel.bottomSecond.spacing} C/C (BOTTOM ${panel.bottomSecond.dir})`,
-      TEXT_H.CALLOUT,
-      { anchor: 'middle' }
-    );
-    b.leader(
-      LAYER_TEXT.name,
-      cx + TEXT_H.CALLOUT * 6,
-      calloutY2 - TEXT_H.CALLOUT * 0.2,
-      cx + (x1 - x0) * 0.12,
-      cy + (y1 - y0) * 0.18,
-      {}
-    );
-
-    if (panel.top) {
+      // Panel mark and thickness badge
+      b.text(LAYER_LABELS.name, cx, cy + 70, panel.panelId, 150, {
+        anchor: 'middle',
+        bold: true,
+      });
       b.text(
         LAYER_TEXT.name,
         cx,
-        cy - TEXT_H.CALLOUT * 9,
-        `T${panel.top.dia}@${panel.top.spacing} C/C (TOP AT SUPPORT)`,
-        TEXT_H.CALLOUT,
+        cy - 60,
+        `THK: ${panel.thickness}mm`,
+        120,
         { anchor: 'middle' }
       );
-    }
 
-    if (panel.oneWay) {
-      b.text(LAYER_TEXT.name, cx, y1 + TEXT_H.CALLOUT * 3.4, 'ALT. REINF. BENT U', TEXT_H.CALLOUT, {
-        anchor: 'middle',
-      });
-      // Bent-up alternate bars: a diagonal kicker across the short direction
-      b.poly(LAYER_REBAR.name, [
-        [x0 + (x1 - x0) * 0.12, y0 + (y1 - y0) * 0.3],
-        [x0 + (x1 - x0) * 0.3, y1 - (y1 - y0) * 0.3],
-        [x0 + (x1 - x0) * 0.48, y1 - (y1 - y0) * 0.3],
-      ]);
-    }
-
-    // Plan dimensions of the panel
-    b.dimHorizontal(x0, x1, y1 + TEXT_H.CALLOUT * 7, `${(panel.lx * 1000).toFixed(0)}`, {
-      textHeight: TEXT_H.CALLOUT,
+      // Clean span direction arrows (no dense hatching)
+      const arrowLen = Math.min(500, (x1 - x0) * 0.35, (y1 - y0) * 0.35);
+      if (arrowLen > 120) {
+        if (panel.oneWay) {
+          if ((x1 - x0) <= (y1 - y0)) {
+            b.line(LAYER_REBAR.name, cx - arrowLen / 2, cy - 180, cx + arrowLen / 2, cy - 180);
+            b.arrowHead(LAYER_REBAR.name, cx - arrowLen / 2, cy - 180, Math.PI, 35);
+            b.arrowHead(LAYER_REBAR.name, cx + arrowLen / 2, cy - 180, 0, 35);
+          } else {
+            b.line(LAYER_REBAR.name, cx, cy - arrowLen / 2 - 140, cx, cy + arrowLen / 2 - 140);
+            b.arrowHead(LAYER_REBAR.name, cx, cy - arrowLen / 2 - 140, -Math.PI / 2, 35);
+            b.arrowHead(LAYER_REBAR.name, cx, cy + arrowLen / 2 - 140, Math.PI / 2, 35);
+          }
+        } else {
+          b.line(LAYER_REBAR.name, cx - arrowLen / 2, cy - 180, cx + arrowLen / 2, cy - 180);
+          b.arrowHead(LAYER_REBAR.name, cx - arrowLen / 2, cy - 180, Math.PI, 30);
+          b.arrowHead(LAYER_REBAR.name, cx + arrowLen / 2, cy - 180, 0, 30);
+          b.line(LAYER_REBAR.name, cx, cy - 180 - arrowLen / 2, cx, cy - 180 + arrowLen / 2);
+          b.arrowHead(LAYER_REBAR.name, cx, cy - 180 - arrowLen / 2, -Math.PI / 2, 30);
+          b.arrowHead(LAYER_REBAR.name, cx, cy - 180 + arrowLen / 2, Math.PI / 2, 30);
+        }
+      }
     });
-    b.dimVertical(y0, y1, x1 + TEXT_H.CALLOUT * 7, `${(panel.ly * 1000).toFixed(0)}`, {
-      textHeight: TEXT_H.CALLOUT,
+
+    // 2. Beams (Double lines)
+    (level.beams || []).forEach((bm) => {
+      const p1 = mm({ x: bm.startX, z: bm.startZ });
+      const p2 = mm({ x: bm.endX, z: bm.endZ });
+      const dx = p2[0] - p1[0];
+      const dy = p2[1] - p1[1];
+      const len = Math.hypot(dx, dy);
+      if (len > 0) {
+        const wMm = ((bm.width || 0.3) * 1000 * fitPlanScale) / 2;
+        const nx = (-dy / len) * wMm;
+        const ny = (dx / len) * wMm;
+        b.line(LAYER_CONCRETE.name, p1[0] + nx, p1[1] + ny, p2[0] + nx, p2[1] + ny);
+        b.line(LAYER_CONCRETE.name, p1[0] - nx, p1[1] - ny, p2[0] - nx, p2[1] - ny);
+      }
+    });
+
+    // 3. Columns with 'X' cross-hatching
+    (level.columns || []).forEach((col) => {
+      const cp = mm({ x: col.x, z: col.z });
+      const wUnits = Math.max(100, ((col.width || 0.4) * 1000 * fitPlanScale));
+      const dUnits = Math.max(100, ((col.depth || 0.4) * 1000 * fitPlanScale));
+      const cx0 = cp[0] - wUnits / 2;
+      const cy0 = cp[1] - dUnits / 2;
+      b.rect(LAYER_CONCRETE.name, cx0, cy0, wUnits, dUnits, 1.2);
+      b.line(LAYER_GRID.name, cx0, cy0, cx0 + wUnits, cy0 + dUnits);
+      b.line(LAYER_GRID.name, cx0, cy0 + dUnits, cx0 + wUnits, cy0);
+    });
+
+    // 4. Grid lines & bubbles
+    const halfW = (modelSpanX * 1000 * fitPlanScale) / 2;
+    const halfH = (modelSpanZ * 1000 * fitPlanScale) / 2;
+    const planX0 = planCenterX - halfW;
+    const planX1 = planCenterX + halfW;
+    const planY0 = planCenterY - halfH;
+    const planY1 = planCenterY + halfH;
+
+    (level.gridLinesX || []).forEach((g) => {
+      const p = mm({ x: g.coord, z: 0 });
+      const gx = p[0];
+      if (gx >= planX0 - 200 && gx <= planX1 + 200) {
+        b.line(LAYER_GRID.name, gx, planY0 - 400, gx, planY1 + 650);
+        b.circle(LAYER_GRID.name, gx, planY1 + 900, 180);
+        b.text(LAYER_GRID.name, gx, planY1 + 900, g.label || g.id, 130, { anchor: 'middle', bold: true });
+      }
+    });
+
+    (level.gridLinesZ || []).forEach((g) => {
+      const p = mm({ x: 0, z: g.coord });
+      const gy = p[1];
+      if (gy >= planY0 - 200 && gy <= planY1 + 200) {
+        b.line(LAYER_GRID.name, planX0 - 650, gy, planX1 + 400, gy);
+        b.circle(LAYER_GRID.name, planX0 - 900, gy, 180);
+        b.text(LAYER_GRID.name, planX0 - 900, gy, g.label || g.id, 130, { anchor: 'middle', bold: true });
+      }
+    });
+
+    // 5. Plan Title Below
+    const planBottomY = planCenterY - halfH - 1400;
+    b.text(
+      LAYER_LABELS.name,
+      planCenterX,
+      planBottomY,
+      `BENTUP REINFORCEMENT LAYOUT - ${level.levelName.toUpperCase()}`,
+      280,
+      { anchor: 'middle', underline: true, bold: true }
+    );
+    b.text(LAYER_TEXT_SCALE.name, planCenterX, planBottomY - 400, '(SCALE 1:100)', 140, {
+      anchor: 'middle',
     });
   }
 
@@ -618,8 +623,10 @@ export class SlabDetailSheetEngine {
     if (N === 0) return;
 
     const slabTopY = sectionSlabTopY;
-    const tDrawing = thicknessMm * S;
+    // Visible engineered height for A3 CAD detailing so rebar and cranks are clearly visible to the eye!
+    const tDrawing = 800;
     const slabBottomY = slabTopY - tDrawing;
+    const depthBelowSlabMm = 850;
 
     // Lay out horizontal positions of supports and bays
     let curX = sectionStartX;
@@ -628,8 +635,7 @@ export class SlabDetailSheetEngine {
       supports[i].xStart = curX;
       supports[i].xEnd = curX + w;
       supports[i].centerX = curX + w / 2;
-      const depthBelowSlabMm = Math.max(supports[i].totalDepthMm - thicknessMm, 250);
-      supports[i].bottomY = slabBottomY - depthBelowSlabMm * S;
+      supports[i].bottomY = slabBottomY - depthBelowSlabMm;
       curX += w;
 
       if (i < N) {
@@ -641,9 +647,7 @@ export class SlabDetailSheetEngine {
       }
     }
 
-    // -------------------------------------------------------------------------
     // 1. Concrete Slab Outline (Clean wireframe, NO shaded color fill)
-    // -------------------------------------------------------------------------
     const concretePts: [number, number][] = [];
     concretePts.push([supports[0].xStart, slabTopY]);
     concretePts.push([supports[N].xEnd, slabTopY]);
@@ -661,10 +665,8 @@ export class SlabDetailSheetEngine {
     // Render wireframe outline
     b.poly(LAYER_CONCRETE.name, concretePts, true);
 
-    // -------------------------------------------------------------------------
     // 2. Reinforcement Detailing
-    // -------------------------------------------------------------------------
-    const cover = SLAB_COVER * S;
+    const cover = 100;
     const yBot = slabBottomY + cover;
     const yTop = slabTopY - cover;
     const crankH = yTop - yBot;
@@ -674,29 +676,25 @@ export class SlabDetailSheetEngine {
     for (let i = 0; i < N; i++) {
       const lapLength = Math.min(supports[i + 1].widthMm * S * 0.75, 1200);
       if (i === 0 && N === 1) {
-        // Single bay exterior-to-exterior
         b.poly(LAYER_REBAR.name, [
-          [supports[0].xStart + cover, yBot + 150],
+          [supports[0].xStart + cover, yBot + 180],
           [supports[0].xStart + cover, yBot],
           [supports[1].xEnd - cover, yBot],
-          [supports[1].xEnd - cover, yBot + 150],
+          [supports[1].xEnd - cover, yBot + 180],
         ]);
       } else if (i === 0) {
-        // Left exterior
         b.poly(LAYER_REBAR.name, [
-          [supports[0].xStart + cover, yBot + 150],
+          [supports[0].xStart + cover, yBot + 180],
           [supports[0].xStart + cover, yBot],
           [bays[0].xClearEnd + lapLength, yBot],
         ]);
       } else if (i === N - 1) {
-        // Right exterior
         b.poly(LAYER_REBAR.name, [
           [bays[i].xClearStart - Math.min(supports[i].widthMm * S * 0.75, 1200), yBot],
           [supports[N].xEnd - cover, yBot],
-          [supports[N].xEnd - cover, yBot + 150],
+          [supports[N].xEnd - cover, yBot + 180],
         ]);
       } else {
-        // Interior continuous
         b.line(
           LAYER_REBAR.name,
           bays[i].xClearStart - Math.min(supports[i].widthMm * S * 0.75, 1200),
@@ -712,12 +710,14 @@ export class SlabDetailSheetEngine {
       const crankMm = calcCrankOffsetMm(bays[i].clearSpanMm);
       const crankDrawing = crankMm * S;
       const xL_crank_start = bays[i].xClearStart + crankDrawing;
-      const xL_crank_end = xL_crank_start - dx_crank;
+      const xL_crank_end = Math.max(bays[i].xClearStart, xL_crank_start - dx_crank);
       const xR_crank_start = bays[i].xClearEnd - crankDrawing;
-      const xR_crank_end = xR_crank_start + dx_crank;
+      const xR_crank_end = Math.min(bays[i].xClearEnd, xR_crank_start + dx_crank);
 
       // Bottom straight middle segment
-      b.line(LAYER_REBAR.name, xL_crank_start, yBot, xR_crank_start, yBot);
+      if (xR_crank_start > xL_crank_start) {
+        b.line(LAYER_REBAR.name, xL_crank_start, yBot, xR_crank_start, yBot);
+      }
       // Left 45° crank
       b.line(LAYER_REBAR.name, xL_crank_start, yBot, xL_crank_end, yTop);
       // Right 45° crank
@@ -764,7 +764,7 @@ export class SlabDetailSheetEngine {
         const ext = calcCurtailmentMm(bays[0].clearSpanMm) * S;
         const xEnd = supports[0].xEnd + ext;
         b.poly(LAYER_REBAR.name, [
-          [supports[0].xStart + cover + 40, yBot + 120],
+          [supports[0].xStart + cover + 40, yBot + 140],
           [supports[0].xStart + cover + 40, yTop],
           [xEnd, yTop],
           [xEnd + 80, yTop - 80],
@@ -776,7 +776,7 @@ export class SlabDetailSheetEngine {
           [xStart - 80, yTop - 80],
           [xStart, yTop],
           [supports[N].xEnd - cover - 40, yTop],
-          [supports[N].xEnd - cover - 40, yBot + 120],
+          [supports[N].xEnd - cover - 40, yBot + 140],
         ]);
       } else {
         const extLeft = calcCurtailmentMm(bays[k - 1].clearSpanMm) * S;
@@ -793,15 +793,14 @@ export class SlabDetailSheetEngine {
     }
 
     // 2d. Transverse distribution rebar dots (small circles along top & bottom)
-    const dotR = 18;
+    const dotR = 20;
     for (const bay of bays) {
-      const step = Math.max(bay.transSpacing * S, 450);
       const span = bay.xClearEnd - bay.xClearStart - 300;
-      const count = Math.max(2, Math.floor(span / step));
-      const actualStep = span / count;
+      const count = Math.max(3, Math.floor(span / 500));
+      const step = span / count;
       for (let s = 0; s <= count; s++) {
-        const x = bay.xClearStart + 150 + s * actualStep;
-        b.circle(LAYER_REBAR.name, x, yBot + 28, dotR, true);
+        const x = bay.xClearStart + 150 + s * step;
+        b.circle(LAYER_REBAR.name, x, yBot + 32, dotR, true);
       }
     }
     for (let k = 0; k <= N; k++) {
@@ -814,134 +813,125 @@ export class SlabDetailSheetEngine {
           ? supports[N].xEnd - cover - 60
           : supports[k].xEnd + calcCurtailmentMm(bays[k].clearSpanMm) * S;
       const span = xRight - xLeft;
-      const step = 500;
-      const count = Math.max(2, Math.floor(span / step));
-      const actualStep = span / count;
+      const count = Math.max(2, Math.floor(span / 450));
+      const step = span / count;
       for (let s = 0; s <= count; s++) {
-        const x = xLeft + s * actualStep;
-        b.circle(LAYER_REBAR.name, x, yTop - 28, dotR, true);
+        const x = xLeft + s * step;
+        b.circle(LAYER_REBAR.name, x, yTop - 32, dotR, true);
       }
     }
 
-    // -------------------------------------------------------------------------
-    // 3. Dimension Chains
-    // -------------------------------------------------------------------------
-    const yDimSupp = slabTopY + 2600;
-    const yDimSpan = slabTopY + 1900;
-    const yDimCurt = slabTopY + 1200;
-
-    // Row 1: Support widths
-    for (let i = 0; i <= N; i++) {
-      b.dimHorizontal(supports[i].xStart, supports[i].xEnd, yDimSupp, `${supports[i].widthMm}`, {
-        textHeight: TEXT_H.CALLOUT,
-      });
-    }
-
-    // Row 2: Clear spans
+    // 3. Dimension Chains (Stratified without overlap)
+    // Row 1: Clear spans at slabTopY + 500
     for (let i = 0; i < N; i++) {
-      b.dimHorizontal(bays[i].xClearStart, bays[i].xClearEnd, yDimSpan, `${bays[i].clearSpanMm}`, {
-        textHeight: TEXT_H.CALLOUT,
+      b.dimHorizontal(bays[i].xClearStart, bays[i].xClearEnd, slabTopY + 500, `${bays[i].clearSpanMm}`, {
+        textHeight: 130,
       });
     }
 
-    // Row 3: Curtailment extensions over supports
-    for (let k = 1; k < N; k++) {
-      const extLeftMm = calcCurtailmentMm(bays[k - 1].clearSpanMm);
-      const extRightMm = calcCurtailmentMm(bays[k].clearSpanMm);
-      b.dimHorizontal(supports[k].xStart - extLeftMm * S, supports[k].xStart, yDimCurt, `${extLeftMm}`, {
-        textHeight: TEXT_H.CALLOUT,
-      });
-      b.dimHorizontal(supports[k].xEnd, supports[k].xEnd + extRightMm * S, yDimCurt, `${extRightMm}`, {
-        textHeight: TEXT_H.CALLOUT,
+    // Row 2: Support widths at slabTopY + 1050
+    for (let i = 0; i <= N; i++) {
+      b.dimHorizontal(supports[i].xStart, supports[i].xEnd, slabTopY + 1050, `${supports[i].widthMm}`, {
+        textHeight: 130,
       });
     }
 
-    // Row 4: Crank offset dimensions below slab
-    const yDimCrank = slabBottomY - 450;
+    // Row 3: Crank offset dimensions at slabTopY + 1550 (L/6 from support face)
     for (let i = 0; i < N; i++) {
       const crankMm = calcCrankOffsetMm(bays[i].clearSpanMm);
-      b.dimHorizontal(bays[i].xClearStart, bays[i].xClearStart + crankMm * S, yDimCrank, `${crankMm}`, {
-        textHeight: TEXT_H.CALLOUT,
-      });
-      b.dimHorizontal(bays[i].xClearEnd - crankMm * S, bays[i].xClearEnd, yDimCrank, `${crankMm}`, {
-        textHeight: TEXT_H.CALLOUT,
+      const crankDist = crankMm * S;
+      b.dimHorizontal(bays[i].xClearStart, bays[i].xClearStart + crankDist, slabTopY + 1550, `${crankMm}`, {
+        textHeight: 120,
       });
     }
 
-    // -------------------------------------------------------------------------
-    // 4. Text Callouts
-    // -------------------------------------------------------------------------
-    // Top rebar callouts & bottom bent-up callouts
+    // Row 4: Top negative moment curtailment dimensions (0.25L) at slabTopY + 2050
     for (let i = 0; i < N; i++) {
-      const midX = (bays[i].xClearStart + bays[i].xClearEnd) / 2;
-      b.text(
-        LAYER_TEXT.name,
-        midX,
-        slabTopY + 550,
-        `T${bays[i].barDia}@${bays[i].barSpacing} C/C`,
-        TEXT_H.CALLOUT,
-        { anchor: 'middle' }
-      );
-      b.text(
-        LAYER_TEXT.name,
-        midX,
-        slabBottomY - 1050,
-        `T${bays[i].barDia}@${bays[i].barSpacing} C/C (ALT. REINF. BENT UP)`,
-        TEXT_H.CALLOUT,
-        { anchor: 'middle' }
-      );
+      const curtMm = calcCurtailmentMm(bays[i].clearSpanMm);
+      const curtDist = curtMm * S;
+      b.dimHorizontal(bays[i].xClearStart, bays[i].xClearStart + curtDist, slabTopY + 2050, `${curtMm}`, {
+        textHeight: 120,
+      });
     }
 
-    // Support labels below each column/beam
-    const lowestSuppBottom = Math.min(...supports.map((s) => s.bottomY));
+    // 4. Text Callouts & Titles (Stratified without overlap)
+    const secMidX = (supports[0].xStart + supports[N].xEnd) / 2;
+    const repBay = bays[0];
+    const barDia = repBay?.barDia || 8;
+    const barSpacing = repBay?.barSpacing || 150;
+    const transDia = repBay?.transDia || 10;
+    const transSpacing = repBay?.transSpacing || 150;
+
+    // Top extra callout
+    b.text(
+      LAYER_TEXT.name,
+      secMidX,
+      slabTopY + 2500,
+      `TOP EXTRA REINF. OVER SUPPORTS: T${transDia}@${transSpacing} C/C`,
+      140,
+      { anchor: 'middle', bold: true }
+    );
+
+    // Support labels below columns
     for (let i = 0; i <= N; i++) {
       b.text(
-        LAYER_LABELS.name,
+        LAYER_LABELS_SUPPORT.name,
         supports[i].centerX,
-        lowestSuppBottom - 750,
+        slabBottomY - 1050,
         supports[i].label,
-        TEXT_H.GRID,
+        150,
         { anchor: 'middle', bold: true }
       );
     }
 
-    // Slab panel labels below each bay in cyan (LAYER_LABELS)
+    // Slab bay badges with real app design data
     for (let i = 0; i < N; i++) {
       const midX = (bays[i].xClearStart + bays[i].xClearEnd) / 2;
       b.text(
         LAYER_LABELS.name,
         midX,
-        lowestSuppBottom - 1650,
-        `SLAB ${bays[i].panelId} ${bays[i].oneWay ? '(ONE WAY)' : '(TWO WAY)'} (${bays[i].thicknessMm} THK)`,
-        TEXT_H.LABEL,
-        { anchor: 'middle', underline: true, bold: true }
+        slabBottomY - 1350,
+        `SLAB ${bays[i].panelId} (${bays[i].oneWay ? 'ONE WAY' : 'TWO WAY'}) (${bays[i].thicknessMm} THK)`,
+        135,
+        { anchor: 'middle', bold: true }
       );
     }
 
-    // Overall Section Title and Scale Note centered below
-    const sectionMidX = (supports[0].xStart + supports[N].xEnd) / 2;
+    // Bottom straight rebar callout using real app data
+    b.text(
+      LAYER_TEXT.name,
+      secMidX,
+      slabBottomY - 1600,
+      `T${barDia}@${barSpacing} C/C`,
+      140,
+      { anchor: 'middle', bold: true }
+    );
+
+    // Alternate bent-up rebar callout using real app data
+    b.text(
+      LAYER_TEXT.name,
+      secMidX,
+      slabBottomY - 1820,
+      `T${barDia}@${barSpacing} C/C (ALT. REINF. BENT UP)`,
+      140,
+      { anchor: 'middle', bold: true }
+    );
+
+    // Overall Section Title and Scale Note
     b.text(
       LAYER_LABELS.name,
-      sectionMidX,
-      lowestSuppBottom - 2000,
+      secMidX,
+      slabBottomY - 2150,
       'SECTION AA',
-      380,
+      260,
       { anchor: 'middle', underline: true, bold: true }
     );
     b.text(
       LAYER_TEXT_SCALE.name,
-      sectionMidX,
-      lowestSuppBottom - 2450,
+      secMidX,
+      slabBottomY - 2450,
       '(SCALE: H - 1:50 / V - 1:50)',
-      TEXT_H.CALLOUT,
-      { anchor: 'middle' }
-    );
-    b.text(
-      LAYER_TEXT.name,
-      sectionMidX,
-      lowestSuppBottom - 2800,
-      'SECTION X1-X1',
-      TEXT_H.CALLOUT,
+      140,
       { anchor: 'middle' }
     );
   }
@@ -1033,12 +1023,7 @@ export class SlabDetailSheetEngine {
       });
     });
 
-    // 4. Data Rows
-    const notesH = 1600;
-    const availTableH = subHeaderY - (y0 + notesH);
-    const rowH = Math.min(750, availTableH / Math.max(1, panels.length));
-
-    // Deduplicate panels by panelId
+    // 4. Data Rows (Group identical slabs when count > 8 to prevent cramming)
     const uniquePanels: SlabPanelDesign[] = [];
     const seenIds = new Set<string>();
     panels.forEach((p) => {
@@ -1048,25 +1033,138 @@ export class SlabDetailSheetEngine {
       }
     });
 
-    uniquePanels.forEach((panel, idx) => {
+    interface ScheduleGroup {
+      slabNosLines: string[];
+      thickness: number;
+      oneWay: boolean;
+      bottomMain: SlabBarLayer;
+      bottomSecond: SlabBarLayer;
+      remarks: string;
+    }
+
+    const groups: ScheduleGroup[] = [];
+
+    if (uniquePanels.length <= 8) {
+      uniquePanels.forEach((p) => {
+        groups.push({
+          slabNosLines: [p.panelId],
+          thickness: p.thickness,
+          oneWay: p.oneWay,
+          bottomMain: p.bottomMain,
+          bottomSecond: p.bottomSecond,
+          remarks: p.oneWay ? 'CRANK AT L/6' : 'CRANK AT L/6 BOTH WAYS',
+        });
+      });
+    } else {
+      const groupMap = new Map<string, { panels: SlabPanelDesign[]; ids: string[] }>();
+      uniquePanels.forEach((p) => {
+        const sig = `${p.thickness}_${p.oneWay ? '1W' : '2W'}_${p.bottomMain.dia}@${p.bottomMain.spacing}_${p.bottomSecond.dia}@${p.bottomSecond.spacing}`;
+        if (!groupMap.has(sig)) {
+          groupMap.set(sig, { panels: [], ids: [] });
+        }
+        const g = groupMap.get(sig)!;
+        g.panels.push(p);
+        g.ids.push(p.panelId);
+      });
+
+      groupMap.forEach(({ panels: gPanels, ids }) => {
+        const numItems = ids.map((id) => {
+          const m = id.match(/^([A-Za-z]+)(\d+)$/);
+          return {
+            id,
+            prefix: m ? m[1] : 'S',
+            num: m ? parseInt(m[2], 10) : NaN,
+          };
+        });
+
+        const allNumeric = numItems.every((item) => !isNaN(item.num));
+        let ranges: string[] = [];
+        if (allNumeric) {
+          const prefix = numItems[0].prefix || 'S';
+          const nums = Array.from(new Set(numItems.map((i) => i.num))).sort((a, b) => a - b);
+          let start = nums[0];
+          let prev = nums[0];
+          for (let i = 1; i < nums.length; i++) {
+            if (nums[i] === prev + 1) {
+              prev = nums[i];
+            } else {
+              ranges.push(start === prev ? `${prefix}${start}` : `${prefix}${start} - ${prefix}${prev}`);
+              start = nums[i];
+              prev = nums[i];
+            }
+          }
+          ranges.push(start === prev ? `${prefix}${start}` : `${prefix}${start} - ${prefix}${prev}`);
+        } else {
+          ranges = ids;
+        }
+
+        const lines: string[] = [];
+        let cur = '';
+        ranges.forEach((r) => {
+          if (!cur) {
+            cur = r;
+          } else if (cur.length + 2 + r.length <= 16) {
+            cur += `, ${r}`;
+          } else {
+            lines.push(cur);
+            cur = r;
+          }
+        });
+        if (cur) lines.push(cur);
+
+        const rep = gPanels[0];
+        groups.push({
+          slabNosLines: lines,
+          thickness: rep.thickness,
+          oneWay: rep.oneWay,
+          bottomMain: rep.bottomMain,
+          bottomSecond: rep.bottomSecond,
+          remarks: rep.oneWay ? 'CRANK AT L/6' : 'CRANK AT L/6 BOTH WAYS',
+        });
+      });
+    }
+
+    const notesH = 1600;
+    const availTableH = subHeaderY - (y0 + notesH);
+    const rowH = Math.min(850, availTableH / Math.max(1, groups.length));
+    const textH = rowH < 380 ? Math.max(110, Math.round(rowH * 0.35)) : 140;
+
+    groups.forEach((g, idx) => {
       const rY = subHeaderY - (idx + 1) * rowH;
       b.line(LAYER_SCHEDULE_LINE.name, x0, rY, x0 + w, rY, 0.8);
 
-      const cellY = rY + rowH / 2 - 40;
+      const cellMidY = rY + rowH / 2;
+      const slabNosCx = (colXs[0] + colXs[1]) / 2;
+      if (g.slabNosLines.length === 1) {
+        b.text(LAYER_SCHEDULE_TEXT.name, slabNosCx, cellMidY - 30, g.slabNosLines[0], textH, {
+          anchor: 'middle',
+          bold: true,
+        });
+      } else {
+        const lineSpacing = textH * 1.3;
+        const totalTextH = g.slabNosLines.length * lineSpacing;
+        const startY = cellMidY + totalTextH / 2 - textH;
+        g.slabNosLines.forEach((ln, lIdx) => {
+          b.text(LAYER_SCHEDULE_TEXT.name, slabNosCx, startY - lIdx * lineSpacing, ln, Math.min(textH, 125), {
+            anchor: 'middle',
+            bold: true,
+          });
+        });
+      }
+
       const rowValues = [
-        panel.panelId,
-        `${panel.thickness}`,
-        panel.oneWay ? 'ONE WAY' : 'TWO WAY',
-        `T${panel.bottomMain.dia}@${panel.bottomMain.spacing}`,
-        `T${panel.bottomSecond.dia}@${panel.bottomSecond.spacing}`,
-        `T${panel.bottomMain.dia}@${panel.bottomMain.spacing}`,
-        `T${panel.bottomSecond.dia}@${panel.bottomSecond.spacing}`,
-        panel.oneWay ? 'CRANK AT L/6' : 'CRANK AT L/6 BOTH WAYS',
+        `${g.thickness}`,
+        g.oneWay ? 'ONE WAY' : 'TWO WAY',
+        `T${g.bottomMain.dia}@${g.bottomMain.spacing}`,
+        `T${g.bottomSecond.dia}@${g.bottomSecond.spacing}`,
+        `T${g.bottomMain.dia}@${g.bottomMain.spacing}`,
+        `T${g.bottomSecond.dia}@${g.bottomSecond.spacing}`,
+        g.remarks,
       ];
 
       rowValues.forEach((val, cIdx) => {
-        const cx = (colXs[cIdx] + colXs[cIdx + 1]) / 2;
-        b.text(LAYER_SCHEDULE_TEXT.name, cx, cellY, val, 150, {
+        const cx = (colXs[cIdx + 1] + colXs[cIdx + 2]) / 2;
+        b.text(LAYER_SCHEDULE_TEXT.name, cx, cellMidY - 30, val, textH, {
           anchor: 'middle',
         });
       });

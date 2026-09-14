@@ -199,6 +199,7 @@ export const FloorPlanViewer: React.FC = () => {
           sheets = BeamSectionSheetEngine.buildSheets({
             level: activePlan,
             project: {
+              ...(activeProject || {}),
               savedBeamDesigns: savedBeamDesigns || {},
               savedSlabDesigns: savedSlabDesigns || {},
               universalRebarSelection: (activeProject as any)?.universalRebarSelection,
@@ -210,7 +211,10 @@ export const FloorPlanViewer: React.FC = () => {
         } else if (sheetMode === 'SLAB_DETAILS') {
           const single = SlabDetailSheetEngine.buildSheet({
             level: activePlan,
-            project: { savedSlabDesigns: savedSlabDesigns || {} },
+            project: {
+              ...(activeProject || {}),
+              savedSlabDesigns: savedSlabDesigns || {},
+            },
           });
           sheets = [single];
         }
@@ -297,6 +301,7 @@ export const FloorPlanViewer: React.FC = () => {
             sheetsToExport = BeamSectionSheetEngine.buildSheets({
               level: activePlan,
               project: {
+                ...(activeProject || {}),
                 savedBeamDesigns: savedBeamDesigns || {},
                 savedSlabDesigns: savedSlabDesigns || {},
                 universalRebarSelection: (activeProject as any)?.universalRebarSelection,
@@ -309,7 +314,10 @@ export const FloorPlanViewer: React.FC = () => {
             sheetsToExport = [
               SlabDetailSheetEngine.buildSheet({
                 level: activePlan,
-                project: { savedSlabDesigns: savedSlabDesigns || {} },
+                project: {
+                  ...(activeProject || {}),
+                  savedSlabDesigns: savedSlabDesigns || {},
+                },
               }),
             ];
           }
@@ -373,6 +381,7 @@ export const FloorPlanViewer: React.FC = () => {
             const fresh = BeamSectionSheetEngine.buildSheets({
               level,
               project: {
+                ...(activeProject || {}),
                 savedBeamDesigns: savedBeamDesigns || {},
                 savedSlabDesigns: savedSlabDesigns || {},
                 universalRebarSelection: (activeProject as any)?.universalRebarSelection,
@@ -405,7 +414,10 @@ export const FloorPlanViewer: React.FC = () => {
           } else {
             const fresh = SlabDetailSheetEngine.buildSheet({
               level,
-              project: { savedSlabDesigns: savedSlabDesigns || {} },
+              project: {
+                ...(activeProject || {}),
+                savedSlabDesigns: savedSlabDesigns || {},
+              },
             });
             allSheets.push(fresh);
           }

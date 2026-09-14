@@ -545,6 +545,7 @@ export class BeamSectionSheetEngine {
         sheetNumber: totalPages > 1 ? `${pIdx + 11}` : '11',
         levelName: level.levelName,
         pageInfo,
+        project: input.project,
       });
 
       // 2. Draw Top-Right General Notes Block
@@ -791,8 +792,8 @@ export class BeamSectionSheetEngine {
     }
 
     // 2. Supports Detailing (Left, Intermediates, Right)
-    const yColTop = yTop + 1400;
-    const yColBot = yBot - 1400;
+    const yColTop = yTop + 950;
+    const yColBot = yBot - 1200;
 
     // Left Support
     const sup0 = run.spans[0].supLeft;
@@ -801,11 +802,11 @@ export class BeamSectionSheetEngine {
     b.line(LAYER_CONCRETE.name, colEnds[0], yColBot, colEnds[0], yBot);
     this.drawBreakline(b, colStarts[0], colEnds[0], yColTop);
     this.drawBreakline(b, colStarts[0], colEnds[0], yColBot);
-    this.drawCenterLine(b, colCenters[0], yColBot - 500, yColTop + 850);
-    b.arrowHead(LAYER_GRID.name, colCenters[0], yColTop + 800, Math.PI / 2, 85);
-    b.text(LAYER_GRID.name, colCenters[0], yColTop + 1100, sup0.gridLabel, TEXT_H.GRID, { anchor: 'middle', bold: true });
-    b.dimHorizontal(colStarts[0], colEnds[0], yColTop + 450, sup0.widthMm, { textHeight: TEXT_H.CALLOUT });
-    b.text(LAYER_LABELS_SUPPORT.name, colCenters[0], yColBot - 450, sup0.label, TEXT_H.GRID, { anchor: 'middle', bold: true });
+    this.drawCenterLine(b, colCenters[0], yColBot - 350, yColTop + 1300);
+    b.arrowHead(LAYER_GRID.name, colCenters[0], yColTop + 1250, Math.PI / 2, 85);
+    b.text(LAYER_GRID.name, colCenters[0], yTop + 2150, sup0.gridLabel, TEXT_H.MARK, { anchor: 'middle', bold: true });
+    b.dimHorizontal(colStarts[0], colEnds[0], yTop + 1050, sup0.widthMm, { textHeight: 130 });
+    b.text(LAYER_LABELS_SUPPORT.name, colCenters[0], yBot - 1700, sup0.label, TEXT_H.MARK, { anchor: 'middle', bold: true });
 
     // Intermediate Supports
     for (let i = 0; i < N - 1; i++) {
@@ -817,11 +818,15 @@ export class BeamSectionSheetEngine {
       b.line(LAYER_CONCRETE.name, colEnds[cIdx], yColBot, colEnds[cIdx], yBot);
       this.drawBreakline(b, colStarts[cIdx], colEnds[cIdx], yColTop);
       this.drawBreakline(b, colStarts[cIdx], colEnds[cIdx], yColBot);
-      this.drawCenterLine(b, colCenters[cIdx], yColBot - 500, yColTop + 850);
-      b.arrowHead(LAYER_GRID.name, colCenters[cIdx], yColTop + 800, Math.PI / 2, 85);
-      b.text(LAYER_GRID.name, colCenters[cIdx], yColTop + 1100, sup.gridLabel, TEXT_H.GRID, { anchor: 'middle', bold: true });
-      b.dimHorizontal(colStarts[cIdx], colEnds[cIdx], yColTop + 450, sup.widthMm, { textHeight: TEXT_H.CALLOUT });
-      b.text(LAYER_LABELS_SUPPORT.name, colCenters[cIdx], yColBot - 450, sup.label, TEXT_H.GRID, { anchor: 'middle', bold: true });
+      this.drawCenterLine(b, colCenters[cIdx], yColBot - 350, yColTop + 1300);
+      b.arrowHead(LAYER_GRID.name, colCenters[cIdx], yColTop + 1250, Math.PI / 2, 85);
+      b.text(LAYER_GRID.name, colCenters[cIdx], yTop + 2150, sup.gridLabel, TEXT_H.MARK, { anchor: 'middle', bold: true });
+      b.dimHorizontal(colStarts[cIdx], colEnds[cIdx], yTop + 1050, sup.widthMm, { textHeight: 130 });
+
+      // Stagger alternate column marks if close to prevent collision
+      const isClose = Math.abs(colCenters[cIdx] - colCenters[cIdx - 1]) < 1800;
+      const staggerY = (cIdx % 2 === 1 && isClose) ? yBot - 1920 : yBot - 1700;
+      b.text(LAYER_LABELS_SUPPORT.name, colCenters[cIdx], staggerY, sup.label, TEXT_H.MARK, { anchor: 'middle', bold: true });
     }
 
     // Right End Support
@@ -831,28 +836,28 @@ export class BeamSectionSheetEngine {
     b.line(LAYER_CONCRETE.name, colEnds[N], yColBot, colEnds[N], yColTop);
     this.drawBreakline(b, colStarts[N], colEnds[N], yColTop);
     this.drawBreakline(b, colStarts[N], colEnds[N], yColBot);
-    this.drawCenterLine(b, colCenters[N], yColBot - 500, yColTop + 850);
-    b.arrowHead(LAYER_GRID.name, colCenters[N], yColTop + 800, Math.PI / 2, 85);
-    b.text(LAYER_GRID.name, colCenters[N], yColTop + 1100, supLast.gridLabel, TEXT_H.GRID, { anchor: 'middle', bold: true });
-    b.dimHorizontal(colStarts[N], colEnds[N], yColTop + 450, supLast.widthMm, { textHeight: TEXT_H.CALLOUT });
-    b.text(LAYER_LABELS_SUPPORT.name, colCenters[N], yColBot - 450, supLast.label, TEXT_H.GRID, { anchor: 'middle', bold: true });
+    this.drawCenterLine(b, colCenters[N], yColBot - 350, yColTop + 1300);
+    b.arrowHead(LAYER_GRID.name, colCenters[N], yColTop + 1250, Math.PI / 2, 85);
+    b.text(LAYER_GRID.name, colCenters[N], yTop + 2150, supLast.gridLabel, TEXT_H.MARK, { anchor: 'middle', bold: true });
+    b.dimHorizontal(colStarts[N], colEnds[N], yTop + 1050, supLast.widthMm, { textHeight: 130 });
+    b.text(LAYER_LABELS_SUPPORT.name, colCenters[N], yBot - 1700, supLast.label, TEXT_H.MARK, { anchor: 'middle', bold: true });
 
     // 3. Continuous Top Through Rebar (full run length)
     b.poly(
       LAYER_REBAR.name,
       [
-        [xAnchLeft, yTopBar - 280],
+        [xAnchLeft, yTopBar - 220],
         [xAnchLeft, yTopBar],
         [xAnchRight, yTopBar],
-        [xAnchRight, yTopBar - 280],
+        [xAnchRight, yTopBar - 220],
       ],
       false
     );
 
     const firstTopThru = `${run.spans[0].design.top.through.count}-T ${run.spans[0].design.top.through.dia}`;
     const topCalloutX = spanXStarts[0] + (spanXEnds[0] - spanXStarts[0]) * 0.22;
-    b.leader(LAYER_REBAR.name, topCalloutX, yTopBar + 180, topCalloutX, yTopBar, { h: TEXT_H.CALLOUT });
-    b.text(LAYER_REBAR.name, topCalloutX, yTopBar + 220, firstTopThru, TEXT_H.CALLOUT, {
+    b.leader(LAYER_REBAR.name, topCalloutX, yTopBar + 170, topCalloutX, yTopBar, { h: 140 });
+    b.text(LAYER_REBAR.name, topCalloutX, yTopBar + 210, firstTopThru, 140, {
       anchor: 'middle',
       bold: true,
     });
@@ -866,28 +871,28 @@ export class BeamSectionSheetEngine {
       const spanUnits = xEnd - xStart;
 
       // Bottom Continuous Through Rebar
-      const leftHookX = idx === 0 ? xAnchLeft : xStart - 100;
-      const rightHookX = idx === N - 1 ? xAnchRight : xEnd + 100;
+      const leftHookX = idx === 0 ? xAnchLeft : xStart - 80;
+      const rightHookX = idx === N - 1 ? xAnchRight : xEnd + 80;
 
       if (idx === 0 || idx === N - 1) {
         const pts: [number, number][] = [];
-        if (idx === 0) pts.push([xAnchLeft, yBotBar + 280]);
+        if (idx === 0) pts.push([xAnchLeft, yBotBar + 220]);
         pts.push([leftHookX, yBotBar]);
         pts.push([rightHookX, yBotBar]);
-        if (idx === N - 1) pts.push([xAnchRight, yBotBar + 280]);
+        if (idx === N - 1) pts.push([xAnchRight, yBotBar + 220]);
         b.poly(LAYER_REBAR.name, pts, false);
       } else {
         b.line(LAYER_REBAR.name, leftHookX, yBotBar, rightHookX, yBotBar);
       }
 
       const botCalloutX = xStart + spanUnits * 0.22;
-      b.leader(LAYER_REBAR.name, botCalloutX, yBotBar - 180, botCalloutX, yBotBar, { h: TEXT_H.CALLOUT });
+      b.leader(LAYER_REBAR.name, botCalloutX, yBotBar - 150, botCalloutX, yBotBar, { h: 140 });
       b.text(
         LAYER_REBAR.name,
         botCalloutX,
-        yBotBar - 220,
+        yBotBar - 190,
         `${design.bottom.through.count}-T ${design.bottom.through.dia}`,
-        TEXT_H.CALLOUT,
+        140,
         { anchor: 'middle', bold: true }
       );
 
@@ -897,34 +902,34 @@ export class BeamSectionSheetEngine {
         const midLenMm = design.curtailmentDetails?.botLengthMm || Math.max(500, clearSpanMm - 2 * startOffMm);
         const xMidStart = xStart + startOffMm * S;
         const xMidEnd = xMidStart + midLenMm * S;
-        const yBotExtra = yBotBar + 45;
+        const yBotExtra = yBotBar + 35;
 
         b.line(LAYER_REBAR.name, xMidStart, yBotExtra, xMidEnd, yBotExtra);
         b.line(LAYER_REBAR.name, xMidStart, yBotExtra - 15, xMidStart, yBotExtra + 15);
         b.line(LAYER_REBAR.name, xMidEnd, yBotExtra - 15, xMidEnd, yBotExtra + 15);
 
         const midCalloutX = (xMidStart + xMidEnd) / 2;
-        b.leader(LAYER_REBAR.name, midCalloutX, yBotBar - 400, midCalloutX, yBotExtra, { h: TEXT_H.CALLOUT });
+        b.leader(LAYER_REBAR.name, midCalloutX, yBot - 350, midCalloutX, yBotExtra, { h: 140 });
         b.text(
           LAYER_REBAR.name,
           midCalloutX,
-          yBotBar - 440,
+          yBot - 390,
           `${design.bottom.extra.count}-T ${design.bottom.extra.dia}`,
-          TEXT_H.CALLOUT,
+          140,
           { anchor: 'middle', bold: true }
         );
-        b.dimHorizontal(xMidStart, xMidEnd, yBot - 600, midLenMm, { textHeight: TEXT_H.CALLOUT });
+        b.dimHorizontal(xMidStart, xMidEnd, yBot - 580, midLenMm, { textHeight: 130 });
       }
 
       // Top Extra End Support Rebar (leftmost and rightmost)
       if (idx === 0 && design.top.extra && design.top.extra.count > 0) {
         const cutLeftMm = design.curtailmentDetails?.topCutoffLeftMm || Math.round(clearSpanMm * 0.28);
         const xCutLeft = xStart + cutLeftMm * S;
-        const yTopExtra = yTopBar - 45;
+        const yTopExtra = yTopBar - 35;
         b.poly(
           LAYER_REBAR.name,
           [
-            [xAnchLeft, yTopExtra - 200],
+            [xAnchLeft, yTopExtra - 160],
             [xAnchLeft, yTopExtra],
             [xCutLeft, yTopExtra],
           ],
@@ -932,60 +937,60 @@ export class BeamSectionSheetEngine {
         );
         b.line(LAYER_REBAR.name, xCutLeft, yTopExtra - 15, xCutLeft, yTopExtra + 15);
         const extraCalloutX = (xStart + xCutLeft) / 2;
-        b.leader(LAYER_REBAR.name, extraCalloutX, yTopBar + 380, extraCalloutX, yTopExtra, { h: TEXT_H.CALLOUT });
+        b.leader(LAYER_REBAR.name, extraCalloutX, yTop + 200, extraCalloutX, yTopExtra, { h: 140 });
         b.text(
           LAYER_REBAR.name,
           extraCalloutX,
-          yTopBar + 420,
+          yTop + 240,
           `${design.top.extra.count}-T ${design.top.extra.dia}`,
-          TEXT_H.CALLOUT,
+          140,
           { anchor: 'middle', bold: true }
         );
-        b.dimHorizontal(xStart, xCutLeft, yTop + 750, cutLeftMm, { textHeight: TEXT_H.CALLOUT });
+        b.dimHorizontal(xStart, xCutLeft, yTop + 550, cutLeftMm, { textHeight: 130 });
       }
 
       if (idx === N - 1 && design.top.extra && design.top.extra.count > 0) {
         const cutRightMm = design.curtailmentDetails?.topCutoffRightMm || Math.round(clearSpanMm * 0.28);
         const xCutRight = xEnd - cutRightMm * S;
-        const yTopExtra = yTopBar - 45;
+        const yTopExtra = yTopBar - 35;
         b.poly(
           LAYER_REBAR.name,
           [
             [xCutRight, yTopExtra],
             [xAnchRight, yTopExtra],
-            [xAnchRight, yTopExtra - 200],
+            [xAnchRight, yTopExtra - 160],
           ],
           false
         );
         b.line(LAYER_REBAR.name, xCutRight, yTopExtra - 15, xCutRight, yTopExtra + 15);
         const extraCalloutX = (xCutRight + xEnd) / 2;
-        b.leader(LAYER_REBAR.name, extraCalloutX, yTopBar + 380, extraCalloutX, yTopExtra, { h: TEXT_H.CALLOUT });
+        b.leader(LAYER_REBAR.name, extraCalloutX, yTop + 200, extraCalloutX, yTopExtra, { h: 140 });
         b.text(
           LAYER_REBAR.name,
           extraCalloutX,
-          yTopBar + 420,
+          yTop + 240,
           `${design.top.extra.count}-T ${design.top.extra.dia}`,
-          TEXT_H.CALLOUT,
+          140,
           { anchor: 'middle', bold: true }
         );
-        b.dimHorizontal(xCutRight, xEnd, yTop + 750, cutRightMm, { textHeight: TEXT_H.CALLOUT });
+        b.dimHorizontal(xCutRight, xEnd, yTop + 550, cutRightMm, { textHeight: 130 });
       }
 
       // Stirrups in 3 Zones
       this.drawSpanStirrups(b, design, xStart, xEnd, yBot, yTop, S);
 
       // Top Clear Span Dimension
-      b.dimHorizontal(xStart, xEnd, yTop + 1400, clearSpanMm, { textHeight: TEXT_H.CALLOUT });
+      b.dimHorizontal(xStart, xEnd, yTop + 1550, clearSpanMm, { textHeight: 140 });
 
-      // Beam Label below span
-      b.text(
-        LAYER_LABELS.name,
-        (xStart + xEnd) / 2,
-        yBot - 950,
-        `${design.mark}:${design.b}x${design.D}`,
-        TEXT_H.LABEL,
-        { anchor: 'middle', bold: true }
-      );
+      // Beam Mark & Size below span (auto-wrap on narrow spans)
+      const availW = spanUnits - 80;
+      const midX = (xStart + xEnd) / 2;
+      if (availW < 1600) {
+        b.text(LAYER_LABELS.name, midX, yBot - 1360, design.mark, 150, { anchor: 'middle', bold: true });
+        b.text(LAYER_LABELS.name, midX, yBot - 1520, `${design.b}x${design.D}`, 130, { anchor: 'middle', bold: true });
+      } else {
+        b.text(LAYER_LABELS.name, midX, yBot - 1400, `${design.mark}:${design.b}x${design.D}`, 160, { anchor: 'middle', bold: true });
+      }
     });
 
     // 5. Top Extra Rebar Over Intermediate Supports
@@ -999,24 +1004,24 @@ export class BeamSectionSheetEngine {
         const cIdx = i + 1;
         const xCutLeft = colStarts[cIdx] - cutLeftMm * S;
         const xCutRight = colEnds[cIdx] + cutRightMm * S;
-        const yTopExtra = yTopBar - 45;
+        const yTopExtra = yTopBar - 35;
 
         b.line(LAYER_REBAR.name, xCutLeft, yTopExtra, xCutRight, yTopExtra);
         b.line(LAYER_REBAR.name, xCutLeft, yTopExtra - 15, xCutLeft, yTopExtra + 15);
         b.line(LAYER_REBAR.name, xCutRight, yTopExtra - 15, xCutRight, yTopExtra + 15);
 
-        b.leader(LAYER_REBAR.name, colCenters[cIdx], yTopBar + 380, colCenters[cIdx], yTopExtra, { h: TEXT_H.CALLOUT });
+        b.leader(LAYER_REBAR.name, colCenters[cIdx], yTop + 200, colCenters[cIdx], yTopExtra, { h: 140 });
         b.text(
           LAYER_REBAR.name,
           colCenters[cIdx],
-          yTopBar + 420,
+          yTop + 240,
           `${extraBars.count}-T ${extraBars.dia}`,
-          TEXT_H.CALLOUT,
+          140,
           { anchor: 'middle', bold: true }
         );
 
-        b.dimHorizontal(xCutLeft, colStarts[cIdx], yTop + 750, cutLeftMm, { textHeight: TEXT_H.CALLOUT });
-        b.dimHorizontal(colEnds[cIdx], xCutRight, yTop + 750, cutRightMm, { textHeight: TEXT_H.CALLOUT });
+        b.dimHorizontal(xCutLeft, colStarts[cIdx], yTop + 550, cutLeftMm, { textHeight: 130 });
+        b.dimHorizontal(colEnds[cIdx], xCutRight, yTop + 550, cutRightMm, { textHeight: 130 });
       }
     }
 
@@ -1024,9 +1029,9 @@ export class BeamSectionSheetEngine {
     b.text(
       LAYER_TEXT_SCALE.name,
       (colStarts[0] + colEnds[N]) / 2,
-      yBot - 1450,
+      yBot - 2200,
       '(SCALE: H - 1:50 / V - 1:50)',
-      TEXT_H.CALLOUT,
+      130,
       { anchor: 'middle' }
     );
   }
@@ -1050,32 +1055,30 @@ export class BeamSectionSheetEngine {
       const zEnd = cursorX + zoneW;
 
       // Vertical stirrup lines inside beam
-      const step = Math.max(12, Math.min(zoneW / 6, (zone.spacing * S) / 2));
+      const step = Math.max(16, Math.min(zoneW / 6, (zone.spacing * S) / 2));
       let sx = cursorX + step / 2;
       while (sx < zEnd) {
-        b.line(LAYER_LINK.name, sx, yBot + 40, sx, yTop - 40);
+        b.line(LAYER_LINK.name, sx, yBot + 30, sx, yTop - 30);
         sx += step;
       }
 
       // Zone delimiter vertical tick
       b.line(LAYER_LINK.name, zEnd, yBot, zEnd, yTop);
 
-      // Callout below
+      // Callout below (compact AutoCAD format)
       const zMid = (cursorX + zEnd) / 2;
-      const calloutText = `${zone.stirrupCount}-${design.stirrups.legs}L-T${zone.stirrupDia}`;
-      b.text(LAYER_SCHEDULE_TEXT.name, zMid, yBot - 140, calloutText, TEXT_H.CALLOUT - 25, {
+      const compactText = zoneW < 900
+        ? `T${zone.stirrupDia}@${zone.spacing}`
+        : `${zone.stirrupCount}-${design.stirrups.legs}L-T${zone.stirrupDia}@${zone.spacing}`;
+
+      b.text(LAYER_SCHEDULE_TEXT.name, zMid, yBot - 850, compactText, 130, {
         anchor: 'middle',
         bold: true,
       });
-      b.text(LAYER_SCHEDULE_TEXT.name, zMid, yBot - 340, `@${zone.spacing} C/C`, TEXT_H.CALLOUT - 35, {
-        anchor: 'middle',
-      });
-      b.text(LAYER_SCHEDULE_TEXT.name, zMid, yBot - 520, zone.label, TEXT_H.CALLOUT - 45, {
-        anchor: 'middle',
-      });
+
       if (zoneMm > 0) {
-        b.dimHorizontal(cursorX, zEnd, yBot - 680, Math.round(zoneMm), {
-          textHeight: TEXT_H.CALLOUT - 30,
+        b.dimHorizontal(cursorX, zEnd, yBot - 1080, Math.round(zoneMm), {
+          textHeight: 125,
         });
       }
 
