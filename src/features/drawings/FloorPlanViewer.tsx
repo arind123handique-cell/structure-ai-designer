@@ -133,9 +133,8 @@ export const FloorPlanViewer: React.FC = () => {
   const [pdfSuccessMessage, setPdfSuccessMessage] = useState<string | null>(null);
   const [selectedPileCapNodeId, setSelectedPileCapNodeId] = useState<number | null>(null);
 
-  // Dimension text size control (in drawing units)
+  // Dimension text size control (in drawing units) — real-time update
   const [dimensionTextSize, setDimensionTextSize] = useState<number>(350);
-  const [dimensionTextSizeInput, setDimensionTextSizeInput] = useState<string>('350');
 
   const selectedCapCol = useMemo(() => {
     if (!selectedPileCapNodeId || !activePlan) return null;
@@ -244,17 +243,12 @@ export const FloorPlanViewer: React.FC = () => {
     }, 40);
   };
 
-  // Apply dimension text size and regenerate sheets
-  const handleApplyDimensionSize = () => {
-    const val = parseInt(dimensionTextSizeInput, 10);
-    if (!isNaN(val) && val >= 100 && val <= 600) {
-      setDimensionTextSize(val);
-      // Force regenerate sheets with new size
-      if (sheetMode !== 'FRAMING') {
-        handleGenerateSheet(true);
-      }
+  // Real-time dimension size update — regenerate sheets when dimensionTextSize changes
+  React.useEffect(() => {
+    if (sheetMode !== 'FRAMING' && currentSheets.length > 0) {
+      handleGenerateSheet(true);
     }
-  };
+  }, [dimensionTextSize]);
 
   // Add / Place Staircase on active level
   const handleAddStaircaseToLevel = () => {
@@ -803,27 +797,32 @@ export const FloorPlanViewer: React.FC = () => {
               </button>
             </div>
 
-            {/* Dimension Text Size Control */}
-            <div className="inline-flex items-center gap-1.5 bg-slate-100 p-0.5 rounded border border-slate-300 text-xs font-mono">
-              <span className="px-1.5 text-[10px] text-slate-600 font-semibold">DIM:</span>
+            {/* Dimension Text Size Control — Real-Time */}
+            <div className="inline-flex items-center gap-1.5 bg-slate-100 p-1 rounded border border-slate-300 text-xs font-mono">
+              <span className="px-1 text-[10px] text-slate-600 font-semibold">DIM:</span>
+              <input
+                type="range"
+                min={100}
+                max={600}
+                step={10}
+                value={dimensionTextSize}
+                onChange={(e) => setDimensionTextSize(Number(e.target.value))}
+                className="w-20 h-1 accent-indigo-600 cursor-pointer"
+                title="Drag to change dimension text size"
+              />
               <input
                 type="number"
                 min={100}
                 max={600}
                 step={10}
-                value={dimensionTextSizeInput}
-                onChange={(e) => setDimensionTextSizeInput(e.target.value)}
-                className="w-14 px-1.5 py-0.5 text-xs font-mono text-center border border-slate-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                value={dimensionTextSize}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (!isNaN(v) && v >= 100 && v <= 600) setDimensionTextSize(v);
+                }}
+                className="w-12 px-1 py-0.5 text-[10px] font-mono text-center border border-slate-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 title="Dimension text size (100-600)"
               />
-              <button
-                type="button"
-                onClick={handleApplyDimensionSize}
-                className="px-2 py-0.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded shadow-xs transition-colors"
-                title="Apply dimension size and regenerate drawing"
-              >
-                Apply
-              </button>
             </div>
 
             {/* 2. Foundation Cross-Sections Visibility & Selection */}
