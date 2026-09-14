@@ -375,10 +375,27 @@ export class FloorPlanEngine {
       Object.entries(savedPileCapDesigns).forEach(([k, v]) => {
         const nid = Number(k);
         const ov = customPileCapOverrides ? customPileCapOverrides[nid] : undefined;
-        designedPileCaps.set(nid, {
-          ...v,
-          rotationAngle: ov?.rotationAngle ?? v.rotationAngle,
-        });
+        const matchedInput = pileCapInputs.find((p) => p.supportNodeId === nid);
+        if (ov?.customPileCount && matchedInput) {
+          const recomputed = PileCapDesignEngine.design({
+            ...matchedInput,
+            customPileCount: ov.customPileCount,
+            customCapLength: ov.customCapLength,
+            customCapWidth: ov.customCapWidth,
+            customCapDepth: ov.customCapDepth,
+            rotationAngle: ov.rotationAngle ?? v.rotationAngle,
+          });
+          designedPileCaps.set(nid, recomputed);
+        } else {
+          designedPileCaps.set(nid, {
+            ...v,
+            rotationAngle: ov?.rotationAngle ?? v.rotationAngle,
+            ...(ov?.customPileCount ? { pileCount: ov.customPileCount } : {}),
+            ...(ov?.customCapLength ? { capLength: ov.customCapLength } : {}),
+            ...(ov?.customCapWidth ? { capWidth: ov.customCapWidth } : {}),
+            ...(ov?.customCapDepth ? { capDepth: ov.customCapDepth } : {}),
+          });
+        }
       });
     } else {
       designedPileCaps = pileCapInputs.length > 0
