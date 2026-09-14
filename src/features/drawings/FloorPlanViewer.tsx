@@ -79,6 +79,7 @@ export const FloorPlanViewer: React.FC = () => {
 
   // CAD Sheet Orientation & Section Visibility State (A3 Landscape / Portrait)
   const [sheetOrientation, setSheetOrientation] = useState<'LANDSCAPE' | 'PORTRAIT'>('LANDSCAPE');
+  const [cadTheme, setCadTheme] = useState<'AUTOCAD_WHITE' | 'BLUEPRINT_DARK'>('AUTOCAD_WHITE');
   const [showCrossSections, setShowCrossSections] = useState<boolean>(true);
   const [layersMenuOpen, setLayersMenuOpen] = useState<boolean>(false);
   const [zoomFit, setZoomFit] = useState<boolean>(true);
@@ -403,6 +404,34 @@ export const FloorPlanViewer: React.FC = () => {
                 title="Format drawing as ISO A3 Portrait (297 × 420 mm)"
               >
                 <span>📄 A3 Portrait (297×420)</span>
+              </button>
+            </div>
+
+            {/* CAD Theme Toggle (AutoCAD White vs Blueprint Dark) */}
+            <div className="inline-flex items-center bg-slate-100 p-0.5 rounded border border-slate-300 text-xs font-mono">
+              <button
+                type="button"
+                onClick={() => setCadTheme('AUTOCAD_WHITE')}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-colors ${
+                  cadTheme === 'AUTOCAD_WHITE'
+                    ? 'bg-deep-navy text-white shadow-xs'
+                    : 'text-slate-700 hover:text-slate-900 hover:bg-white'
+                }`}
+                title="AutoCAD White Paper Space layout"
+              >
+                <span>🎨 AutoCAD White</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCadTheme('BLUEPRINT_DARK')}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-colors ${
+                  cadTheme === 'BLUEPRINT_DARK'
+                    ? 'bg-deep-navy text-white shadow-xs'
+                    : 'text-slate-700 hover:text-slate-900 hover:bg-white'
+                }`}
+                title="High-contrast Blueprint Dark workspace"
+              >
+                <span>🌙 Blueprint Dark</span>
               </button>
             </div>
 
@@ -771,6 +800,8 @@ export const FloorPlanViewer: React.FC = () => {
           <FloorPlanSvg
             floorPlan={activePlan}
             project={activeProject}
+            cadTheme={cadTheme}
+            onCadThemeChange={setCadTheme}
             sheetOrientation={sheetOrientation}
             showCrossSections={showCrossSections}
             onToggleCrossSections={setShowCrossSections}
