@@ -169,39 +169,67 @@ export const FloorPlanViewer: React.FC = () => {
 
   // ---------------------------------------------------------------------
   // Detail drawing sheets — beam reinforcement sections and slab detailing,
-  // generated per floor in the conventions of the source CAD drawings
-  // (see DXF_DRAWING_ANALYSIS.md).
+  // generated on-demand per floor to prevent browser lag and memory thrashing.
   // ---------------------------------------------------------------------
   const [sheetMode, setSheetMode] = useState<'FRAMING' | 'BEAM_SECTIONS' | 'SLAB_DETAILS'>('FRAMING');
 
   const fckGrade = activeProject?.metadata.designSettings.concreteGrade === 'M30' ? 30 : 25;
   const fyGrade = activeProject?.metadata.designSettings.steelGrade === 'Fe500D' ? 500 : 500;
 
-  const detailSheet: DrawingSheet | null = useMemo(() => {
-    if (sheetMode === 'FRAMING' || !activePlan) return null;
-    try {
-      if (sheetMode === 'BEAM_SECTIONS') {
-        return BeamSectionSheetEngine.buildSheet({
-          level: activePlan,
-          project: {
-            savedBeamDesigns: savedBeamDesigns || {},
-            savedSlabDesigns: savedSlabDesigns || {},
-            universalRebarSelection: (activeProject as any)?.universalRebarSelection,
-            allowedColumnRebarDiameters: (activeProject as any)?.allowedColumnRebarDiameters,
-          },
-          fck: fckGrade,
-          fy: fyGrade,
-        });
+  // In-memory cache for on-demand generated sheets per floor level & mode
+  const [generatedSheetsMap, setGeneratedSheetsMap] = useState<Record<string, DrawingSheet[]>>({});
+  const [isGeneratingSheet, setIsGeneratingSheet] = useState(false);
+  const [activePageIndex, setActivePageIndex] = useState<Record<string, number>>({});
+
+  const activeLevelIdx = activePlan?.levelIndex ?? 0;
+  const sheetCacheKey = activePlan ? `${sheetMode}_${activeLevelIdx}` : '';
+  const currentSheets: DrawingSheet[] = generatedSheetsMap[sheetCacheKey] || [];
+  const currentPageIdx = Math.min(activePageIndex[sheetCacheKey] || 0, Math.max(0, currentSheets.length - 1));
+  const activeDetailSheet: DrawingSheet | null = currentSheets[currentPageIdx] || currentSheets[0] || null;
+
+  const handleGenerateSheet = (forceRegenerate = false) => {
+    if (!activePlan || sheetMode === 'FRAMING') return;
+    if (!forceRegenerate && currentSheets.length > 0) return;
+
+    setIsGeneratingSheet(true);
+    setTimeout(() => {
+      try {
+        let sheets: DrawingSheet[] = [];
+        if (sheetMode === 'BEAM_SECTIONS') {
+          sheets = BeamSectionSheetEngine.buildSheets({
+            level: activePlan,
+            project: {
+              savedBeamDesigns: savedBeamDesigns || {},
+              savedSlabDesigns: savedSlabDesigns || {},
+              universalRebarSelection: (activeProject as any)?.universalRebarSelection,
+              allowedColumnRebarDiameters: (activeProject as any)?.allowedColumnRebarDiameters,
+            },
+            fck: fckGrade,
+            fy: fyGrade,
+          });
+        } else if (sheetMode === 'SLAB_DETAILS') {
+          const single = SlabDetailSheetEngine.buildSheet({
+            level: activePlan,
+            project: { savedSlabDesigns: savedSlabDesigns || {} },
+          });
+          sheets = [single];
+        }
+
+        setGeneratedSheetsMap((prev) => ({
+          ...prev,
+          [sheetCacheKey]: sheets,
+        }));
+        setActivePageIndex((prev) => ({
+          ...prev,
+          [sheetCacheKey]: 0,
+        }));
+      } catch (err) {
+        console.error('Failed to generate drawing sheets:', err);
+      } finally {
+        setIsGeneratingSheet(false);
       }
-      return SlabDetailSheetEngine.buildSheet({
-        level: activePlan,
-        project: { savedSlabDesigns: savedSlabDesigns || {} },
-      });
-    } catch (err) {
-      console.error('Detail sheet generation failed:', err);
-      return null;
-    }
-  }, [sheetMode, activePlan, savedBeamDesigns, savedSlabDesigns, activeProject, fckGrade, fyGrade]);
+    }, 40);
+  };
 
   // Add / Place Staircase on active level
   const handleAddStaircaseToLevel = () => {
@@ -261,12 +289,45 @@ export const FloorPlanViewer: React.FC = () => {
   const handleExportCurrentPdf = () => {
     setIsExportingPdf(true);
     try {
-      if (detailSheet) {
-        PdfExportService.exportDetailSheetToPdf(detailSheet, activeProject, undefined, {
-          orientation: sheetOrientation.toLowerCase() as any,
-          theme: cadTheme === 'BLUEPRINT_DARK' ? 'dark' : 'light',
-        });
-        setPdfSuccessMessage(`Exported ${detailSheet.sheetNumber} (${detailSheet.title}) as A3 ${sheetOrientation} PDF!`);
+      if (sheetMode !== 'FRAMING') {
+        let sheetsToExport = currentSheets;
+        if (sheetsToExport.length === 0 && activePlan) {
+          // On-demand build for export if user hasn't pressed generate yet
+          if (sheetMode === 'BEAM_SECTIONS') {
+            sheetsToExport = BeamSectionSheetEngine.buildSheets({
+              level: activePlan,
+              project: {
+                savedBeamDesigns: savedBeamDesigns || {},
+                savedSlabDesigns: savedSlabDesigns || {},
+                universalRebarSelection: (activeProject as any)?.universalRebarSelection,
+                allowedColumnRebarDiameters: (activeProject as any)?.allowedColumnRebarDiameters,
+              },
+              fck: fckGrade,
+              fy: fyGrade,
+            });
+          } else {
+            sheetsToExport = [
+              SlabDetailSheetEngine.buildSheet({
+                level: activePlan,
+                project: { savedSlabDesigns: savedSlabDesigns || {} },
+              }),
+            ];
+          }
+        }
+
+        if (sheetsToExport.length > 1) {
+          PdfExportService.exportAllDetailSheetsToPdf(sheetsToExport, activeProject, undefined, {
+            orientation: sheetOrientation.toLowerCase() as any,
+            theme: cadTheme === 'BLUEPRINT_DARK' ? 'dark' : 'light',
+          });
+          setPdfSuccessMessage(`Exported ${sheetsToExport.length}-page A3 ${sheetOrientation} PDF set for ${activePlan?.levelName}!`);
+        } else if (sheetsToExport.length === 1) {
+          PdfExportService.exportDetailSheetToPdf(sheetsToExport[0], activeProject, undefined, {
+            orientation: sheetOrientation.toLowerCase() as any,
+            theme: cadTheme === 'BLUEPRINT_DARK' ? 'dark' : 'light',
+          });
+          setPdfSuccessMessage(`Exported ${sheetsToExport[0].sheetNumber} (${sheetsToExport[0].title}) as A3 ${sheetOrientation} PDF!`);
+        }
         setTimeout(() => setPdfSuccessMessage(null), 3500);
         return;
       }
@@ -302,24 +363,32 @@ export const FloorPlanViewer: React.FC = () => {
       if (sheetMode === 'BEAM_SECTIONS') {
         const targetLevels = floorPlans.filter((fp) => !fp.isFoundationLevel);
         const levelsToExport = targetLevels.length > 0 ? targetLevels : floorPlans;
-        const sheets: DrawingSheet[] = levelsToExport.map((level) =>
-          BeamSectionSheetEngine.buildSheet({
-            level,
-            project: {
-              savedBeamDesigns: savedBeamDesigns || {},
-              savedSlabDesigns: savedSlabDesigns || {},
-              universalRebarSelection: (activeProject as any)?.universalRebarSelection,
-              allowedColumnRebarDiameters: (activeProject as any)?.allowedColumnRebarDiameters,
-            },
-            fck: fckGrade,
-            fy: fyGrade,
-          })
-        );
-        PdfExportService.exportAllDetailSheetsToPdf(sheets, activeProject, undefined, {
+        const allSheets: DrawingSheet[] = [];
+        levelsToExport.forEach((level) => {
+          const lKey = `BEAM_SECTIONS_${level.levelIndex ?? 0}`;
+          const cached = generatedSheetsMap[lKey];
+          if (cached && cached.length > 0) {
+            allSheets.push(...cached);
+          } else {
+            const fresh = BeamSectionSheetEngine.buildSheets({
+              level,
+              project: {
+                savedBeamDesigns: savedBeamDesigns || {},
+                savedSlabDesigns: savedSlabDesigns || {},
+                universalRebarSelection: (activeProject as any)?.universalRebarSelection,
+                allowedColumnRebarDiameters: (activeProject as any)?.allowedColumnRebarDiameters,
+              },
+              fck: fckGrade,
+              fy: fyGrade,
+            });
+            allSheets.push(...fresh);
+          }
+        });
+        PdfExportService.exportAllDetailSheetsToPdf(allSheets, activeProject, undefined, {
           orientation: sheetOrientation.toLowerCase() as any,
           theme: cadTheme === 'BLUEPRINT_DARK' ? 'dark' : 'light',
         });
-        setPdfSuccessMessage(`Exported complete A3 ${sheetOrientation} multi-page Beam Reinforcement Sections PDF set for ${sheets.length} floor levels!`);
+        setPdfSuccessMessage(`Exported complete A3 ${sheetOrientation} multi-page Beam Reinforcement Sections PDF set (${allSheets.length} pages) for ${levelsToExport.length} floor levels!`);
         setTimeout(() => setPdfSuccessMessage(null), 4000);
         return;
       }
@@ -327,17 +396,25 @@ export const FloorPlanViewer: React.FC = () => {
       if (sheetMode === 'SLAB_DETAILS') {
         const targetLevels = floorPlans.filter((fp) => !fp.isFoundationLevel);
         const levelsToExport = targetLevels.length > 0 ? targetLevels : floorPlans;
-        const sheets: DrawingSheet[] = levelsToExport.map((level) =>
-          SlabDetailSheetEngine.buildSheet({
-            level,
-            project: { savedSlabDesigns: savedSlabDesigns || {} },
-          })
-        );
-        PdfExportService.exportAllDetailSheetsToPdf(sheets, activeProject, undefined, {
+        const allSheets: DrawingSheet[] = [];
+        levelsToExport.forEach((level) => {
+          const lKey = `SLAB_DETAILS_${level.levelIndex ?? 0}`;
+          const cached = generatedSheetsMap[lKey];
+          if (cached && cached.length > 0) {
+            allSheets.push(...cached);
+          } else {
+            const fresh = SlabDetailSheetEngine.buildSheet({
+              level,
+              project: { savedSlabDesigns: savedSlabDesigns || {} },
+            });
+            allSheets.push(fresh);
+          }
+        });
+        PdfExportService.exportAllDetailSheetsToPdf(allSheets, activeProject, undefined, {
           orientation: sheetOrientation.toLowerCase() as any,
           theme: cadTheme === 'BLUEPRINT_DARK' ? 'dark' : 'light',
         });
-        setPdfSuccessMessage(`Exported complete A3 ${sheetOrientation} multi-page Slab Detailing PDF set for ${sheets.length} floor levels!`);
+        setPdfSuccessMessage(`Exported complete A3 ${sheetOrientation} multi-page Slab Detailing PDF set (${allSheets.length} sheets) for ${levelsToExport.length} floor levels!`);
         setTimeout(() => setPdfSuccessMessage(null), 4000);
         return;
       }
@@ -424,7 +501,7 @@ export const FloorPlanViewer: React.FC = () => {
             onClick={handleExportCurrentPdf}
             disabled={isExportingPdf}
             className="flex items-center gap-1.5 px-3.5 py-1.5 bg-secondary-brand hover:bg-blue-700 text-white font-mono text-xs font-semibold rounded shadow-2xs transition-all disabled:opacity-50"
-            title={detailSheet ? `Export active detail drawing sheet (${detailSheet.sheetNumber}) as a vector A3 PDF` : "Export the currently active 2D floor plan as a vector A3 PDF drawing sheet"}
+            title={activeDetailSheet ? `Export active detail drawing sheet (${activeDetailSheet.sheetNumber}) as a vector A3 PDF` : "Export the currently active 2D floor plan as a vector A3 PDF drawing sheet"}
           >
             <Download className="w-3.5 h-3.5" />
             <span>{isExportingPdf ? 'Exporting...' : 'Export Active Level (PDF)'}</span>
@@ -444,8 +521,8 @@ export const FloorPlanViewer: React.FC = () => {
           {/* Export CSV Schedule */}
           <button
             onClick={handleExportCsv}
-            disabled={!!detailSheet}
-            title={detailSheet ? 'CSV schedule export applies to the GA framing plan — switch to GA Framing Plan' : 'Export element schedule as CSV'}
+            disabled={sheetMode !== 'FRAMING'}
+            title={sheetMode !== 'FRAMING' ? 'CSV schedule export applies to the GA framing plan — switch to GA Framing Plan' : 'Export element schedule as CSV'}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-ui-border rounded text-xs font-mono font-semibold shadow-2xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-slate-600" />
@@ -557,6 +634,85 @@ export const FloorPlanViewer: React.FC = () => {
                 );
               })}
             </div>
+
+            {/* On-Demand Generate & Pagination Controls for Beam Sections and Slab Details */}
+            {sheetMode !== 'FRAMING' && (
+              <div className="flex items-center gap-1.5 flex-wrap font-mono text-xs">
+                {currentSheets.length === 0 ? (
+                  <button
+                    type="button"
+                    disabled={isGeneratingSheet}
+                    onClick={() => handleGenerateSheet(false)}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded shadow-xs transition-colors"
+                    title="Generate high-precision CAD drawing sheet"
+                  >
+                    {isGeneratingSheet ? (
+                      <RotateCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                    )}
+                    <span>{isGeneratingSheet ? 'Generating...' : '⚡ Generate Drawing Sheet'}</span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isGeneratingSheet}
+                      onClick={() => handleGenerateSheet(true)}
+                      className="flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded font-semibold transition-colors shadow-2xs"
+                      title="Regenerate drawing sheets from latest rebar and structural designs"
+                    >
+                      <RotateCw className={`w-3.5 h-3.5 text-indigo-600 ${isGeneratingSheet ? 'animate-spin' : ''}`} />
+                      <span>{isGeneratingSheet ? 'Updating...' : 'Regenerate'}</span>
+                    </button>
+
+                    {currentSheets.length > 1 && (
+                      <div className="inline-flex items-center bg-slate-100 p-0.5 rounded border border-slate-300 text-xs font-mono gap-0.5">
+                        <button
+                          type="button"
+                          disabled={currentPageIdx === 0}
+                          onClick={() => setActivePageIndex((prev) => ({ ...prev, [sheetCacheKey]: Math.max(0, currentPageIdx - 1) }))}
+                          className="p-1 px-1.5 rounded text-xs font-bold text-slate-700 hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent"
+                          title="Previous Page"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+
+                        {currentSheets.map((sh, pIdx) => (
+                          <button
+                            key={pIdx}
+                            type="button"
+                            onClick={() => setActivePageIndex((prev) => ({ ...prev, [sheetCacheKey]: pIdx }))}
+                            className={`px-2 py-0.5 rounded text-xs font-semibold transition-colors ${
+                              currentPageIdx === pIdx
+                                ? 'bg-deep-navy text-white shadow-xs'
+                                : 'text-slate-700 hover:text-slate-900 hover:bg-white'
+                            }`}
+                            title={`Switch to Page ${pIdx + 1} of ${currentSheets.length} (${sh.sheetNumber})`}
+                          >
+                            Page {pIdx + 1}
+                          </button>
+                        ))}
+
+                        <button
+                          type="button"
+                          disabled={currentPageIdx === currentSheets.length - 1}
+                          onClick={() => setActivePageIndex((prev) => ({ ...prev, [sheetCacheKey]: Math.min(currentSheets.length - 1, currentPageIdx + 1) }))}
+                          className="p-1 px-1.5 rounded text-xs font-bold text-slate-700 hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent"
+                          title="Next Page"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+
+                        <span className="text-[11px] text-slate-500 px-1 font-semibold">
+                          ({activeDetailSheet?.sheetNumber || `P${currentPageIdx + 1}`})
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
             {/* 1. Sheet Orientation Toggle: A3 Landscape vs Portrait */}
             <div className="inline-flex items-center bg-slate-100 p-0.5 rounded border border-slate-300 text-xs font-mono">
@@ -1005,13 +1161,88 @@ export const FloorPlanViewer: React.FC = () => {
       {/* Main 2D CAD SVG Canvas Plan — Fully Scrollable Responsive Container */}
       <div className="w-full flex justify-center items-center p-1 pb-28">
         <div className="w-full max-w-[1680px] flex justify-center items-center">
-          {detailSheet ? (
-            <DrawingSheetSvg
-              sheet={detailSheet}
-              theme={cadTheme === 'BLUEPRINT_DARK' ? 'dark' : 'light'}
-              width={sheetOrientation === 'PORTRAIT' ? 1188 : 1680}
-              maxHeight={zoomFit ? 820 : undefined}
-            />
+          {sheetMode !== 'FRAMING' ? (
+            currentSheets.length > 0 && activeDetailSheet ? (
+              <DrawingSheetSvg
+                sheet={activeDetailSheet}
+                theme={cadTheme === 'BLUEPRINT_DARK' ? 'dark' : 'light'}
+                width={sheetOrientation === 'PORTRAIT' ? 1188 : 1680}
+                maxHeight={zoomFit ? 820 : undefined}
+              />
+            ) : (
+              /* High-Performance On-Demand CAD Sheet Generation Card */
+              <div className="w-full max-w-2xl bg-white border border-slate-300 rounded-xl shadow-lg p-8 my-10 text-center font-mono animate-in fade-in zoom-in-95">
+                <div className="w-16 h-16 mx-auto bg-indigo-50 border border-indigo-200 text-indigo-600 rounded-2xl flex items-center justify-center mb-4 shadow-xs">
+                  {sheetMode === 'BEAM_SECTIONS' ? (
+                    <Compass className="w-8 h-8 text-indigo-600" />
+                  ) : (
+                    <Layers3 className="w-8 h-8 text-indigo-600" />
+                  )}
+                </div>
+
+                <h3 className="text-lg font-bold text-slate-900 mb-2">
+                  {sheetMode === 'BEAM_SECTIONS'
+                    ? `Generate Beam Reinforcement Cross-Sections (${activePlan?.levelName.toUpperCase()})`
+                    : `Generate Slab Detailing & Schedule (${activePlan?.levelName.toUpperCase()})`}
+                </h3>
+
+                <p className="text-xs text-slate-600 max-w-lg mx-auto mb-6 leading-relaxed">
+                  {sheetMode === 'BEAM_SECTIONS'
+                    ? 'Authentic ISO A3 engineering drawings with continuous multi-span beam elevations, top/bottom through & curtailed rebar, 3-zone shear confinement stirrups, general notes block, and full AutoCAD-standard title block.'
+                    : 'Authentic ISO A3 engineering sheet with floor slab bent-up reinforcement layout (Left), continuous multi-bay SECTION AA (Right Top), and complete SLAB SCHEDULE table (Right Bottom).'}
+                </p>
+
+                <div className="grid grid-cols-3 gap-3 max-w-md mx-auto mb-6 text-left">
+                  <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg">
+                    <span className="text-[10px] uppercase text-slate-500 block font-bold">Floor Level</span>
+                    <span className="text-xs font-bold text-slate-800 truncate block">{activePlan?.levelName}</span>
+                    <span className="text-[10px] text-slate-400">El. +{activePlan?.elevationY.toFixed(2)}m</span>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg">
+                    <span className="text-[10px] uppercase text-slate-500 block font-bold">
+                      {sheetMode === 'BEAM_SECTIONS' ? 'Beams Count' : 'Slab Panels'}
+                    </span>
+                    <span className="text-xs font-bold text-indigo-600 block">
+                      {sheetMode === 'BEAM_SECTIONS'
+                        ? `${activePlan?.beams.length || 0} Beams`
+                        : `${activePlan?.slabs?.length || 0} Panels`}
+                    </span>
+                    <span className="text-[10px] text-slate-400">IS 456 / SP:34</span>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg">
+                    <span className="text-[10px] uppercase text-slate-500 block font-bold">Sheet Layout</span>
+                    <span className="text-xs font-bold text-emerald-600 block">ISO A3 Wireframe</span>
+                    <span className="text-[10px] text-slate-400">Pure CAD Line Art</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={isGeneratingSheet}
+                    onClick={() => handleGenerateSheet(false)}
+                    className="flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all text-sm cursor-pointer disabled:opacity-50"
+                  >
+                    {isGeneratingSheet ? (
+                      <>
+                        <RotateCw className="w-4 h-4 animate-spin" />
+                        <span>Generating High-Precision CAD Sheet...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4 text-amber-300" />
+                        <span>⚡ Generate A3 Drawing Sheet</span>
+                      </>
+                    )}
+                  </button>
+
+                  <span className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                    <Info className="w-3.5 h-3.5 text-slate-400" />
+                    <span>On-demand generation prevents browser lag and frees memory on large models</span>
+                  </span>
+                </div>
+              </div>
+            )
           ) : (
           <FloorPlanSvg
             floorPlan={activePlan}

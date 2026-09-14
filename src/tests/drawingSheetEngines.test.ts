@@ -234,14 +234,14 @@ describe('Beam reinforcement cross-section sheet engine', () => {
     expect(sheet.notes).toContain('(SCALE: H = 1:50  / V = 1:50)');
   });
 
-  it('lays the sections out in rows stacked downwards with a sensible extent', () => {
-    const sheet = BeamSectionSheetEngine.buildSheet(input);
+  it('lays the continuous beam runs onto ISO A3 drawing sheets with proper extents and pagination', () => {
+    const sheets = BeamSectionSheetEngine.buildSheets(input);
+    expect(sheets.length).toBeGreaterThanOrEqual(1);
+    const sheet = sheets[0];
     const bounds = sheet.bounds;
-    // 5 beams wrap to 2 rows of 4 and 1, so nothing exceeds 4 cells wide
-    expect(bounds.maxX - bounds.minX).toBeLessThanOrEqual(4 * cellWidthFor(4.5));
-    // five beams wrap onto two rows, so the sheet extends a full row pitch down
-    expect(bounds.minY).toBeLessThan(-15000);
-    expect(bounds.maxY - bounds.minY).toBeGreaterThan(25000);
+    // Standard ISO A3 CAD sheet dimensions: 42000 x 29700 model units
+    expect(bounds.maxX - bounds.minX).toBe(42000);
+    expect(bounds.maxY - bounds.minY).toBe(29700);
     expect(computeBounds(sheet.primitives)).toEqual(bounds);
   });
 
@@ -365,6 +365,36 @@ describe('Beam reinforcement cross-section sheet engine', () => {
     );
     expect(hookedBars.length).toBeGreaterThanOrEqual(10); // top & bottom through + extra bars
   });
+
+  it('automatically paginates beams into multiple A3 sheets when they exceed a single page', () => {
+    // Create a level with 24 beams across multiple spans
+    const manyBeamsLevel = buildLevel();
+    const extraBeams = [];
+    for (let i = 10; i < 30; i++) {
+      extraBeams.push({
+        memberId: i,
+        label: `B${i}`,
+        startNodeId: i * 2,
+        endNodeId: i * 2 + 1,
+        startX: (i % 5) * 5,
+        startZ: Math.floor(i / 5) * 4,
+        endX: (i % 5) * 5 + 4.5,
+        endZ: Math.floor(i / 5) * 4,
+        length: 4.5,
+        width: 0.23,
+        depth: 0.45,
+        sectionName: '230x450',
+      });
+    }
+    manyBeamsLevel.beams = [...manyBeamsLevel.beams, ...extraBeams];
+
+    const sheets = BeamSectionSheetEngine.buildSheets({ level: manyBeamsLevel, fck: 25, fy: 500 });
+    expect(sheets.length).toBeGreaterThanOrEqual(2);
+    expect(sheets[0].sheetNumber).toContain('STR-201-P1');
+    expect(sheets[1].sheetNumber).toContain('STR-201-P2');
+    expect(sheets[0].bounds.maxX - sheets[0].bounds.minX).toBe(42000);
+    expect(sheets[1].bounds.maxX - sheets[1].bounds.minX).toBe(42000);
+  });
 });
 
 describe('Slab detailing sheet engine', () => {
@@ -407,6 +437,11 @@ describe('Slab detailing sheet engine', () => {
     expect(texts.some((t) => /\(TWO WAY\) \(150 THK\)/.test(t))).toBe(true);
     expect(texts.some((t) => /^T\d+@\d+ C\/C \(BOTTOM [XY]\)$/.test(t))).toBe(true);
     expect(texts).toContain('SECTION X1-X1');
+    expect(texts).toContain('SLAB SCHEDULE');
+    expect(texts).toContain('SECTION AA');
+    expect(texts).toContain('PRINT REDUCTION BAR | A3 SHEET');
+    expect(sheet.bounds.maxX - sheet.bounds.minX).toBe(42000);
+    expect(sheet.bounds.maxY - sheet.bounds.minY).toBe(29700);
   });
 
   it('returns an empty annotated sheet when the level has no panels', () => {

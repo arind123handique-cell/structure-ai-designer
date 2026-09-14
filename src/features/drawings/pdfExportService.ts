@@ -1698,7 +1698,6 @@ export class PdfExportService {
     const drawAreaW = pageWidth - 32;
     const drawAreaH = tbY - drawY0 - 4;
 
-    // Bounds handling
     const bounds = sheet.bounds && Number.isFinite(sheet.bounds.minX)
       ? sheet.bounds
       : computeBounds(sheet.primitives || []);

@@ -138,13 +138,18 @@ export const BEAM_SECTION_SHEET_LAYERS: SheetLayer[] = [
 export const SLAB_SHEET_LAYERS: SheetLayer[] = [
   LAYER_CONCRETE,
   LAYER_REBAR,
+  LAYER_LINK,
   LAYER_GRID,
   LAYER_LABELS,
+  LAYER_LABELS_SUPPORT,
   LAYER_TEXT,
+  LAYER_TEXT_SCALE,
   LAYER_DIMENSION,
   LAYER_SCHEDULE_BORDER,
   LAYER_SCHEDULE_HEADER,
   LAYER_SCHEDULE_LINE,
+  LAYER_SCHEDULE_TEXT,
+  LAYER_CUT_LINE,
   LAYER_SECTION_MARK,
   LAYER_SOLID,
 ];
@@ -445,4 +450,186 @@ export function computeBounds(prims: SheetPrimitive[]): SheetBounds {
 
   if (!Number.isFinite(minX)) return { minX: 0, minY: 0, maxX: 1, maxY: 1 };
   return { minX, minY, maxX, maxY };
+}
+
+// ---------------------------------------------------------------------------
+// Standard ISO A3 CAD Sheet Constants & Detailing Helpers (420 x 297 mm @ 1:100)
+// ---------------------------------------------------------------------------
+
+export const A3_WIDTH = 42000;
+export const A3_HEIGHT = 29700;
+export const A3_MARGIN = 1000;
+export const A3_INNER_W = A3_WIDTH - 2 * A3_MARGIN; // 40000
+export const A3_INNER_H = A3_HEIGHT - 2 * A3_MARGIN; // 27700
+export const A3_TITLE_BLOCK_H = 3500;
+
+export interface A3TitleBlockOptions {
+  title: string;
+  sheetNumber: string;
+  levelName?: string;
+  client?: string;
+  address?: string;
+  dagNo?: string;
+  pattaNo?: string;
+  wardNo?: string;
+  scale?: string;
+  drawnBy?: string;
+  checkedBy?: string;
+  jobDwgNo?: string;
+  pageInfo?: string;
+}
+
+/**
+ * Draws an authentic ISO A3 CAD drawing border, graphic reduction scale bar,
+ * and multi-compartment engineering title block matching the user's reference drawings.
+ */
+export function drawA3BorderAndTitleBlock(b: SheetBuilder, opts: A3TitleBlockOptions) {
+  const layerBorder = LAYER_SCHEDULE_BORDER.name;
+  const layerLine = LAYER_SCHEDULE_LINE.name;
+  const layerText = LAYER_TEXT.name;
+  const layerHeader = LAYER_SCHEDULE_HEADER.name;
+  const layerLabels = LAYER_LABELS.name;
+
+  // 1. Outer Border (thick line around 420x297 mm paper extents)
+  b.rect(layerBorder, 0, 0, A3_WIDTH, A3_HEIGHT, 3.5);
+
+  // 2. Inner Margin Border (10mm in from edge)
+  const x0 = A3_MARGIN;
+  const y0 = A3_MARGIN;
+  const w = A3_INNER_W;
+  const h = A3_INNER_H;
+  b.rect(layerBorder, x0, y0, w, h, 2.0);
+
+  // 3. Title Block across bottom of inner border (Y from y0 to y0 + A3_TITLE_BLOCK_H)
+  const tbY0 = y0;
+  const tbH = A3_TITLE_BLOCK_H;
+  const tbY1 = tbY0 + tbH;
+
+  b.line(layerBorder, x0, tbY1, x0 + w, tbY1, 2.0);
+
+  // Compartment widths:
+  // [Client & Scale Bar: 10500] | [Dag/Patta/Ward: 7500] | [Revision Table: 8000] | [Sheet Title & Specs: 14000]
+  const col1W = 10500;
+  const col2W = 7500;
+  const col3W = 8000;
+  const col4W = w - col1W - col2W - col3W; // 14000
+
+  const col1X = x0;
+  const col2X = col1X + col1W;
+  const col3X = col2X + col2W;
+  const col4X = col3X + col3W;
+
+  // Vertical dividers
+  b.line(layerBorder, col2X, tbY0, col2X, tbY1, 1.5);
+  b.line(layerBorder, col3X, tbY0, col3X, tbY1, 1.5);
+  b.line(layerBorder, col4X, tbY0, col4X, tbY1, 1.5);
+
+  // --- COL 1: Client & Print Reduction Bar ---
+  b.text(layerHeader, col1X + 300, tbY1 - 450, 'CLIENT:', 180, { bold: true });
+  const clientName = opts.client || 'Mrs Ila Kumar, House No. 3,';
+  const clientAddr = opts.address || 'Panjabari, Bagharbari, Tarali\nPath/Opp Gate No.2 Kalakhetra, Guwahati, Assam.';
+  b.text(layerText, col1X + 1300, tbY1 - 450, clientName, 170, { bold: true });
+
+  const addrLines = clientAddr.split('\n');
+  addrLines.forEach((line, idx) => {
+    b.text(layerText, col1X + 1300, tbY1 - 750 - idx * 280, line, 150);
+  });
+
+  // Scale bar at bottom of Col 1
+  const sbY = tbY0 + 700;
+  b.text(layerText, col1X + 300, sbY + 550, 'PRINT REDUCTION BAR | A3 SHEET', 140, { bold: true });
+  b.line(layerLine, col1X + 300, sbY, col1X + 6300, sbY, 1.2);
+  const tickSteps = [0, 10, 20, 30, 40, 50];
+  tickSteps.forEach((val, i) => {
+    const tx = col1X + 300 + i * 1200;
+    b.line(layerLine, tx, sbY - 120, tx, sbY + 120, 1.0);
+    b.text(layerText, tx, sbY + 240, String(val), 130, { anchor: 'middle' });
+  });
+  b.text(layerText, col1X + 6500, sbY + 10, '50mm', 140);
+  b.text(layerText, col1X + 300, tbY0 + 200, 'ALL RIGHTS RESERVED. NO REPRODUCTION UNLESS WRITTEN CONSENT GIVEN', 105);
+
+  // --- COL 2: DAG / PATTA / WARD / CHECKED_BY ---
+  const dag = opts.dagNo || '436';
+  const patta = opts.pattaNo || '547';
+  const ward = opts.wardNo || '31';
+  b.text(layerHeader, col2X + 400, tbY1 - 600, `DAG NO- ${dag}`, 240, { bold: true });
+  b.text(layerHeader, col2X + 400, tbY1 - 1200, `PATTA NO: ${patta}`, 240, { bold: true });
+  b.text(layerHeader, col2X + 400, tbY1 - 1800, `WARD NO-${ward}`, 240, { bold: true });
+
+  b.line(layerLine, col2X, tbY0 + 1000, col3X, tbY0 + 1000, 1.0);
+  b.text(layerText, col2X + 400, tbY0 + 400, `CHECKED_BY: ${opts.checkedBy || ''}`, 200, { bold: true });
+
+  // --- COL 3: Revision Table ---
+  b.line(layerLine, col3X, tbY1 - 650, col4X, tbY1 - 650, 1.2);
+  const revColW1 = 1500;
+  const revColW2 = 4500;
+  b.line(layerLine, col3X + revColW1, tbY0, col3X + revColW1, tbY1, 1.0);
+  b.line(layerLine, col3X + revColW1 + revColW2, tbY0, col3X + revColW1 + revColW2, tbY1, 1.0);
+
+  b.text(layerHeader, col3X + revColW1 / 2, tbY1 - 420, 'REV.', 140, { anchor: 'middle', bold: true });
+  b.text(layerHeader, col3X + revColW1 + revColW2 / 2, tbY1 - 420, 'AMENDMENT DESCRIPTION', 140, { anchor: 'middle', bold: true });
+  b.text(layerHeader, col4X - 1000, tbY1 - 420, 'DATE', 140, { anchor: 'middle', bold: true });
+
+  // 4 revision rows
+  for (let r = 1; r <= 4; r++) {
+    const ry = tbY1 - 650 - r * 650;
+    b.line(layerLine, col3X, ry, col4X, ry, 0.8);
+  }
+
+  // --- COL 4: Large Sheet Title & Drawing Metadata ---
+  b.line(layerLine, col4X, tbY1 - 1800, x0 + w, tbY1 - 1800, 1.5);
+  const fullTitle = opts.pageInfo ? `${opts.title} (${opts.pageInfo})` : opts.title;
+  b.text(layerLabels, col4X + 500, tbY1 - 1100, fullTitle, 360, { bold: true });
+
+  const subRowY = tbY0 + 1000;
+  b.line(layerLine, col4X, subRowY, x0 + w, subRowY, 1.0);
+
+  // Sub-compartments in bottom half of Col 4
+  const col4Sub1 = col4X + 3500;
+  const col4Sub2 = col4X + 8000;
+  b.line(layerLine, col4Sub1, tbY0, col4Sub1, subRowY, 1.0);
+  b.line(layerLine, col4Sub2, tbY0, col4Sub2, tbY1 - 1800, 1.0);
+
+  // Top half sub: DRAWN / SCALE / JOB NO
+  b.text(layerText, col4X + 300, tbY1 - 2200, 'SCALE', 160);
+  b.text(layerHeader, col4X + 1600, tbY1 - 2200, opts.scale || 'N.T.S', 200, { bold: true });
+
+  b.text(layerText, col4Sub2 + 300, tbY1 - 2200, 'JOB-DRAWING No.', 150);
+  b.text(layerHeader, col4Sub2 + 1000, tbY1 - 2550, opts.jobDwgNo || '1', 260, { bold: true });
+
+  b.text(layerText, col4Sub2 + 3800, tbY1 - 2200, 'SHEET NO:', 150);
+  b.text(layerHeader, col4Sub2 + 4500, tbY1 - 2550, opts.sheetNumber, 280, { bold: true });
+
+  b.text(layerText, col4X + 300, tbY0 + 400, 'DRAWN', 160);
+  b.text(layerHeader, col4X + 1600, tbY0 + 400, opts.drawnBy || 'ER. ROGERS', 190, { bold: true });
+}
+
+/**
+ * Draws the standard Top-Right General Notes block matching reference image media_1789398691291.png.
+ */
+export function drawA3GeneralNotes(b: SheetBuilder, customNotes?: string[]) {
+  const layerBorder = LAYER_SCHEDULE_BORDER.name;
+  const layerText = LAYER_TEXT.name;
+  const layerHeader = LAYER_SCHEDULE_HEADER.name;
+
+  const notesW = 7500;
+  const notesH = 6800;
+  const nx = A3_WIDTH - A3_MARGIN - notesW; // 41000 - 7500 = 33500
+  const ny = A3_HEIGHT - A3_MARGIN - notesH; // 28700 - 6800 = 21900
+
+  b.rect(layerBorder, nx, ny, notesW, notesH, 1.2);
+
+  b.text(layerHeader, nx + 300, ny + notesH - 500, 'NOTE-', 220, { bold: true });
+
+  const notes = customNotes || [
+    '1. THIS DRAWING IS TO BE READ IN CONJUNCTION',
+    '   WITH THE ARCHITECTURAL DRAWING.',
+    '2. FIGURED DIMENSIONS SHOULD BE FOLLOWED.',
+    '3. ALL DIMENSION ARE IN MM (MILLIMETERS),',
+    '   UNLESS SPECIFIED.',
+  ];
+
+  notes.forEach((line, idx) => {
+    b.text(layerText, nx + 300, ny + notesH - 1100 - idx * 450, line, 175);
+  });
 }

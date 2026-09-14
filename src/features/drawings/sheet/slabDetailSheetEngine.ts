@@ -24,14 +24,23 @@
 
 import { FloorPlanLevel } from '../floorPlanEngine';
 import {
+  A3_WIDTH,
+  A3_HEIGHT,
+  drawA3BorderAndTitleBlock,
   DrawingSheet,
   LAYER_CONCRETE,
   LAYER_CUT_LINE,
   LAYER_DIMENSION,
   LAYER_LABELS,
+  LAYER_LABELS_SUPPORT,
   LAYER_REBAR,
+  LAYER_SCHEDULE_BORDER,
+  LAYER_SCHEDULE_HEADER,
+  LAYER_SCHEDULE_LINE,
+  LAYER_SCHEDULE_TEXT,
   LAYER_SECTION_MARK,
   LAYER_TEXT,
+  LAYER_TEXT_SCALE,
   PLAN_SCALE,
   SECTION_SCALE,
   SLAB_SHEET_LAYERS,
@@ -348,62 +357,115 @@ export class SlabDetailSheetEngine {
     const { level } = input;
     const panels = this.extractLevelPanels(input);
     const b = new SheetBuilder(SLAB_SHEET_LAYERS);
+    const sheetNumber = `STR-${300 + (level.levelIndex || 0)}`;
 
     if (panels.length === 0) {
       return b.build({
-        sheetNumber: `STR-${300 + (level.levelIndex || 0)}`,
+        sheetNumber,
         title: 'SLAB REINFORCEMENT DETAILING',
         levelName: level.levelName,
         notes: ['No slab panels detected at this level'],
       });
     }
 
-    // Convert panel outlines from metres to millimetres (true size / 1:100).
-    const mm = (p: { x: number; z: number }): [number, number] => [
-      p.x * 1000 * PLAN_SCALE,
-      -p.z * 1000 * PLAN_SCALE,
-    ];
+    // 1. Draw standard ISO A3 CAD Sheet Border & Title Block matching media_1789398719721.png
+    drawA3BorderAndTitleBlock(b, {
+      title: `${level.levelName.toUpperCase()} SLAB DETAILING & SCHEDULE`,
+      sheetNumber: '12',
+      levelName: level.levelName,
+      scale: 'PLAN 1:100 / SEC 1:50',
+      jobDwgNo: '2',
+    });
 
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
+    // Divider line between Left Half (Plan) and Right Half (Section + Schedule)
+    b.line(LAYER_SCHEDULE_BORDER.name, 21000, 4500, 21000, 28700, 1.5);
+    // Divider line on Right side between Section AA (Top) and Schedule (Bottom)
+    b.line(LAYER_SCHEDULE_BORDER.name, 21000, 16000, 41000, 16000, 1.5);
+
+    // -------------------------------------------------------------------------
+    // Left Half: Floor Slab Bent-up Reinforcement Plan View
+    // -------------------------------------------------------------------------
+    let minModelX = Infinity;
+    let maxModelX = -Infinity;
+    let minModelZ = Infinity;
+    let maxModelZ = -Infinity;
+    panels.forEach((panel) => {
+      panel.points.forEach((pt) => {
+        minModelX = Math.min(minModelX, pt.x);
+        maxModelX = Math.max(maxModelX, pt.x);
+        minModelZ = Math.min(minModelZ, pt.z);
+        maxModelZ = Math.max(maxModelZ, pt.z);
+      });
+    });
+
+    const modelSpanX = Math.max(0.1, maxModelX - minModelX);
+    const modelSpanZ = Math.max(0.1, maxModelZ - minModelZ);
+    const modelMidX = (minModelX + maxModelX) / 2;
+    const modelMidZ = (minModelZ + maxModelZ) / 2;
+
+    // Available plan area: X in [2000, 20000] (w=18000), Y in [7500, 27500] (h=20000)
+    const fitPlanScale = Math.min(1.0, 14000 / (modelSpanX * 1000), 14000 / (modelSpanZ * 1000));
+    const planCenterX = 11000;
+    const planCenterY = 17500;
+
+    const mm = (p: { x: number; z: number }): [number, number] => [
+      planCenterX + (p.x - modelMidX) * 1000 * fitPlanScale,
+      planCenterY - (p.z - modelMidZ) * 1000 * fitPlanScale,
+    ];
 
     panels.forEach((panel) => {
       const pts = panel.points.map(mm);
       b.poly(LAYER_CONCRETE.name, pts, true);
-      pts.forEach(([x, y]) => {
-        minX = Math.min(minX, x);
-        maxX = Math.max(maxX, x);
-        minY = Math.min(minY, y);
-        maxY = Math.max(maxY, y);
-      });
     });
 
-    // 1. Draw plan panels
     panels.forEach((panel) => this.drawPanel(b, panel, mm));
 
-    // 2. Extract continuous multi-bay longitudinal section
+    // Plan Title Below
+    const planBottomY = planCenterY - (modelSpanZ * 1000 * fitPlanScale) / 2 - 1400;
+    b.text(
+      LAYER_LABELS.name,
+      planCenterX,
+      planBottomY,
+      `BENTUP REINFORCEMENT LAYOUT - ${level.levelName.toUpperCase()}`,
+      360,
+      { anchor: 'middle', underline: true, bold: true }
+    );
+    b.text(LAYER_TEXT_SCALE.name, planCenterX, planBottomY - 450, '(SCALE 1:100)', TEXT_H.CALLOUT, {
+      anchor: 'middle',
+    });
+
+    // Section cut line across the plan
+    const planLeftX = planCenterX - (modelSpanX * 1000 * fitPlanScale) / 2;
+    const planRightX = planCenterX + (modelSpanX * 1000 * fitPlanScale) / 2;
+    this.drawCutLine(b, planLeftX, planRightX, planCenterY);
+
+    // -------------------------------------------------------------------------
+    // Right Top: Continuous Multi-Bay Longitudinal Section (SECTION AA)
+    // -------------------------------------------------------------------------
     const sectionDesign = this.extractLongitudinalSection(input, panels);
-
     if (sectionDesign) {
-      // Center the section horizontally under the plan
-      const planCenterX = (minX + maxX) / 2;
-      const sectionStartX = planCenterX - sectionDesign.totalLengthDrawing / 2;
+      const totalModelMm =
+        sectionDesign.supports.reduce((s, sup) => s + sup.widthMm, 0) +
+        sectionDesign.bays.reduce((s, bay) => s + bay.clearSpanMm, 0);
+      const maxSecW = 18000;
+      const S_H = Math.min(2.0, maxSecW / Math.max(1, totalModelMm));
+      sectionDesign.scaleFactor = S_H;
+      sectionDesign.totalLengthDrawing = totalModelMm * S_H;
 
-      // Vertical position below plan panels with generous breathing margin
-      const sectionY = minY - 5000;
-      this.drawLongitudinalSection(b, sectionDesign, sectionStartX, sectionY);
-
-      // Section cut line across the plan at the matching cut line
-      const cutLineY = (minY + maxY) / 2;
-      this.drawCutLine(b, minX, maxX, cutLineY);
+      const secStartX = 21500 + (19000 - sectionDesign.totalLengthDrawing) / 2;
+      const secTopY = 25000;
+      this.drawLongitudinalSection(b, sectionDesign, secStartX, secTopY);
     }
 
+    // -------------------------------------------------------------------------
+    // Right Bottom: Slab Schedule Table
+    // -------------------------------------------------------------------------
+    this.drawSlabSchedule(b, panels, 21500, 4800, 19000, 10700);
+
     return b.build({
-      sheetNumber: `STR-${300 + (level.levelIndex || 0)}`,
-      title: 'SLAB REINFORCEMENT PLAN & LONGITUDINAL SECTION',
-      subtitle: `${panels.length} slab panels · ${panels[0].thickness} mm thick · IS 456 continuous multi-bay detailing`,
+      sheetNumber,
+      title: `${level.levelName.toUpperCase()} SLAB DETAILING & SCHEDULE`,
+      subtitle: `${panels.length} slab panels · ${panels[0].thickness} mm thick · IS 456 detailing`,
       levelName: level.levelName,
       notes: [
         '(ONE WAY / TWO WAY AS NOTED)',
@@ -861,42 +923,178 @@ export class SlabDetailSheetEngine {
     b.text(
       LAYER_LABELS.name,
       sectionMidX,
-      lowestSuppBottom - 2700,
-      'SECTION X1-X1',
-      400,
+      lowestSuppBottom - 2000,
+      'SECTION AA',
+      380,
       { anchor: 'middle', underline: true, bold: true }
+    );
+    b.text(
+      LAYER_TEXT_SCALE.name,
+      sectionMidX,
+      lowestSuppBottom - 2450,
+      '(SCALE: H - 1:50 / V - 1:50)',
+      TEXT_H.CALLOUT,
+      { anchor: 'middle' }
     );
     b.text(
       LAYER_TEXT.name,
       sectionMidX,
-      lowestSuppBottom - 3250,
-      '(SCALE: H - 1:50 / V - 1:50)',
+      lowestSuppBottom - 2800,
+      'SECTION X1-X1',
       TEXT_H.CALLOUT,
       { anchor: 'middle' }
     );
   }
 
-  /** Section cut line across the slab plan with `SECTION X1-X1` bubbles. */
+  /** Section cut line across the slab plan with `SECTION X1-X1` / `A` bubbles. */
   private static drawCutLine(b: SheetBuilder, minX: number, maxX: number, y: number) {
-    const r = TEXT_H.CALLOUT * 3;
-    const x0 = minX - 1500;
-    const x1 = maxX + 1500;
+    const r = TEXT_H.CALLOUT * 2.8;
+    const x0 = minX - 1400;
+    const x1 = maxX + 1400;
 
     b.poly(LAYER_CUT_LINE.name, [
-      [x0, y + 1600],
-      [x1, y + 1600],
+      [x0, y],
+      [x1, y],
     ]);
-    b.poly(LAYER_CUT_LINE.name, [
-      [x0, y - 1600],
-      [x1, y - 1600],
-    ]);
+    b.arrowHead(LAYER_SECTION_MARK.name, x0 + 100, y + 450, Math.PI / 2, 80);
+    b.arrowHead(LAYER_SECTION_MARK.name, x1 - 100, y + 450, Math.PI / 2, 80);
+
     b.circle(LAYER_SECTION_MARK.name, x0, y, r);
     b.circle(LAYER_SECTION_MARK.name, x1, y, r);
-    b.text(LAYER_SECTION_MARK.name, x0, y + TEXT_H.CALLOUT, 'X1', TEXT_H.CALLOUT, { anchor: 'middle' });
-    b.text(LAYER_SECTION_MARK.name, x1, y + TEXT_H.CALLOUT, 'X1', TEXT_H.CALLOUT, { anchor: 'middle' });
-    b.text(LAYER_SECTION_MARK.name, (x0 + x1) / 2, y + 2400, 'SECTION X1-X1', TEXT_H.CALLOUT, {
+    b.text(LAYER_SECTION_MARK.name, x0, y + TEXT_H.CALLOUT * 0.35, 'A', TEXT_H.CALLOUT * 1.2, {
       anchor: 'middle',
       bold: true,
     });
+    b.text(LAYER_SECTION_MARK.name, x1, y + TEXT_H.CALLOUT * 0.35, 'A', TEXT_H.CALLOUT * 1.2, {
+      anchor: 'middle',
+      bold: true,
+    });
+    b.text(LAYER_SECTION_MARK.name, (x0 + x1) / 2, y + 400, 'SECTION X1-X1', TEXT_H.CALLOUT, {
+      anchor: 'middle',
+      bold: true,
+    });
+  }
+
+  /**
+   * Draws the authentic SLAB SCHEDULE table matching reference image media_1789398719721.png.
+   */
+  public static drawSlabSchedule(
+    b: SheetBuilder,
+    panels: SlabPanelDesign[],
+    x0: number,
+    y0: number,
+    w: number,
+    h: number
+  ) {
+    const yTop = y0 + h;
+
+    // 1. Table Outer Border
+    b.rect(LAYER_SCHEDULE_BORDER.name, x0, y0, w, h, 1.8);
+
+    // 2. Table Main Header
+    const headerH = 850;
+    b.line(LAYER_SCHEDULE_BORDER.name, x0, yTop - headerH, x0 + w, yTop - headerH, 1.4);
+    b.text(
+      LAYER_SCHEDULE_HEADER.name,
+      x0 + w / 2,
+      yTop - headerH / 2 + 60,
+      'SLAB SCHEDULE',
+      280,
+      { anchor: 'middle', bold: true }
+    );
+
+    // 3. Columns Definition
+    const colWidths = [2200, 1500, 2200, 2700, 2700, 2600, 2600, 2500];
+    const colHeaders = [
+      'SLAB NOS',
+      'THK (MM)',
+      'TYPE',
+      'BOTTOM (SHORT)',
+      'BOTTOM (LONG)',
+      'TOP EXTRA (SHORT)',
+      'TOP EXTRA (LONG)',
+      'REMARKS',
+    ];
+
+    const colXs: number[] = [x0];
+    for (let i = 0; i < colWidths.length; i++) {
+      colXs.push(colXs[i] + colWidths[i]);
+    }
+
+    const subHeaderH = 800;
+    const subHeaderY = yTop - headerH - subHeaderH;
+    b.line(LAYER_SCHEDULE_BORDER.name, x0, subHeaderY, x0 + w, subHeaderY, 1.2);
+
+    colHeaders.forEach((title, i) => {
+      const cx = (colXs[i] + colXs[i + 1]) / 2;
+      b.text(LAYER_SCHEDULE_HEADER.name, cx, yTop - headerH - subHeaderH / 2 + 50, title, 150, {
+        anchor: 'middle',
+        bold: true,
+      });
+    });
+
+    // 4. Data Rows
+    const notesH = 1600;
+    const availTableH = subHeaderY - (y0 + notesH);
+    const rowH = Math.min(750, availTableH / Math.max(1, panels.length));
+
+    // Deduplicate panels by panelId
+    const uniquePanels: SlabPanelDesign[] = [];
+    const seenIds = new Set<string>();
+    panels.forEach((p) => {
+      if (!seenIds.has(p.panelId)) {
+        seenIds.add(p.panelId);
+        uniquePanels.push(p);
+      }
+    });
+
+    uniquePanels.forEach((panel, idx) => {
+      const rY = subHeaderY - (idx + 1) * rowH;
+      b.line(LAYER_SCHEDULE_LINE.name, x0, rY, x0 + w, rY, 0.8);
+
+      const cellY = rY + rowH / 2 - 40;
+      const rowValues = [
+        panel.panelId,
+        `${panel.thickness}`,
+        panel.oneWay ? 'ONE WAY' : 'TWO WAY',
+        `T${panel.bottomMain.dia}@${panel.bottomMain.spacing}`,
+        `T${panel.bottomSecond.dia}@${panel.bottomSecond.spacing}`,
+        `T${panel.bottomMain.dia}@${panel.bottomMain.spacing}`,
+        `T${panel.bottomSecond.dia}@${panel.bottomSecond.spacing}`,
+        panel.oneWay ? 'CRANK AT L/6' : 'CRANK AT L/6 BOTH WAYS',
+      ];
+
+      rowValues.forEach((val, cIdx) => {
+        const cx = (colXs[cIdx] + colXs[cIdx + 1]) / 2;
+        b.text(LAYER_SCHEDULE_TEXT.name, cx, cellY, val, 150, {
+          anchor: 'middle',
+        });
+      });
+    });
+
+    // Vertical Divider Lines across Header and Rows
+    for (let c = 1; c < colXs.length - 1; c++) {
+      b.line(LAYER_SCHEDULE_LINE.name, colXs[c], y0 + notesH, colXs[c], yTop - headerH, 1.0);
+    }
+
+    // 5. Notes Compartment at Bottom of Schedule
+    b.line(LAYER_SCHEDULE_BORDER.name, x0, y0 + notesH, x0 + w, y0 + notesH, 1.2);
+    b.text(LAYER_SCHEDULE_HEADER.name, x0 + 400, y0 + notesH - 400, 'NOTES FOR SLAB REINFORCEMENT:', 170, {
+      bold: true,
+    });
+    b.text(
+      LAYER_SCHEDULE_TEXT.name,
+      x0 + 400,
+      y0 + notesH - 800,
+      '1. ALL BENT-UP BARS TO BE CRANKED AT 45° AT DISTANCE L/6 FROM INNER FACE OF SUPPORT.',
+      140
+    );
+    b.text(
+      LAYER_SCHEDULE_TEXT.name,
+      x0 + 400,
+      y0 + notesH - 1200,
+      '2. CLEAR COVER TO SLAB BARS = 20 MM. CONCRETE GRADE M25, REINFORCEMENT GRADE Fe500.',
+      140
+    );
   }
 }

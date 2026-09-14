@@ -41,6 +41,10 @@ import {
   STRIP_SCALE,
   SheetBuilder,
   TEXT_H,
+  A3_WIDTH,
+  A3_HEIGHT,
+  drawA3BorderAndTitleBlock,
+  drawA3GeneralNotes,
 } from './drawingSheet';
 
 // ---------------------------------------------------------------------------
@@ -140,6 +144,24 @@ export interface BeamSupportDetail {
   widthMm: number;
   depthMm: number;
   gridLabel: string;
+}
+
+export interface ContinuousSpanItem {
+  design: BeamSectionDesign;
+  beam: FloorBeamInfo;
+  clearSpanMm: number;
+  wLeftMm: number;
+  wRightMm: number;
+  supLeft: BeamSupportDetail;
+  supRight: BeamSupportDetail;
+}
+
+export interface ContinuousBeamRun {
+  runId: string;
+  axis: 'X' | 'Z';
+  spans: ContinuousSpanItem[];
+  totalSpanMm: number;
+  totalWidthDrawing: number;
 }
 
 /** Round down to the nearest 25 mm, as used for practical stirrup spacings. */
@@ -431,34 +453,633 @@ export class BeamSectionSheetEngine {
   // Sheet construction
   // -------------------------------------------------------------------------
 
-  public static buildSheet(input: BeamSectionSheetInput): DrawingSheet {
+  // -------------------------------------------------------------------------
+  // Continuous Multi-Span Beam Grouping & Multi-Page A3 Sheet Construction
+  // -------------------------------------------------------------------------
+
+  public static buildSheets(input: BeamSectionSheetInput): DrawingSheet[] {
     const { level } = input;
     const designs = this.extractLevelBeams(input);
-    const builder = new SheetBuilder(BEAM_SECTION_SHEET_LAYERS);
-    const sheetNumber = `STR-${200 + (level.levelIndex || 0)}`;
-
-    const columns = detailsPerRow(designs.map((d) => cellWidthFor(d.spanM)));
-    for (let rowIdx = 0; rowIdx * columns < designs.length; rowIdx++) {
-      const rowDesigns = designs.slice(rowIdx * columns, (rowIdx + 1) * columns);
-      let cursorX = 0;
-      rowDesigns.forEach((design) => {
-        const cellW = cellWidthFor(design.spanM);
-        this.drawDetail(builder, design, cursorX, cellW, -rowIdx * ROW_PITCH, level);
-        cursorX += cellW;
+    if (designs.length === 0) {
+      const b = new SheetBuilder(BEAM_SECTION_SHEET_LAYERS);
+      const sheetNumber = `STR-${200 + (level.levelIndex || 0)}`;
+      drawA3BorderAndTitleBlock(b, {
+        title: `${level.levelName.toUpperCase()} BEAM LAYOUT`,
+        sheetNumber,
+        levelName: level.levelName,
       });
+      drawA3GeneralNotes(b);
+      return [
+        b.build({
+          sheetNumber,
+          title: `${level.levelName.toUpperCase()} BEAM LAYOUT`,
+          levelName: level.levelName,
+          notes: ['(SCALE: H - 1:50 / V - 1:50)'],
+        }),
+      ];
     }
 
-    return builder.build({
-      sheetNumber,
-      title: 'BEAM REINFORCEMENT LONGITUDINAL ELEVATIONS & DETAILING',
-      subtitle: `${designs.length} beam elevations · ${columns} per row · IS 456 / IS 13920 detailing`,
-      levelName: level.levelName,
-      notes: [
-        '(SCALE: H - 1:50 / V - 1:50)',
-        '(SCALE: H = 1:50  / V = 1:50)',
-        '(SCALE 1:25)',
-        'All dimensions in mm',
+    const runs = this.groupContinuousBeams(designs, level);
+
+    // Plan row placements across pages
+    // Row 0 has Notes block on right (maxX = 31000). Rows 1-3 have maxX = 38500.
+    const rowMaxX = [31000, 38500, 38500, 38500];
+    const rowBaseYs = [22000, 16600, 11200, 5800];
+
+    interface PlacedRun {
+      run: ContinuousBeamRun;
+      x: number;
+      y: number;
+      maxW: number;
+    }
+
+    const pages: PlacedRun[][] = [];
+    let curPage: PlacedRun[] = [];
+    let curRow = 0;
+    let curX = 2200;
+
+    runs.forEach((run) => {
+      let limitX = rowMaxX[curRow] || 38500;
+      const fullRowW = limitX - 2200;
+      const fitScaleFull = run.totalWidthDrawing > fullRowW ? fullRowW / run.totalWidthDrawing : 1.0;
+      const minRunW = run.totalWidthDrawing * fitScaleFull;
+
+      if (curX + minRunW > limitX && curX > 2200) {
+        // Wrap to next row
+        curRow++;
+        curX = 2200;
+      }
+
+      if (curRow >= 4) {
+        // Page full -> start new page
+        pages.push(curPage);
+        curPage = [];
+        curRow = 0;
+        curX = 2200;
+      }
+
+      limitX = rowMaxX[curRow] || 38500;
+      const maxW = Math.max(1000, limitX - curX);
+      const fitScale = run.totalWidthDrawing > maxW ? maxW / run.totalWidthDrawing : 1.0;
+      const effectiveW = run.totalWidthDrawing * fitScale;
+
+      curPage.push({ run, x: curX, y: rowBaseYs[curRow], maxW });
+      curX += effectiveW + 2400; // gap between runs in same row
+    });
+
+    if (curPage.length > 0) {
+      pages.push(curPage);
+    }
+
+    const totalPages = Math.max(1, pages.length);
+    const baseSheetNumber = `STR-${200 + (level.levelIndex || 0)}`;
+
+    return pages.map((pageRuns, pIdx) => {
+      const builder = new SheetBuilder(BEAM_SECTION_SHEET_LAYERS);
+      const sheetNumber = totalPages > 1 ? `${baseSheetNumber}-P${pIdx + 1}` : baseSheetNumber;
+      const pageInfo = totalPages > 1 ? `PAGE ${pIdx + 1} OF ${totalPages}` : undefined;
+
+      // 1. Draw A3 Border and Engineering Title Block
+      drawA3BorderAndTitleBlock(builder, {
+        title: `${level.levelName.toUpperCase()} BEAM LAYOUT`,
+        sheetNumber: totalPages > 1 ? `${pIdx + 11}` : '11',
+        levelName: level.levelName,
+        pageInfo,
+      });
+
+      // 2. Draw Top-Right General Notes Block
+      drawA3GeneralNotes(builder);
+
+      // 3. Draw All Continuous Runs on this page
+      pageRuns.forEach(({ run, x, y, maxW }) => {
+        this.drawContinuousRun(builder, run, x, y, level, maxW);
+      });
+
+      return builder.build({
+        sheetNumber,
+        title: `${level.levelName.toUpperCase()} BEAM LAYOUT`,
+        subtitle: `${designs.length} beams · ${runs.length} continuous runs · Page ${pIdx + 1} of ${totalPages}`,
+        levelName: level.levelName,
+        notes: [
+          '(SCALE: H - 1:50 / V - 1:50)',
+          '(SCALE: H = 1:50  / V = 1:50)',
+          '(SCALE 1:25)',
+          'All dimensions in mm',
+        ],
+      });
+    });
+  }
+
+  /**
+   * Backward-compatible single sheet builder.
+   * Returns page 0 or the requested pageIndex from buildSheets.
+   */
+  public static buildSheet(input: BeamSectionSheetInput, pageIndex = 0): DrawingSheet {
+    const sheets = this.buildSheets(input);
+    return sheets[Math.min(pageIndex, sheets.length - 1)] || sheets[0];
+  }
+
+  /**
+   * Groups colinear, contiguous beams sharing common support nodes/columns into
+   * continuous multi-span runs (e.g. 2-span, 3-span, 4-span, 5-span runs).
+   */
+  public static groupContinuousBeams(
+    designs: BeamSectionDesign[],
+    level: FloorPlanLevel
+  ): ContinuousBeamRun[] {
+    const S = STRIP_SCALE; // 2
+    const used = new Set<number>();
+    const runs: ContinuousBeamRun[] = [];
+
+    const getBeam = (mId: number): FloorBeamInfo =>
+      (level.beams || []).find((b) => b.memberId === mId) || {
+        memberId: mId,
+        label: `B${mId}`,
+        startNodeId: 1,
+        endNodeId: 2,
+        startX: 0,
+        startZ: 0,
+        endX: 4.5,
+        endZ: 0,
+        length: 4.5,
+        width: 0.23,
+        depth: 0.45,
+        sectionName: '230x450',
+      };
+
+    const xBeams: { design: BeamSectionDesign; beam: FloorBeamInfo }[] = [];
+    const zBeams: { design: BeamSectionDesign; beam: FloorBeamInfo }[] = [];
+
+    designs.forEach((d) => {
+      const beam = getBeam(d.memberId);
+      const dx = Math.abs(beam.endX - beam.startX);
+      const dz = Math.abs(beam.endZ - beam.startZ);
+      if (dx >= dz) {
+        xBeams.push({ design: d, beam });
+      } else {
+        zBeams.push({ design: d, beam });
+      }
+    });
+
+    const finalizeRun = (
+      items: { design: BeamSectionDesign; beam: FloorBeamInfo }[],
+      axis: 'X' | 'Z'
+    ) => {
+      let totalSpanMm = 0;
+      let totalDrawingW = 0;
+      const spans = items.map((it, idx) => {
+        const supLeft = this.resolveSupport(level, it.beam, 'start');
+        const supRight = this.resolveSupport(level, it.beam, 'end');
+        const spanMm = Math.round(it.design.spanM * 1000);
+        const clearSpanMm = Math.max(1000, spanMm - Math.round(supLeft.widthMm / 2 + supRight.widthMm / 2));
+        totalSpanMm += spanMm;
+        const spanDrawing = clearSpanMm * S;
+        totalDrawingW += spanDrawing + (idx === 0 ? supLeft.widthMm * S : 0) + supRight.widthMm * S;
+        return {
+          design: it.design,
+          beam: it.beam,
+          clearSpanMm,
+          wLeftMm: supLeft.widthMm,
+          wRightMm: supRight.widthMm,
+          supLeft,
+          supRight,
+        };
+      });
+
+      runs.push({
+        runId: items.map((i) => i.design.mark).join('-'),
+        axis,
+        spans,
+        totalSpanMm,
+        totalWidthDrawing: totalDrawingW,
+      });
+    };
+
+    const chainBeams = (
+      list: { design: BeamSectionDesign; beam: FloorBeamInfo }[],
+      axis: 'X' | 'Z'
+    ) => {
+      const groups = new Map<number, { design: BeamSectionDesign; beam: FloorBeamInfo }[]>();
+      list.forEach((item) => {
+        const coord = axis === 'X' ? item.beam.startZ : item.beam.startX;
+        const key = Math.round(coord * 2) / 2; // within 0.5m grid line
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(item);
+      });
+
+      groups.forEach((group) => {
+        group.sort((a, b) => {
+          const valA = axis === 'X' ? Math.min(a.beam.startX, a.beam.endX) : Math.min(a.beam.startZ, a.beam.endZ);
+          const valB = axis === 'X' ? Math.min(b.beam.startX, b.beam.endX) : Math.min(b.beam.startZ, b.beam.endZ);
+          return valA - valB;
+        });
+
+        let currentRun: { design: BeamSectionDesign; beam: FloorBeamInfo }[] = [];
+
+        for (let i = 0; i < group.length; i++) {
+          const item = group[i];
+          if (used.has(item.design.memberId)) continue;
+
+          if (currentRun.length === 0) {
+            currentRun.push(item);
+            used.add(item.design.memberId);
+          } else {
+            const prev = currentRun[currentRun.length - 1];
+            const prevEndNode = prev.beam.endNodeId;
+            const nextStartNode = item.beam.startNodeId;
+            const prevEndCoord = axis === 'X' ? Math.max(prev.beam.startX, prev.beam.endX) : Math.max(prev.beam.startZ, prev.beam.endZ);
+            const nextStartCoord = axis === 'X' ? Math.min(item.beam.startX, item.beam.endX) : Math.min(item.beam.startZ, item.beam.endZ);
+
+            const isConnected =
+              prevEndNode === nextStartNode ||
+              prev.beam.startNodeId === item.beam.startNodeId ||
+              prev.beam.endNodeId === item.beam.endNodeId ||
+              Math.abs(prevEndCoord - nextStartCoord) <= 0.6;
+
+            if (isConnected && currentRun.length < 5) {
+              currentRun.push(item);
+              used.add(item.design.memberId);
+            } else {
+              finalizeRun(currentRun, axis);
+              currentRun = [item];
+              used.add(item.design.memberId);
+            }
+          }
+        }
+        if (currentRun.length > 0) {
+          finalizeRun(currentRun, axis);
+        }
+      });
+    };
+
+    chainBeams(xBeams, 'X');
+    chainBeams(zBeams, 'Z');
+
+    designs.forEach((d) => {
+      if (!used.has(d.memberId)) {
+        const beam = getBeam(d.memberId);
+        finalizeRun([{ design: d, beam }], 'X');
+        used.add(d.memberId);
+      }
+    });
+
+    return runs;
+  }
+
+  /**
+   * Draws an authentic continuous multi-span beam elevation cross-section matching media_1789398691291.png.
+   */
+  public static drawContinuousRun(
+    b: SheetBuilder,
+    run: ContinuousBeamRun,
+    originX: number,
+    rowBaseY: number,
+    level: FloorPlanLevel,
+    maxAvailableW?: number
+  ) {
+    const maxW = maxAvailableW || Math.max(1000, 39500 - originX);
+    const fitScale = run.totalWidthDrawing > maxW ? maxW / run.totalWidthDrawing : 1.0;
+    const S = STRIP_SCALE * fitScale;
+    const N = run.spans.length;
+    if (N === 0) return;
+
+    const maxD = Math.max(...run.spans.map((s) => s.design.D));
+    const D_units = maxD * S;
+
+    const yBot = rowBaseY;
+    const yTop = yBot + D_units;
+    const covUnits = BEAM_COVER * S;
+    const yTopBar = yTop - covUnits - 25;
+    const yBotBar = yBot + covUnits + 25;
+
+    // Track column & span X coordinates
+    let curX = originX;
+    const spanXStarts: number[] = [];
+    const spanXEnds: number[] = [];
+    const colStarts: number[] = [];
+    const colEnds: number[] = [];
+    const colCenters: number[] = [];
+
+    // Left end support
+    const w0Units = run.spans[0].wLeftMm * S;
+    colStarts.push(curX);
+    colEnds.push(curX + w0Units);
+    colCenters.push(curX + w0Units / 2);
+    curX += w0Units;
+
+    run.spans.forEach((spanItem, idx) => {
+      const spanW = spanItem.clearSpanMm * S;
+      spanXStarts.push(curX);
+      const xEnd = curX + spanW;
+      spanXEnds.push(xEnd);
+      curX = xEnd;
+
+      const wSupport = spanItem.wRightMm * S;
+      colStarts.push(curX);
+      colEnds.push(curX + wSupport);
+      colCenters.push(curX + wSupport / 2);
+      curX += wSupport;
+    });
+
+    const xAnchLeft = colStarts[0] + covUnits;
+    const xAnchRight = colEnds[N] - covUnits;
+
+    // 1. Concrete Outline across all spans
+    for (let i = 0; i < N; i++) {
+      b.line(LAYER_CONCRETE.name, spanXStarts[i], yTop, spanXEnds[i], yTop);
+      b.line(LAYER_CONCRETE.name, spanXStarts[i], yBot, spanXEnds[i], yBot);
+    }
+
+    // 2. Supports Detailing (Left, Intermediates, Right)
+    const yColTop = yTop + 1400;
+    const yColBot = yBot - 1400;
+
+    // Left Support
+    const sup0 = run.spans[0].supLeft;
+    b.line(LAYER_CONCRETE.name, colStarts[0], yColBot, colStarts[0], yColTop);
+    b.line(LAYER_CONCRETE.name, colEnds[0], yTop, colEnds[0], yColTop);
+    b.line(LAYER_CONCRETE.name, colEnds[0], yColBot, colEnds[0], yBot);
+    this.drawBreakline(b, colStarts[0], colEnds[0], yColTop);
+    this.drawBreakline(b, colStarts[0], colEnds[0], yColBot);
+    this.drawCenterLine(b, colCenters[0], yColBot - 500, yColTop + 850);
+    b.arrowHead(LAYER_GRID.name, colCenters[0], yColTop + 800, Math.PI / 2, 85);
+    b.text(LAYER_GRID.name, colCenters[0], yColTop + 1100, sup0.gridLabel, TEXT_H.GRID, { anchor: 'middle', bold: true });
+    b.dimHorizontal(colStarts[0], colEnds[0], yColTop + 450, sup0.widthMm, { textHeight: TEXT_H.CALLOUT });
+    b.text(LAYER_LABELS_SUPPORT.name, colCenters[0], yColBot - 450, sup0.label, TEXT_H.GRID, { anchor: 'middle', bold: true });
+
+    // Intermediate Supports
+    for (let i = 0; i < N - 1; i++) {
+      const cIdx = i + 1;
+      const sup = run.spans[i].supRight;
+      b.line(LAYER_CONCRETE.name, colStarts[cIdx], yTop, colStarts[cIdx], yColTop);
+      b.line(LAYER_CONCRETE.name, colStarts[cIdx], yColBot, colStarts[cIdx], yBot);
+      b.line(LAYER_CONCRETE.name, colEnds[cIdx], yTop, colEnds[cIdx], yColTop);
+      b.line(LAYER_CONCRETE.name, colEnds[cIdx], yColBot, colEnds[cIdx], yBot);
+      this.drawBreakline(b, colStarts[cIdx], colEnds[cIdx], yColTop);
+      this.drawBreakline(b, colStarts[cIdx], colEnds[cIdx], yColBot);
+      this.drawCenterLine(b, colCenters[cIdx], yColBot - 500, yColTop + 850);
+      b.arrowHead(LAYER_GRID.name, colCenters[cIdx], yColTop + 800, Math.PI / 2, 85);
+      b.text(LAYER_GRID.name, colCenters[cIdx], yColTop + 1100, sup.gridLabel, TEXT_H.GRID, { anchor: 'middle', bold: true });
+      b.dimHorizontal(colStarts[cIdx], colEnds[cIdx], yColTop + 450, sup.widthMm, { textHeight: TEXT_H.CALLOUT });
+      b.text(LAYER_LABELS_SUPPORT.name, colCenters[cIdx], yColBot - 450, sup.label, TEXT_H.GRID, { anchor: 'middle', bold: true });
+    }
+
+    // Right End Support
+    const supLast = run.spans[N - 1].supRight;
+    b.line(LAYER_CONCRETE.name, colStarts[N], yTop, colStarts[N], yColTop);
+    b.line(LAYER_CONCRETE.name, colStarts[N], yColBot, colStarts[N], yBot);
+    b.line(LAYER_CONCRETE.name, colEnds[N], yColBot, colEnds[N], yColTop);
+    this.drawBreakline(b, colStarts[N], colEnds[N], yColTop);
+    this.drawBreakline(b, colStarts[N], colEnds[N], yColBot);
+    this.drawCenterLine(b, colCenters[N], yColBot - 500, yColTop + 850);
+    b.arrowHead(LAYER_GRID.name, colCenters[N], yColTop + 800, Math.PI / 2, 85);
+    b.text(LAYER_GRID.name, colCenters[N], yColTop + 1100, supLast.gridLabel, TEXT_H.GRID, { anchor: 'middle', bold: true });
+    b.dimHorizontal(colStarts[N], colEnds[N], yColTop + 450, supLast.widthMm, { textHeight: TEXT_H.CALLOUT });
+    b.text(LAYER_LABELS_SUPPORT.name, colCenters[N], yColBot - 450, supLast.label, TEXT_H.GRID, { anchor: 'middle', bold: true });
+
+    // 3. Continuous Top Through Rebar (full run length)
+    b.poly(
+      LAYER_REBAR.name,
+      [
+        [xAnchLeft, yTopBar - 280],
+        [xAnchLeft, yTopBar],
+        [xAnchRight, yTopBar],
+        [xAnchRight, yTopBar - 280],
       ],
+      false
+    );
+
+    const firstTopThru = `${run.spans[0].design.top.through.count}-T ${run.spans[0].design.top.through.dia}`;
+    const topCalloutX = spanXStarts[0] + (spanXEnds[0] - spanXStarts[0]) * 0.22;
+    b.leader(LAYER_REBAR.name, topCalloutX, yTopBar + 180, topCalloutX, yTopBar, { h: TEXT_H.CALLOUT });
+    b.text(LAYER_REBAR.name, topCalloutX, yTopBar + 220, firstTopThru, TEXT_H.CALLOUT, {
+      anchor: 'middle',
+      bold: true,
+    });
+
+    // 4. Per-Span Reinforcement & Detailing
+    run.spans.forEach((spanItem, idx) => {
+      const design = spanItem.design;
+      const xStart = spanXStarts[idx];
+      const xEnd = spanXEnds[idx];
+      const clearSpanMm = spanItem.clearSpanMm;
+      const spanUnits = xEnd - xStart;
+
+      // Bottom Continuous Through Rebar
+      const leftHookX = idx === 0 ? xAnchLeft : xStart - 100;
+      const rightHookX = idx === N - 1 ? xAnchRight : xEnd + 100;
+
+      if (idx === 0 || idx === N - 1) {
+        const pts: [number, number][] = [];
+        if (idx === 0) pts.push([xAnchLeft, yBotBar + 280]);
+        pts.push([leftHookX, yBotBar]);
+        pts.push([rightHookX, yBotBar]);
+        if (idx === N - 1) pts.push([xAnchRight, yBotBar + 280]);
+        b.poly(LAYER_REBAR.name, pts, false);
+      } else {
+        b.line(LAYER_REBAR.name, leftHookX, yBotBar, rightHookX, yBotBar);
+      }
+
+      const botCalloutX = xStart + spanUnits * 0.22;
+      b.leader(LAYER_REBAR.name, botCalloutX, yBotBar - 180, botCalloutX, yBotBar, { h: TEXT_H.CALLOUT });
+      b.text(
+        LAYER_REBAR.name,
+        botCalloutX,
+        yBotBar - 220,
+        `${design.bottom.through.count}-T ${design.bottom.through.dia}`,
+        TEXT_H.CALLOUT,
+        { anchor: 'middle', bold: true }
+      );
+
+      // Bottom Extra Midspan Rebar
+      if (design.bottom.extra && design.bottom.extra.count > 0) {
+        const startOffMm = design.curtailmentDetails?.botStartOffsetMm || Math.round(clearSpanMm * 0.15);
+        const midLenMm = design.curtailmentDetails?.botLengthMm || Math.max(500, clearSpanMm - 2 * startOffMm);
+        const xMidStart = xStart + startOffMm * S;
+        const xMidEnd = xMidStart + midLenMm * S;
+        const yBotExtra = yBotBar + 45;
+
+        b.line(LAYER_REBAR.name, xMidStart, yBotExtra, xMidEnd, yBotExtra);
+        b.line(LAYER_REBAR.name, xMidStart, yBotExtra - 15, xMidStart, yBotExtra + 15);
+        b.line(LAYER_REBAR.name, xMidEnd, yBotExtra - 15, xMidEnd, yBotExtra + 15);
+
+        const midCalloutX = (xMidStart + xMidEnd) / 2;
+        b.leader(LAYER_REBAR.name, midCalloutX, yBotBar - 400, midCalloutX, yBotExtra, { h: TEXT_H.CALLOUT });
+        b.text(
+          LAYER_REBAR.name,
+          midCalloutX,
+          yBotBar - 440,
+          `${design.bottom.extra.count}-T ${design.bottom.extra.dia}`,
+          TEXT_H.CALLOUT,
+          { anchor: 'middle', bold: true }
+        );
+        b.dimHorizontal(xMidStart, xMidEnd, yBot - 600, midLenMm, { textHeight: TEXT_H.CALLOUT });
+      }
+
+      // Top Extra End Support Rebar (leftmost and rightmost)
+      if (idx === 0 && design.top.extra && design.top.extra.count > 0) {
+        const cutLeftMm = design.curtailmentDetails?.topCutoffLeftMm || Math.round(clearSpanMm * 0.28);
+        const xCutLeft = xStart + cutLeftMm * S;
+        const yTopExtra = yTopBar - 45;
+        b.poly(
+          LAYER_REBAR.name,
+          [
+            [xAnchLeft, yTopExtra - 200],
+            [xAnchLeft, yTopExtra],
+            [xCutLeft, yTopExtra],
+          ],
+          false
+        );
+        b.line(LAYER_REBAR.name, xCutLeft, yTopExtra - 15, xCutLeft, yTopExtra + 15);
+        const extraCalloutX = (xStart + xCutLeft) / 2;
+        b.leader(LAYER_REBAR.name, extraCalloutX, yTopBar + 380, extraCalloutX, yTopExtra, { h: TEXT_H.CALLOUT });
+        b.text(
+          LAYER_REBAR.name,
+          extraCalloutX,
+          yTopBar + 420,
+          `${design.top.extra.count}-T ${design.top.extra.dia}`,
+          TEXT_H.CALLOUT,
+          { anchor: 'middle', bold: true }
+        );
+        b.dimHorizontal(xStart, xCutLeft, yTop + 750, cutLeftMm, { textHeight: TEXT_H.CALLOUT });
+      }
+
+      if (idx === N - 1 && design.top.extra && design.top.extra.count > 0) {
+        const cutRightMm = design.curtailmentDetails?.topCutoffRightMm || Math.round(clearSpanMm * 0.28);
+        const xCutRight = xEnd - cutRightMm * S;
+        const yTopExtra = yTopBar - 45;
+        b.poly(
+          LAYER_REBAR.name,
+          [
+            [xCutRight, yTopExtra],
+            [xAnchRight, yTopExtra],
+            [xAnchRight, yTopExtra - 200],
+          ],
+          false
+        );
+        b.line(LAYER_REBAR.name, xCutRight, yTopExtra - 15, xCutRight, yTopExtra + 15);
+        const extraCalloutX = (xCutRight + xEnd) / 2;
+        b.leader(LAYER_REBAR.name, extraCalloutX, yTopBar + 380, extraCalloutX, yTopExtra, { h: TEXT_H.CALLOUT });
+        b.text(
+          LAYER_REBAR.name,
+          extraCalloutX,
+          yTopBar + 420,
+          `${design.top.extra.count}-T ${design.top.extra.dia}`,
+          TEXT_H.CALLOUT,
+          { anchor: 'middle', bold: true }
+        );
+        b.dimHorizontal(xCutRight, xEnd, yTop + 750, cutRightMm, { textHeight: TEXT_H.CALLOUT });
+      }
+
+      // Stirrups in 3 Zones
+      this.drawSpanStirrups(b, design, xStart, xEnd, yBot, yTop, S);
+
+      // Top Clear Span Dimension
+      b.dimHorizontal(xStart, xEnd, yTop + 1400, clearSpanMm, { textHeight: TEXT_H.CALLOUT });
+
+      // Beam Label below span
+      b.text(
+        LAYER_LABELS.name,
+        (xStart + xEnd) / 2,
+        yBot - 950,
+        `${design.mark}:${design.b}x${design.D}`,
+        TEXT_H.LABEL,
+        { anchor: 'middle', bold: true }
+      );
+    });
+
+    // 5. Top Extra Rebar Over Intermediate Supports
+    for (let i = 0; i < N - 1; i++) {
+      const leftDesign = run.spans[i].design;
+      const rightDesign = run.spans[i + 1].design;
+      const extraBars = rightDesign.top.extra || leftDesign.top.extra;
+      if (extraBars && extraBars.count > 0) {
+        const cutLeftMm = leftDesign.curtailmentDetails?.topCutoffRightMm || Math.round(run.spans[i].clearSpanMm * 0.28);
+        const cutRightMm = rightDesign.curtailmentDetails?.topCutoffLeftMm || Math.round(run.spans[i + 1].clearSpanMm * 0.28);
+        const cIdx = i + 1;
+        const xCutLeft = colStarts[cIdx] - cutLeftMm * S;
+        const xCutRight = colEnds[cIdx] + cutRightMm * S;
+        const yTopExtra = yTopBar - 45;
+
+        b.line(LAYER_REBAR.name, xCutLeft, yTopExtra, xCutRight, yTopExtra);
+        b.line(LAYER_REBAR.name, xCutLeft, yTopExtra - 15, xCutLeft, yTopExtra + 15);
+        b.line(LAYER_REBAR.name, xCutRight, yTopExtra - 15, xCutRight, yTopExtra + 15);
+
+        b.leader(LAYER_REBAR.name, colCenters[cIdx], yTopBar + 380, colCenters[cIdx], yTopExtra, { h: TEXT_H.CALLOUT });
+        b.text(
+          LAYER_REBAR.name,
+          colCenters[cIdx],
+          yTopBar + 420,
+          `${extraBars.count}-T ${extraBars.dia}`,
+          TEXT_H.CALLOUT,
+          { anchor: 'middle', bold: true }
+        );
+
+        b.dimHorizontal(xCutLeft, colStarts[cIdx], yTop + 750, cutLeftMm, { textHeight: TEXT_H.CALLOUT });
+        b.dimHorizontal(colEnds[cIdx], xCutRight, yTop + 750, cutRightMm, { textHeight: TEXT_H.CALLOUT });
+      }
+    }
+
+    // Scale note below the run
+    b.text(
+      LAYER_TEXT_SCALE.name,
+      (colStarts[0] + colEnds[N]) / 2,
+      yBot - 1450,
+      '(SCALE: H - 1:50 / V - 1:50)',
+      TEXT_H.CALLOUT,
+      { anchor: 'middle' }
+    );
+  }
+
+  private static drawSpanStirrups(
+    b: SheetBuilder,
+    design: BeamSectionDesign,
+    xStart: number,
+    xEnd: number,
+    yBot: number,
+    yTop: number,
+    S: number
+  ) {
+    const spanUnits = xEnd - xStart;
+    const totalZoneMm = design.zones.reduce((s, z) => s + (z.endMm - z.startMm), 0) || 1;
+
+    let cursorX = xStart;
+    design.zones.forEach((zone) => {
+      const zoneMm = zone.endMm - zone.startMm;
+      const zoneW = (spanUnits * zoneMm) / totalZoneMm;
+      const zEnd = cursorX + zoneW;
+
+      // Vertical stirrup lines inside beam
+      const step = Math.max(12, Math.min(zoneW / 6, (zone.spacing * S) / 2));
+      let sx = cursorX + step / 2;
+      while (sx < zEnd) {
+        b.line(LAYER_LINK.name, sx, yBot + 40, sx, yTop - 40);
+        sx += step;
+      }
+
+      // Zone delimiter vertical tick
+      b.line(LAYER_LINK.name, zEnd, yBot, zEnd, yTop);
+
+      // Callout below
+      const zMid = (cursorX + zEnd) / 2;
+      const calloutText = `${zone.stirrupCount}-${design.stirrups.legs}L-T${zone.stirrupDia}`;
+      b.text(LAYER_SCHEDULE_TEXT.name, zMid, yBot - 140, calloutText, TEXT_H.CALLOUT - 25, {
+        anchor: 'middle',
+        bold: true,
+      });
+      b.text(LAYER_SCHEDULE_TEXT.name, zMid, yBot - 340, `@${zone.spacing} C/C`, TEXT_H.CALLOUT - 35, {
+        anchor: 'middle',
+      });
+      b.text(LAYER_SCHEDULE_TEXT.name, zMid, yBot - 520, zone.label, TEXT_H.CALLOUT - 45, {
+        anchor: 'middle',
+      });
+      if (zoneMm > 0) {
+        b.dimHorizontal(cursorX, zEnd, yBot - 680, Math.round(zoneMm), {
+          textHeight: TEXT_H.CALLOUT - 30,
+        });
+      }
+
+      cursorX = zEnd;
     });
   }
 
