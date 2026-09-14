@@ -230,6 +230,199 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
     }
   };
 
+  // Helper to render authentic AutoCAD aligned dimension (DIMALIGNED) along any angled facet
+  const renderCadAlignedDimension = (params: {
+    key: string;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    normalX: number;
+    normalY: number;
+    dimOffset?: number;
+    valueMm: number | string;
+    color?: string;
+    textColor?: string;
+    fontSize?: number;
+    tickSize?: number;
+  }) => {
+    const {
+      key,
+      x1,
+      y1,
+      x2,
+      y2,
+      normalX,
+      normalY,
+      dimOffset = 11,
+      valueMm,
+      color = theme.dimLine,
+      textColor = theme.dimText,
+      fontSize = 6.8,
+      tickSize = 3.5,
+    } = params;
+
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    if (len < 0.5) return null;
+
+    // Unit tangent along edge
+    const ux = dx / len;
+    const uy = dy / len;
+
+    // Outward unit normal
+    const nx = normalX;
+    const ny = normalY;
+
+    // Dimension line points (offset along normal)
+    const d1x = x1 + nx * dimOffset;
+    const d1y = y1 + ny * dimOffset;
+    const d2x = x2 + nx * dimOffset;
+    const d2y = y2 + ny * dimOffset;
+
+    // Extension line start (small gap from edge) and end (overhang beyond dimension line)
+    const gap = 1.5;
+    const overhang = 3.0;
+    const e1StartX = x1 + nx * gap;
+    const e1StartY = y1 + ny * gap;
+    const e1EndX = x1 + nx * (dimOffset + overhang);
+    const e1EndY = y1 + ny * (dimOffset + overhang);
+
+    const e2StartX = x2 + nx * gap;
+    const e2StartY = y2 + ny * gap;
+    const e2EndX = x2 + nx * (dimOffset + overhang);
+    const e2EndY = y2 + ny * (dimOffset + overhang);
+
+    // 45-degree CAD architectural slash tick vector relative to dimension line
+    // Tick at 45° between tangent and normal: (ux + nx) / sqrt(2), (uy + ny) / sqrt(2)
+    const tS = tickSize * 0.707;
+    const slashX = (ux + nx) * 0.7071 * tS;
+    const slashY = (uy + ny) * 0.7071 * tS;
+
+    // Midpoint of dimension line
+    const midX = (d1x + d2x) / 2;
+    const midY = (d1y + d2y) / 2;
+
+    // Angle of dimension line in degrees
+    let angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+    // Standard CAD text orientation: keep text upright (-90 <= angle <= 90)
+    if (angleDeg > 90) {
+      angleDeg -= 180;
+    } else if (angleDeg < -90) {
+      angleDeg += 180;
+    }
+
+    // Offset text slightly outward from the dimension line
+    const textDist = 3.2;
+    const textX = midX + nx * textDist;
+    const textY = midY + ny * textDist;
+
+    return (
+      <g key={key} className="cad-dimension-aligned">
+        {/* Extension lines */}
+        <line x1={e1StartX} y1={e1StartY} x2={e1EndX} y2={e1EndY} stroke={color} strokeWidth="0.7" />
+        <line x1={e2StartX} y1={e2StartY} x2={e2EndX} y2={e2EndY} stroke={color} strokeWidth="0.7" />
+        {/* Dimension line */}
+        <line x1={d1x} y1={d1y} x2={d2x} y2={d2y} stroke={color} strokeWidth="0.7" />
+        {/* 45-degree CAD slash ticks */}
+        <line
+          x1={d1x - slashX}
+          y1={d1y - slashY}
+          x2={d1x + slashX}
+          y2={d1y + slashY}
+          stroke={color}
+          strokeWidth="1.1"
+          strokeLinecap="round"
+        />
+        <line
+          x1={d2x - slashX}
+          y1={d2y - slashY}
+          x2={d2x + slashX}
+          y2={d2y + slashY}
+          stroke={color}
+          strokeWidth="1.1"
+          strokeLinecap="round"
+        />
+        {/* Dimension Text with background halo mask to ensure crisp readability */}
+        <text
+          x={textX}
+          y={textY}
+          fill={textColor}
+          fontSize={fontSize}
+          fontWeight="bold"
+          textAnchor="middle"
+          dominantBaseline="central"
+          transform={`rotate(${angleDeg} ${textX} ${textY})`}
+          stroke={theme.paperBg}
+          strokeWidth="2.5"
+          paintOrder="stroke"
+          strokeLinejoin="round"
+        >
+          {typeof valueMm === 'number' ? Math.round(valueMm) : valueMm}
+        </text>
+      </g>
+    );
+  };
+
+  // Helper to render aligned dimensions along EVERY facet of a polygonal pile cap
+  const renderCadPolygonFacetDimensions = (
+    ptsSvg: Array<{ x: number; y: number }>,
+    ptsMm: Array<{ x: number; y: number }>,
+    keyPrefix: string,
+    dimOffset: number = 11,
+    fontSize: number = 6.8
+  ) => {
+    if (!ptsSvg || ptsSvg.length < 3 || ptsSvg.length !== ptsMm.length) return null;
+    const n = ptsSvg.length;
+
+    // Detect winding order in SVG space (where +Y is down) via shoelace formula
+    let signedArea = 0;
+    for (let i = 0; i < n; i++) {
+      const next = (i + 1) % n;
+      signedArea += ptsSvg[i].x * ptsSvg[next].y - ptsSvg[next].x * ptsSvg[i].y;
+    }
+
+    // In SVG coords (+Y is down), clockwise winding has signedArea > 0.
+    // If signedArea < 0 (counter-clockwise), reverse points so winding is strictly clockwise.
+    const orderedSvg = signedArea < 0 ? [...ptsSvg].reverse() : [...ptsSvg];
+    const orderedMm = signedArea < 0 ? [...ptsMm].reverse() : [...ptsMm];
+
+    return (
+      <g key={`poly_dims_${keyPrefix}`}>
+        {orderedSvg.map((p1, i) => {
+          const next = (i + 1) % n;
+          const p2 = orderedSvg[next];
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const len = Math.hypot(dx, dy);
+          if (len < 0.8) return null;
+
+          // In clockwise SVG polygon, outward normal is (dy / len, -dx / len)
+          const normalX = dy / len;
+          const normalY = -dx / len;
+
+          const m1 = orderedMm[i];
+          const m2 = orderedMm[next];
+          const sideMm = Math.round(Math.hypot(m2.x - m1.x, m2.y - m1.y));
+
+          return renderCadAlignedDimension({
+            key: `${keyPrefix}_facet_${i}`,
+            x1: p1.x,
+            y1: p1.y,
+            x2: p2.x,
+            y2: p2.y,
+            normalX,
+            normalY,
+            dimOffset,
+            valueMm: sideMm,
+            fontSize,
+          });
+        })}
+      </g>
+    );
+  };
+
   // Helper to render authentic AutoCAD bored pile symbol: blue circle with centered crosshairs (+)
   const renderCadBoredPile = (key: string, px: number, py: number, rPile: number) => (
     <g key={key}>
@@ -1056,7 +1249,22 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                         const yBtm = cy + capW / 2;
                         const yApex = yTop + (hRise / 1000) * scale;
 
-                        const outerPts = `${xLeft},${yTop} ${xTopBreak},${yTop} ${xApex},${yApex} ${xBtmBreak},${yBtm} ${xLeft},${yBtm}`;
+                        const ptsSvg = [
+                          { x: xLeft, y: yTop },
+                          { x: xTopBreak, y: yTop },
+                          { x: xApex, y: yApex },
+                          { x: xBtmBreak, y: yBtm },
+                          { x: xLeft, y: yBtm },
+                        ];
+                        const ptsMm = [
+                          { x: -L_mm / 2, y: -B_mm / 2 },
+                          { x: -L_mm / 2 + wTopFlat, y: -B_mm / 2 },
+                          { x: L_mm / 2, y: -B_mm / 2 + hRise },
+                          { x: -L_mm / 2 + wBtmFlat, y: B_mm / 2 },
+                          { x: -L_mm / 2, y: B_mm / 2 },
+                        ];
+
+                        const outerPts = ptsSvg.map(p => `${p.x},${p.y}`).join(' ');
                         const innerPts = `${xLeft + coverPx},${yTop + coverPx} ${xTopBreak - coverPx * 0.5},${yTop + coverPx} ${xApex - coverPx * 1.4},${yApex} ${xBtmBreak - coverPx * 0.5},${yBtm - coverPx} ${xLeft + coverPx},${yBtm - coverPx}`;
 
                         const pilePositions = [
@@ -1078,14 +1286,10 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                             {/* Center Magenta Column */}
                             <rect x={cx - colW / 2} y={cy - colD / 2} width={colW} height={colD} fill={theme.columnFill} stroke={theme.columnStroke} strokeWidth="1.2" />
                             <text x={cx} y={cy + 3} fill={theme.columnText} fontSize="7" fontWeight="bold" textAnchor="middle">{col.label}</text>
-                            {/* Cap Dimension Lines */}
-                            {renderCadLinearDimension({ key: `c5_top1_${col.nodeId}`, x1: xLeft, y1: yTop, x2: xTopBreak, y2: yTop, dimOffset: -10, valueMm: wTopFlat, fontSize: 6.8 })}
-                            {renderCadLinearDimension({ key: `c5_top2_${col.nodeId}`, x1: xTopBreak, y1: yTop, x2: xApex, y2: yTop, dimOffset: -10, valueMm: wApex, fontSize: 6.8 })}
-                            {renderCadLinearDimension({ key: `c5_left1_${col.nodeId}`, x1: xLeft, y1: yTop, x2: xLeft, y2: yApex, dimOffset: -10, isVertical: true, valueMm: hRise, fontSize: 6.8 })}
-                            {renderCadLinearDimension({ key: `c5_left2_${col.nodeId}`, x1: xLeft, y1: yApex, x2: xLeft, y2: yBtm, dimOffset: -10, isVertical: true, valueMm: hFlat, fontSize: 6.8 })}
-                            {renderCadLinearDimension({ key: `c5_btm_${col.nodeId}`, x1: xLeft, y1: yBtm, x2: xBtmBreak, y2: yBtm, dimOffset: 10, valueMm: wBtmFlat, fontSize: 6.8 })}
+                            {/* Aligned Facet Dimensions */}
+                            {renderCadPolygonFacetDimensions(ptsSvg, ptsMm, `c5_${col.nodeId}`, 11, 6.8)}
                             {/* Cap Mark */}
-                            <text x={xApex + 3} y={yBtm + 6} fill={theme.capLabelText} fontSize="8" fontWeight="bold">PC2</text>
+                            <text x={xApex + 8} y={yBtm + 12} fill={theme.capLabelText} fontSize="8" fontWeight="bold">PC2</text>
                           </g>
                         );
                       })()
@@ -1094,9 +1298,6 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                         const L_mm = cap.capLength || 2760;
                         const B_mm = cap.capWidth || 2778;
                         const wTop = Math.round(L_mm * 0.58);
-                        const chamferW = (L_mm - wTop) / 2;
-                        const hMid = Math.round(B_mm * 0.5);
-                        const corner = Math.round(Math.hypot(chamferW, B_mm - hMid));
 
                         const xL = cx - capL / 2;
                         const xR = cx + capL / 2;
@@ -1105,7 +1306,24 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                         const yT = cy - capW / 2;
                         const yB = cy + capW / 2;
 
-                        const outerPts = `${xTop1},${yT} ${xTop2},${yT} ${xR},${cy} ${xTop2},${yB} ${xTop1},${yB} ${xL},${cy}`;
+                        const ptsSvg = [
+                          { x: xTop1, y: yT },
+                          { x: xTop2, y: yT },
+                          { x: xR, y: cy },
+                          { x: xTop2, y: yB },
+                          { x: xTop1, y: yB },
+                          { x: xL, y: cy },
+                        ];
+                        const ptsMm = [
+                          { x: -wTop / 2, y: -B_mm / 2 },
+                          { x: wTop / 2, y: -B_mm / 2 },
+                          { x: L_mm / 2, y: 0 },
+                          { x: wTop / 2, y: B_mm / 2 },
+                          { x: -wTop / 2, y: B_mm / 2 },
+                          { x: -L_mm / 2, y: 0 },
+                        ];
+
+                        const outerPts = ptsSvg.map(p => `${p.x},${p.y}`).join(' ');
                         const innerPts = `${xTop1},${yT + coverPx} ${xTop2},${yT + coverPx} ${xR - coverPx * 1.2},${cy} ${xTop2},${yB - coverPx} ${xTop1},${yB - coverPx} ${xL + coverPx * 1.2},${cy}`;
 
                         const pilePositions = [
@@ -1124,17 +1342,20 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                             {pilePositions.map((p, pIdx) => renderCadBoredPile(`p6_${col.nodeId}_${pIdx}`, p.px, p.py, rPile))}
                             <rect x={cx - colW / 2} y={cy - colD / 2} width={colW} height={colD} fill={theme.columnFill} stroke={theme.columnStroke} strokeWidth="1.2" />
                             <text x={cx} y={cy + 3} fill={theme.columnText} fontSize="7" fontWeight="bold" textAnchor="middle">{col.label}</text>
-                            {renderCadLinearDimension({ key: `c6_top_${col.nodeId}`, x1: xTop1, y1: yT, x2: xTop2, y2: yT, dimOffset: -10, valueMm: wTop, fontSize: 6.8 })}
-                            {renderCadLinearDimension({ key: `c6_left1_${col.nodeId}`, x1: xL, y1: yT, x2: xL, y2: cy, dimOffset: -10, isVertical: true, valueMm: hMid, fontSize: 6.8 })}
-                            {renderCadLinearDimension({ key: `c6_left2_${col.nodeId}`, x1: xL, y1: cy, x2: xL, y2: yB, dimOffset: -10, isVertical: true, valueMm: hMid, fontSize: 6.8 })}
-                            <text x={xR + 3} y={yB + 6} fill={theme.capLabelText} fontSize="8" fontWeight="bold">PC3</text>
+                            {/* Aligned Facet Dimensions */}
+                            {renderCadPolygonFacetDimensions(ptsSvg, ptsMm, `c6_${col.nodeId}`, 11, 6.8)}
+                            <text x={xR + 8} y={yB + 12} fill={theme.capLabelText} fontSize="8" fontWeight="bold">PC3</text>
                           </g>
                         );
                       })()
                     ) : (count === 3 || shape === 'TRIANGULAR') ? (
                       (() => {
-                        const pts = getTruncated3PilePolygonMm(cap.pileSpacing, cap.edgeDistance, orient, 0);
-                        const polyStr = pts.map((p) => `${cx + (p.x / 1000) * scale},${cy - (p.y / 1000) * scale}`).join(' ');
+                        const ptsMm = getTruncated3PilePolygonMm(cap.pileSpacing, cap.edgeDistance, orient, 0);
+                        const ptsSvg = ptsMm.map((p) => ({
+                          x: cx + (p.x / 1000) * scale,
+                          y: cy - (p.y / 1000) * scale,
+                        }));
+                        const polyStr = ptsSvg.map((p) => `${p.x},${p.y}`).join(' ');
                         const ptsInner = getTruncated3PilePolygonMm(cap.pileSpacing, cap.edgeDistance, orient, -50);
                         const innerStr = ptsInner.map((p) => `${cx + (p.x / 1000) * scale},${cy - (p.y / 1000) * scale}`).join(' ');
                         const pileOffsets = getPileOffsetsMm(3, cap.pileSpacing, orient);
@@ -1146,9 +1367,9 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                             {pileOffsets.map((off, pIdx) => renderCadBoredPile(`p3_${col.nodeId}_${pIdx}`, cx + (off.x / 1000) * scale, cy - (off.y / 1000) * scale, rPile))}
                             <rect x={cx - colW / 2} y={cy - colD / 2} width={colW} height={colD} fill={theme.columnFill} stroke={theme.columnStroke} strokeWidth="1.2" />
                             <text x={cx} y={cy + 3} fill={theme.columnText} fontSize="7" fontWeight="bold" textAnchor="middle">{col.label}</text>
-                            {renderCadLinearDimension({ key: `c3_top_${col.nodeId}`, x1: cx - capL / 2, y1: cy - capW / 2, x2: cx + capL / 2, y2: cy - capW / 2, dimOffset: -10, valueMm: cap.capLength, fontSize: 7 })}
-                            {renderCadLinearDimension({ key: `c3_left_${col.nodeId}`, x1: cx - capL / 2, y1: cy - capW / 2, x2: cx - capL / 2, y2: cy + capW / 2, dimOffset: -10, isVertical: true, valueMm: cap.capWidth, fontSize: 7 })}
-                            <text x={cx + capL / 2 + 3} y={cy + capW / 2 + 6} fill={theme.capLabelText} fontSize="8" fontWeight="bold">{pcLabel}</text>
+                            {/* Aligned dimensions along each side/facet showing each side length */}
+                            {renderCadPolygonFacetDimensions(ptsSvg, ptsMm, `c3_${col.nodeId}`, 11, 6.8)}
+                            <text x={cx + capL / 2 + 8} y={cy + capW / 2 + 14} fill={theme.capLabelText} fontSize="8" fontWeight="bold">{pcLabel}</text>
                           </g>
                         );
                       })()
@@ -2275,49 +2496,13 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                   {/* ---------------- PLAN VIEW ALIGNED DIMENSIONS WITH ARROW LINES ---------------- */}
                   {item.count === 3 && dims3p ? (
                     <g>
-                      {/* Top Apex Width */}
                       {(() => {
-                        const topY = plCy - (dims3p.RpMm + item.eo) * dScale - 18;
-                        const x1 = plCx - item.eo * dScale;
-                        const x2 = plCx + item.eo * dScale;
-                        return (
-                          <g>
-                            <line x1={x1} y1={topY + 12} x2={x1} y2={topY - 3} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
-                            <line x1={x2} y1={topY + 12} x2={x2} y2={topY - 3} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
-                            <line x1={x1} y1={topY} x2={x2} y2={topY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                            <rect x={plCx - 14} y={topY - 6} width={28} height={9} fill={isCadWhite ? '#ffffff' : '#020617'} rx="2" />
-                            <text x={plCx} y={topY + 1} fill="#dc2626" fontSize="7.5" fontWeight="bold" textAnchor="middle">
-                              {dims3p.apexWidthMm}
-                            </text>
-                          </g>
-                        );
-                      })()}
-
-                      {/* Bottom Base Chain: eo | s | eo */}
-                      {(() => {
-                        const btmY = plCy + (dims3p.halfRpMm + item.eo) * dScale + 18;
-                        const xLeft = plCx - (dims3p.lengthMm / 2) * dScale;
-                        const xP1 = plCx - (item.s / 2) * dScale;
-                        const xP2 = plCx + (item.s / 2) * dScale;
-                        const xRight = plCx + (dims3p.lengthMm / 2) * dScale;
-                        return (
-                          <g>
-                            <line x1={xLeft} y1={btmY - 12} x2={xLeft} y2={btmY + 3} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
-                            <line x1={xRight} y1={btmY - 12} x2={xRight} y2={btmY + 3} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
-                            <line x1={xLeft} y1={btmY} x2={xP1} y2={btmY} stroke="#dc2626" strokeWidth="0.7" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                            <text x={(xLeft + xP1) / 2} y={btmY - 2} fill="#dc2626" fontSize="6.5" fontWeight="bold" textAnchor="middle">
-                              {Math.round(item.eo)}
-                            </text>
-                            <line x1={xP1} y1={btmY} x2={xP2} y2={btmY} stroke="#dc2626" strokeWidth="0.7" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                            <text x={plCx} y={btmY - 2} fill="#dc2626" fontSize="7" fontWeight="bold" textAnchor="middle">
-                              {item.s}
-                            </text>
-                            <line x1={xP2} y1={btmY} x2={xRight} y2={btmY} stroke="#dc2626" strokeWidth="0.7" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                            <text x={(xP2 + xRight) / 2} y={btmY - 2} fill="#dc2626" fontSize="6.5" fontWeight="bold" textAnchor="middle">
-                              {Math.round(item.eo)}
-                            </text>
-                          </g>
-                        );
+                        const cardPtsMm = getTruncated3PilePolygonMm(item.s, item.eo, 'UP', 0);
+                        const cardPtsSvg = cardPtsMm.map((p) => ({
+                          x: plCx + p.x * dScale,
+                          y: plCy - p.y * dScale,
+                        }));
+                        return renderCadPolygonFacetDimensions(cardPtsSvg, cardPtsMm, `card_c3_${item.typeId}`, 13, 7.0);
                       })()}
                     </g>
                   ) : item.shape === 'RECTANGULAR' ? (
@@ -2364,45 +2549,21 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                     /* Pentagon 5 Aligned Facet Dimensions */
                     <g>
                       {(() => {
-                        const pts = pentagonVertices(0);
-                        return pts.map((v1, i) => {
-                          const v2 = pts[(i + 1) % pts.length];
-                          const dx = v2.x - v1.x;
-                          const dy = v2.y - v1.y;
-                          const len = Math.hypot(dx, dy);
-                          if (len < 1) return null;
-
-                          const nx = -dy / len;
-                          const ny = dx / len;
-                          const off = 15;
-
-                          const p1x = v1.x + nx * off;
-                          const p1y = v1.y + ny * off;
-                          const p2x = v2.x + nx * off;
-                          const p2y = v2.y + ny * off;
-
-                          let angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
-                          if (angleDeg > 90) angleDeg -= 180;
-                          if (angleDeg < -90) angleDeg -= 180;
-
-                          const midX = (p1x + p2x) / 2;
-                          const midY = (p1y + p2y) / 2;
-                          const facetVal = item.facetDim || Math.round(len / dScale);
-
-                          return (
-                            <g key={`p_dim_${i}`}>
-                              <line x1={v1.x + nx * 2} y1={v1.y + ny * 2} x2={v1.x + nx * (off + 3)} y2={v1.y + ny * (off + 3)} stroke="#dc2626" strokeWidth="0.4" strokeDasharray="1,1" />
-                              <line x1={v2.x + nx * 2} y1={v2.y + ny * 2} x2={v2.x + nx * (off + 3)} y2={v2.y + ny * (off + 3)} stroke="#dc2626" strokeWidth="0.4" strokeDasharray="1,1" />
-                              <line x1={p1x} y1={p1y} x2={p2x} y2={p2y} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                              <g transform={`translate(${midX}, ${midY}) rotate(${angleDeg})`}>
-                                <rect x="-14" y="-5" width="28" height="10" fill={isCadWhite ? '#ffffff' : '#020617'} rx="2" />
-                                <text x="0" y="2.5" fill="#dc2626" fontSize="7.5" fontWeight="bold" textAnchor="middle">
-                                  {facetVal}
-                                </text>
-                              </g>
-                            </g>
-                          );
-                        });
+                        const ptsSvg = pentagonVertices(0);
+                        const Rp = item.s / (2 * Math.sin(Math.PI / 5));
+                        const Rcap = Rp + item.eo;
+                        const cos18 = Math.cos(Math.PI / 10);
+                        const sin18 = Math.sin(Math.PI / 10);
+                        const sin36 = Math.sin(Math.PI / 5);
+                        const cos36 = Math.cos(Math.PI / 5);
+                        const ptsMm = [
+                          { x: 0, y: Rcap },
+                          { x: -Rcap * cos18, y: Rcap * sin18 },
+                          { x: -Rcap * sin36, y: -Rcap * cos36 },
+                          { x: Rcap * sin36, y: -Rcap * cos36 },
+                          { x: Rcap * cos18, y: Rcap * sin18 },
+                        ];
+                        return renderCadPolygonFacetDimensions(ptsSvg, ptsMm, `card_c5_${item.typeId}`, 13, 7.0);
                       })()}
                     </g>
                   )}
