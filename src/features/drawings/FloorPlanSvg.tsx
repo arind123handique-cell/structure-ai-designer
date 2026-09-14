@@ -17,6 +17,7 @@ import {
   rotatePoints2D,
   angleToOrientation,
 } from '@/features/design/pilecap/pileCapGeometryUtils';
+import { FoundationGeometryTrimming, FoundationCapFootprint } from '@/features/design/gradebeam/foundationGeometryTrimming';
 import { Footprints, Move, RotateCw, RotateCcw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface FloorPlanSvgProps {
@@ -1133,23 +1134,107 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
         )}        {/* 4. Foundation Grade Beams & Pile Caps (Foundation Level) — hidden when SECTION only */}
         {floorPlan.isFoundationLevel && pileCapDisplayMode !== 'SECTION' && (
           <g>
-            {/* Grade Beams (Double Lines) */}
-            {showGradeBeams &&
-              floorPlan.gradeBeams.map((gb) => {
-                // If this grade beam is internal to a combined/shear wall pile cap, suppress it
-                const isInternalToShearWall = floorPlan.combinedPileCaps?.some((grp) => {
-                  const isWallGrp = grp.reason === 'SHEAR_WALL' || grp.nodeIds.length >= 3 || Boolean(grp.wallFootprint);
-                  if (!isWallGrp) return false;
-                  const startIn = grp.columnLabels.includes(gb.startColumnLabel) || grp.columnLabels.includes(`C${gb.startColumnLabel.replace(/\D/g, '')}`);
-                  const endIn = grp.columnLabels.includes(gb.endColumnLabel) || grp.columnLabels.includes(`C${gb.endColumnLabel.replace(/\D/g, '')}`);
-                  return startIn && endIn;
-                });
-                if (isInternalToShearWall) return null;
+            {/* Grade Beams (Double Lines Trimmed Flush to Pile Cap Faces) */}
+            {showGradeBeams && (() => {
+              // Build cap footprints map for trimming grade beams in 2D SVG
+              const capFootprintMap = new Map<number | string, FoundationCapFootprint>();
 
-                const x1 = toSvgX(gb.startX);
-                const y1 = toSvgY(gb.startZ);
-                const x2 = toSvgX(gb.endX);
-                const y2 = toSvgY(gb.endZ);
+              // 1. Individual pile caps
+              floorPlan.columns.forEach((col) => {
+                const cap = col.pileCap;
+                if (!cap) return;
+
+                const overrides = (project?.customPileCapOverrides as any)?.[col.nodeId];
+                const rotDeg = ((cap.rotationAngle ?? overrides?.rotationAngle ?? 0) % 360 + 360) % 360;
+                const capL = cap.capLength / 1000;
+                const capW = cap.capWidth / 1000;
+
+                const count = cap.pileCount;
+                const orient = rotDeg !== 0 ? angleToOrientation(rotDeg) : 'UP';
+                const offsets = getPileOffsetsMm(count, cap.pileSpacing || 875, orient);
+                const pileXs = offsets.map((p) => p.x / 1000);
+                const pileZs = offsets.map((p) => -p.y / 1000);
+                const spanX = pileXs.length > 1 ? Math.max(...pileXs) - Math.min(...pileXs) : 0;
+                const spanZ = pileZs.length > 1 ? Math.max(...pileZs) - Math.min(...pileZs) : 0;
+                const dimX = spanX >= spanZ ? Math.max(capL, capW) : Math.min(capL, capW);
+                const dimZ = spanX >= spanZ ? Math.min(capL, capW) : Math.max(capL, capW);
+
+                const fp: FoundationCapFootprint = {
+                  nodeId: col.nodeId,
+                  label: col.label,
+                  cx: col.x,
+                  cz: col.z,
+                  halfX: dimX / 2,
+                  halfZ: dimZ / 2,
+                  rotationDeg: rotDeg,
+                  isCombined: false,
+                };
+                capFootprintMap.set(col.nodeId, fp);
+                capFootprintMap.set(col.label, fp);
+                capFootprintMap.set(`C${col.columnSlNo}`, fp);
+              });
+
+              // 2. Combined pile caps
+              if (floorPlan.combinedPileCaps && floorPlan.combinedPileCaps.length > 0) {
+                floorPlan.combinedPileCaps.forEach((grp) => {
+                  const isShearWall = grp.reason === 'SHEAR_WALL' || grp.nodeIds.length >= 3 || Boolean(grp.wallFootprint);
+                  const isCoreCombined =
+                    isShearWall ||
+                    [2, 3, 6, 927, 364, 365, 366, 367].some(
+                      (id) => grp.nodeIds?.includes(id) || grp.absorbedIndividualCaps?.includes(id)
+                    );
+
+                  const effMinX = isCoreCombined ? Math.min(grp.minX, 5.40) : grp.minX;
+                  const effMaxX = isCoreCombined ? Math.max(grp.maxX, 9.60) : grp.maxX;
+                  const effMinZ = isCoreCombined ? Math.min(grp.minZ, -4.30) : grp.minZ;
+                  const effMaxZ = isCoreCombined ? Math.max(grp.maxZ, 0.00) : grp.maxZ;
+
+                  const cx = (effMinX + effMaxX) / 2;
+                  const cz = (effMinZ + effMaxZ) / 2;
+                  const capL = grp.capLength / 1000;
+                  const capB = grp.capWidth / 1000;
+
+                  const combFp: FoundationCapFootprint = {
+                    cx,
+                    cz,
+                    halfX: capL / 2,
+                    halfZ: capB / 2,
+                    isCombined: true,
+                    minX: cx - capL / 2,
+                    maxX: cx + capL / 2,
+                    minZ: cz - capB / 2,
+                    maxZ: cz + capB / 2,
+                    absorbedNodeIds: [...grp.nodeIds, ...(grp.absorbedIndividualCaps || [])],
+                  };
+
+                  grp.nodeIds.forEach((nid) => capFootprintMap.set(nid, combFp));
+                  grp.absorbedIndividualCaps?.forEach((nid) => capFootprintMap.set(nid, combFp));
+                  grp.columnLabels?.forEach((lbl) => capFootprintMap.set(lbl, combFp));
+                });
+              }
+
+              return floorPlan.gradeBeams.map((gb) => {
+                const cap1 = (gb.startNodeId ? capFootprintMap.get(gb.startNodeId) : null) || capFootprintMap.get(gb.startColumnLabel) || capFootprintMap.get(`C${gb.startColumnLabel.replace(/\D/g, '')}`);
+                const cap2 = (gb.endNodeId ? capFootprintMap.get(gb.endNodeId) : null) || capFootprintMap.get(gb.endColumnLabel) || capFootprintMap.get(`C${gb.endColumnLabel.replace(/\D/g, '')}`);
+
+                const isSec = gb.beamType === 'SECONDARY';
+                const trimmed = FoundationGeometryTrimming.trimBeamToCapFaces({
+                  x1: gb.startX,
+                  z1: gb.startZ,
+                  x2: gb.endX,
+                  z2: gb.endZ,
+                  cap1,
+                  cap2,
+                  beamWidthM: gb.width / 1000,
+                  isSecondary: isSec,
+                });
+
+                if (trimmed.isSuppressed || trimmed.clearSpan <= 0.08) return null;
+
+                const x1 = toSvgX(trimmed.startX);
+                const y1 = toSvgY(trimmed.startZ);
+                const x2 = toSvgX(trimmed.endX);
+                const y2 = toSvgY(trimmed.endZ);
 
                 const dx = x2 - x1;
                 const dy = y2 - y1;
@@ -1158,7 +1243,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
 
                 const nx = -dy / len;
                 const ny = dx / len;
-                const hw = Math.max(3.5, ((gb.width / 1000) / 2) * scale);
+                const hw = Math.max(3, ((gb.width / 1000) / 2) * scale);
 
                 const p1 = `${x1 + nx * hw},${y1 + ny * hw}`;
                 const p2 = `${x2 + nx * hw},${y2 + ny * hw}`;
@@ -1175,14 +1260,20 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                 const textStr = isShort ? gb.gradeBeamId : `${gb.gradeBeamId} (${gb.width}×${gb.depth})`;
                 const textWidth = textStr.length * 5.2 + 8;
 
+                const strokeColor = isSec ? (isCadWhite ? '#0284c7' : '#38bdf8') : (isCadWhite ? '#4f46e5' : '#6366f1');
+                const fillColor = isSec ? (isCadWhite ? '#f0f9ff' : '#082f49') : (isCadWhite ? '#eef2ff' : '#1e1b4b');
+                const badgeFill = isSec ? (isCadWhite ? '#e0f2fe' : '#0c4a6e') : (isCadWhite ? '#ffffff' : '#020617');
+                const badgeText = isSec ? (isCadWhite ? '#0369a1' : '#7dd3fc') : (isCadWhite ? '#3730a3' : '#c7d2fe');
+
                 return (
                   <g key={`gb_${gb.gradeBeamId}`}>
                     <polygon
                       points={`${p1} ${p2} ${p3} ${p4}`}
-                      fill="#1e1b4b"
-                      fillOpacity="0.45"
-                      stroke="#6366f1"
-                      strokeWidth="1.2"
+                      fill={fillColor}
+                      fillOpacity={isCadWhite ? "0.6" : "0.45"}
+                      stroke={strokeColor}
+                      strokeWidth={isSec ? "1.0" : "1.3"}
+                      strokeDasharray={isSec ? "4,2" : undefined}
                       strokeLinejoin="round"
                     />
                     {showMemberLabels && len >= 35 && (
@@ -1192,19 +1283,20 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                           y="-5.5"
                           width={textWidth}
                           height={11}
-                          fill="#020617"
-                          stroke="#4f46e5"
+                          fill={badgeFill}
+                          stroke={strokeColor}
                           strokeWidth="0.7"
                           rx="2"
                         />
-                        <text x="0" y="2.5" fill="#c7d2fe" fontSize="6.8" fontWeight="bold" textAnchor="middle">
+                        <text x="0" y="2.5" fill={badgeText} fontSize="6.8" fontWeight="bold" textAnchor="middle">
                           {textStr}
                         </text>
                       </g>
                     )}
                   </g>
                 );
-              })}
+              });
+            })()}
 
             {/* Pile Caps in Plan (Excludes Absorbed Columns in Combined/Shear Wall Caps) */}
             {showPileCaps &&

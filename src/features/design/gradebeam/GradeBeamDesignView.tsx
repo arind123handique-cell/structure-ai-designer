@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { useProjectStore } from '@/features/projects/projectStore';
-import { GradeBeamDesignEngine, GradeBeamDesignOutput } from './gradeBeamEngine';
+import { GradeBeamDesignEngine, GradeBeamDesignOutput, GradeBeamOverride } from './gradeBeamEngine';
 import { GradeBeamDrawingSvg } from './GradeBeamDrawingSvg';
+import { GradeBeamEditModal } from './GradeBeamEditModal';
 import { CalculationModal } from '@/features/calculations/CalculationModal';
 import { DetailedCalculationReport } from '@/features/calculations/types';
 import { DataTable, ColumnDef } from '@/components/tables/DataTable';
@@ -10,7 +11,7 @@ import { UniversalRebarBar } from '@/features/design/common/UniversalRebarBar';
 import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
 import { ManualAnalysisEngine } from '@/features/calculations/manualAnalysisEngine';
 import { AnalysisSourceToggle } from '@/components/common/AnalysisSourceToggle';
-import { Play, Compass, FileText, Download, X, Layers, ShieldCheck, Activity, Save, CheckCircle2, Eye, EyeOff, Box } from 'lucide-react';
+import { Play, Compass, FileText, Download, X, Layers, ShieldCheck, Activity, Save, CheckCircle2, Eye, EyeOff, Box, Edit2 } from 'lucide-react';
 
 export const GradeBeamDesignView: React.FC = () => {
   const {
@@ -22,9 +23,22 @@ export const GradeBeamDesignView: React.FC = () => {
     designAnalysisSource,
   } = useProjectStore();
 
+  const [beamOverrides, setBeamOverrides] = useState<Record<string, GradeBeamOverride>>(() => {
+    const initial: Record<string, GradeBeamOverride> = {};
+    if (activeProject?.savedGradeBeamDesigns) {
+      for (const d of activeProject.savedGradeBeamDesigns) {
+        if (d.override) {
+          initial[d.gradeBeamId] = d.override;
+        }
+      }
+    }
+    return initial;
+  });
+
   const [designedGradeBeams, setDesignedGradeBeams] = useState<GradeBeamDesignOutput[]>(() => activeProject?.savedGradeBeamDesigns || []);
   const [selectedReport, setSelectedReport] = useState<DetailedCalculationReport | null>(null);
   const [selectedDrawingBeam, setSelectedDrawingBeam] = useState<GradeBeamDesignOutput | null>(null);
+  const [selectedEditBeam, setSelectedEditBeam] = useState<GradeBeamDesignOutput | null>(null);
   const [isDesigning, setIsDesigning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
@@ -37,7 +51,7 @@ export const GradeBeamDesignView: React.FC = () => {
 
   const gradeBeamAnalysisSource = getSectionAnalysisSource('gradebeams');
 
-  const handleDesignAll = () => {
+  const handleDesignAll = (overrides?: Record<string, GradeBeamOverride>) => {
     if (!activeModel || !activeProject) return;
     setIsDesigning(true);
 
@@ -66,9 +80,23 @@ export const GradeBeamDesignView: React.FC = () => {
       }
     }
 
-    const results = GradeBeamDesignEngine.discoverAndDesignAll(activeModel, fck, fy, customReactionMap);
+    const currentOverrides = overrides || beamOverrides;
+    const results = GradeBeamDesignEngine.discoverAndDesignAll(activeModel, fck, fy, customReactionMap, currentOverrides);
     setDesignedGradeBeams(results);
     setIsDesigning(false);
+  };
+
+  const handleSaveBeamOverride = (gradeBeamId: string, override: GradeBeamOverride) => {
+    const updated = { ...beamOverrides, [gradeBeamId]: override };
+    setBeamOverrides(updated);
+    handleDesignAll(updated);
+  };
+
+  const handleResetBeamOverride = (gradeBeamId: string) => {
+    const updated = { ...beamOverrides };
+    delete updated[gradeBeamId];
+    setBeamOverrides(updated);
+    handleDesignAll(updated);
   };
 
   const handleSaveDesigns = async () => {
@@ -97,11 +125,23 @@ export const GradeBeamDesignView: React.FC = () => {
       accessorKey: 'gradeBeamId',
       sortable: true,
       cell: (r) => (
-        <span className="font-bold text-sky-800 bg-sky-50 px-2 py-0.5 rounded border border-sky-200 text-xs font-mono shadow-2xs">
-          {r.gradeBeamId}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="font-bold text-sky-800 bg-sky-50 px-2 py-0.5 rounded border border-sky-200 text-xs font-mono shadow-2xs">
+            {r.gradeBeamId}
+          </span>
+          {r.beamType === 'SECONDARY' && (
+            <span className="text-[9.5px] font-mono px-1 py-0.2 rounded bg-amber-50 text-amber-700 border border-amber-200 font-bold" title="Secondary Tie Beam">
+              SEC
+            </span>
+          )}
+          {r.isCustomized && (
+            <span className="text-[9.5px] font-mono px-1 py-0.2 rounded bg-purple-50 text-purple-700 border border-purple-200 font-bold" title="Customized Section/Rebar">
+              CUSTOM
+            </span>
+          )}
+        </div>
       ),
-      width: '130px',
+      width: '155px',
     },
     {
       header: 'CONNECTED PILE CAPS (COLUMNS)',
@@ -222,6 +262,14 @@ export const GradeBeamDesignView: React.FC = () => {
       cell: (r) => (
         <div className="flex items-center gap-1.5 justify-center">
           <button
+            onClick={() => setSelectedEditBeam(r)}
+            className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 rounded border border-amber-200 text-[11px] font-mono shadow-xs transition-colors flex items-center gap-1"
+            title="Edit Section Sizing & Rebars"
+          >
+            <Edit2 className="w-3 h-3 text-amber-600" />
+            <span>Edit</span>
+          </button>
+          <button
             onClick={() => setSelectedReport(r.calculationReport)}
             className="px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 rounded border border-ui-border text-[11px] font-mono shadow-xs transition-colors"
             title="View Calculation Sheet"
@@ -237,7 +285,7 @@ export const GradeBeamDesignView: React.FC = () => {
           </button>
         </div>
       ),
-      width: '120px',
+      width: '180px',
     },
   ];
 
@@ -322,7 +370,7 @@ export const GradeBeamDesignView: React.FC = () => {
             <span>{isSaving ? 'Saving...' : '💾 Save Designs'}</span>
           </button>
           <button
-            onClick={handleDesignAll}
+            onClick={() => handleDesignAll()}
             disabled={isDesigning}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-mono text-xs font-semibold shadow-xs transition-colors"
           >
@@ -459,6 +507,17 @@ export const GradeBeamDesignView: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Grade Beam Section Sizing & Rebar Customization Modal */}
+      {selectedEditBeam && (
+        <GradeBeamEditModal
+          gradeBeam={selectedEditBeam}
+          isOpen={Boolean(selectedEditBeam)}
+          onClose={() => setSelectedEditBeam(null)}
+          onSave={handleSaveBeamOverride}
+          onReset={handleResetBeamOverride}
+        />
       )}
     </div>
   );

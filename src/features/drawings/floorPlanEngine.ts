@@ -53,6 +53,10 @@ export interface FloorGradeBeamInfo {
   length: number;
   width: number; // mm
   depth: number; // mm
+  beamType?: 'PRIMARY' | 'SECONDARY';
+  startNodeId?: number;
+  endNodeId?: number;
+  isCustomized?: boolean;
 }
 
 export interface FloorSlabPanelInfo {
@@ -123,7 +127,8 @@ export class FloorPlanEngine {
     savedPileCapDesigns?: Record<number, any>,
     savedCombinedCapDesigns?: any[],
     designSettings?: { concreteGrade?: string; steelGrade?: string },
-    plotSite?: PlotSite | null
+    plotSite?: PlotSite | null,
+    savedGradeBeamDesigns?: GradeBeamDesignOutput[]
   ): FloorPlanLevel[] {
     if (!model || !model.nodes || !model.members) return [];
 
@@ -133,7 +138,7 @@ export class FloorPlanEngine {
       Object.keys(supportPileAssignments || {}).length
     }_${Object.keys(customPileCapOverrides || {}).length}_${manualMergedPileCapGroups?.length || 0}_${
       JSON.stringify(customCombinedCapOverrides || {})
-    }_${designSettings?.concreteGrade || ''
+    }_${savedGradeBeamDesigns ? savedGradeBeamDesigns.length : 0}_${designSettings?.concreteGrade || ''
     }_${designSettings?.steelGrade || ''}`;
 
     const cached = FloorPlanEngine.floorPlanCache.get(model);
@@ -289,7 +294,9 @@ export class FloorPlanEngine {
     }));
 
     // Extract Grade Beams for foundation level
-    const gradeBeamsList = GradeBeamDesignEngine.discoverAndDesignAll(model);
+    const gradeBeamsList = savedGradeBeamDesigns && savedGradeBeamDesigns.length > 0
+      ? savedGradeBeamDesigns
+      : GradeBeamDesignEngine.discoverAndDesignAll(model);
 
     // Extract Pile Cap Designs for foundation supports — uses batch standardization to match PileCapDesignView table exactly
     const defaultPileTypes = projectPileTypes && projectPileTypes.length > 0
@@ -664,6 +671,10 @@ export class FloorPlanEngine {
               length: gb.spanLength,
               width: gb.b,
               depth: gb.D,
+              beamType: gb.beamType,
+              startNodeId: gb.startNodeId,
+              endNodeId: gb.endNodeId,
+              isCustomized: gb.isCustomized,
             };
           })
         : [];

@@ -70,9 +70,25 @@ export const FloorPlanViewer: React.FC = () => {
       customPileCapOverrides,
       manualMergedPileCapGroups,
       detachedCombinedCapNodeIds,
-      customCombinedCapOverrides
+      customCombinedCapOverrides,
+      activeProject?.savedPileCapDesigns,
+      undefined,
+      activeProject?.metadata?.designSettings,
+      undefined,
+      activeProject?.savedGradeBeamDesigns
     );
-  }, [activeModel, projectPileTypes, supportPileAssignments, customPileCapOverrides, customCombinedCapOverrides, manualMergedPileCapGroups, detachedCombinedCapNodeIds]);
+  }, [
+    activeModel,
+    projectPileTypes,
+    supportPileAssignments,
+    customPileCapOverrides,
+    customCombinedCapOverrides,
+    manualMergedPileCapGroups,
+    detachedCombinedCapNodeIds,
+    activeProject?.savedPileCapDesigns,
+    activeProject?.metadata?.designSettings,
+    activeProject?.savedGradeBeamDesigns,
+  ]);
 
   const [selectedLevelIndex, setSelectedLevelIndex] = useState<number>(0);
 
@@ -585,15 +601,26 @@ export const FloorPlanViewer: React.FC = () => {
                       <span>Staircases (Moveable)</span>
                     </label>
                     {activePlan.isFoundationLevel && (
-                      <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded text-indigo-700 font-semibold">
-                        <input
-                          type="checkbox"
-                          checked={showPileCaps}
-                          onChange={(e) => setShowPileCaps(e.target.checked)}
-                          className="rounded text-secondary-brand focus:ring-secondary-brand"
-                        />
-                        <span>Pile Caps</span>
-                      </label>
+                      <>
+                        <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded text-indigo-700 font-semibold">
+                          <input
+                            type="checkbox"
+                            checked={showPileCaps}
+                            onChange={(e) => setShowPileCaps(e.target.checked)}
+                            className="rounded text-secondary-brand focus:ring-secondary-brand"
+                          />
+                          <span>Pile Caps</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded text-sky-700 font-semibold">
+                          <input
+                            type="checkbox"
+                            checked={showGradeBeams}
+                            onChange={(e) => setShowGradeBeams(e.target.checked)}
+                            className="rounded text-sky-600 focus:ring-sky-600"
+                          />
+                          <span>Grade / Tie Beams</span>
+                        </label>
+                      </>
                     )}
                   </div>
                 </div>

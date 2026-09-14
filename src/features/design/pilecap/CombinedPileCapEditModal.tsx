@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { CombinedPileCapEngine, CombinedPileCapGroup } from './combinedPileCapEngine';
-import { X, Layers, CheckCircle2, AlertTriangle, RotateCcw, RotateCw, ShieldCheck, Grid } from 'lucide-react';
+import { X, Layers, CheckCircle2, AlertTriangle, RotateCcw, RotateCw, ShieldCheck, Grid, Zap } from 'lucide-react';
 
 interface CombinedPileCapEditModalProps {
   cap: CombinedPileCapGroup | null;
@@ -20,6 +20,7 @@ interface CombinedPileCapEditModalProps {
     }
   ) => void;
   onReset: (groupId: string) => void;
+  onAutoSize?: (cap: CombinedPileCapGroup) => void;
 }
 
 export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> = ({
@@ -28,6 +29,7 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
   onClose,
   onSave,
   onReset,
+  onAutoSize,
 }) => {
   if (!isOpen || !cap) return null;
 
@@ -184,6 +186,20 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {onAutoSize && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onAutoSize(cap);
+                    onClose();
+                  }}
+                  className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-600 text-white hover:bg-violet-700 transition-colors shadow-xs flex items-center gap-1"
+                  title="Auto-size to match statutory edge and pile spacing without overlapping neighboring pile caps"
+                >
+                  <Zap className="w-3 h-3 text-amber-300" />
+                  <span>Auto-Size (No Overlap)</span>
+                </button>
+              )}
               {(!isSpacingCompliant || capLength < targetRequiredX || capWidth < targetRequiredZ) && (
                 <button
                   type="button"

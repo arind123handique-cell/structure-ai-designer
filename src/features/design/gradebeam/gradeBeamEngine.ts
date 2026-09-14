@@ -3,6 +3,21 @@ import { DetailedCalculationReport } from '@/features/calculations/types';
 import { NormalizedStructuralModel, Support3D } from '@/features/model/types';
 import { ColumnNumberingService } from '@/features/model/columnNumbering';
 
+export interface GradeBeamOverride {
+  b?: number;
+  D?: number;
+  topRebarCallout?: string;
+  bottomRebarCallout?: string;
+  stirrupCallout?: string;
+  customTopCount?: number;
+  customTopDia?: number;
+  customBottomCount?: number;
+  customBottomDia?: number;
+  customStirrupDia?: number;
+  customEndSpacing?: number;
+  customMidSpacing?: number;
+}
+
 export interface GradeBeamDesignInput {
   gradeBeamId: string; // e.g. "GB-1-2"
   startNodeId: number;
@@ -20,6 +35,8 @@ export interface GradeBeamDesignInput {
   factoredPu2: number; // kN (Column 2 reaction)
   wallLoadKnPerM?: number;
   allowedDiameters?: number[];
+  beamType?: 'PRIMARY' | 'SECONDARY';
+  override?: GradeBeamOverride;
 }
 
 export interface GradeBeamDesignOutput {
@@ -33,6 +50,9 @@ export interface GradeBeamDesignOutput {
   spanLength: number;
   b: number;
   D: number;
+  beamType: 'PRIMARY' | 'SECONDARY';
+  isCustomized?: boolean;
+  override?: GradeBeamOverride;
   factoredPu1: number;
   factoredPu2: number;
   factoredTensionTiePu: number;
@@ -68,11 +88,16 @@ export class GradeBeamDesignEngine {
       factoredPu2,
       wallLoadKnPerM,
       allowedDiameters,
+      beamType = 'PRIMARY',
+      override,
     } = input;
 
+    const effectiveB = override?.b || b;
+    const effectiveD = override?.D || D;
+
     const check = IS13920GradeBeam.design({
-      b,
-      D,
+      b: effectiveB,
+      D: effectiveD,
       spanLength,
       fck,
       fy,
@@ -80,6 +105,13 @@ export class GradeBeamDesignEngine {
       factoredPu2,
       wallLoadKnPerM,
       allowedDiameters,
+      customTopCount: override?.customTopCount,
+      customTopDia: override?.customTopDia,
+      customBottomCount: override?.customBottomCount,
+      customBottomDia: override?.customBottomDia,
+      customStirrupDia: override?.customStirrupDia,
+      customEndSpacing: override?.customEndSpacing,
+      customMidSpacing: override?.customMidSpacing,
     });
 
     const calculationReport: DetailedCalculationReport = {
@@ -190,6 +222,11 @@ export class GradeBeamDesignEngine {
       ],
     };
 
+    const topRebarCallout = override?.topRebarCallout || check.topRebarCallout;
+    const bottomRebarCallout = override?.bottomRebarCallout || check.bottomRebarCallout;
+    const stirrupCallout = override?.stirrupCallout || check.stirrupCallout;
+    const isCustomized = Boolean(override);
+
     return {
       gradeBeamId,
       startNodeId,
@@ -199,17 +236,20 @@ export class GradeBeamDesignEngine {
       startPileCapLabel,
       endPileCapLabel,
       spanLength,
-      b,
-      D,
+      b: effectiveB,
+      D: effectiveD,
+      beamType,
+      isCustomized,
+      override,
       factoredPu1,
       factoredPu2,
       factoredTensionTiePu: check.factoredTensionTiePu,
       factoredDesignMomentMu: check.factoredDesignMomentMu,
       factoredDesignShearVu: check.factoredDesignShearVu,
       astReqTotal: check.astReqTotal,
-      topRebarCallout: check.topRebarCallout,
-      bottomRebarCallout: check.bottomRebarCallout,
-      stirrupCallout: check.stirrupCallout,
+      topRebarCallout,
+      bottomRebarCallout,
+      stirrupCallout,
       endZoneSpacing: check.endZoneSpacing,
       midZoneSpacing: check.midZoneSpacing,
       confinementLength: check.confinementLength,
@@ -228,17 +268,20 @@ export class GradeBeamDesignEngine {
   }
 
   /**
-   * Generates and designs all Grade Beam tie connections between support pile caps.
+   * Generates and designs all Grade Beam tie connections between support pile caps,
+   * including secondary tie beams framing into other grade beams.
    */
   public static discoverAndDesignAll(
     model: NormalizedStructuralModel,
     fck: number = 25,
     fy: number = 500,
-    customReactionMap?: Map<number, number>
+    customReactionMap?: Map<number, number>,
+    customOverrides?: Record<string, GradeBeamOverride>
   ): GradeBeamDesignOutput[] {
     if (!model || !model.supports || model.supports.size === 0) return [];
 
-    const cacheKey = `${fck}_${fy}_${model.supports.size}_${model.members.size}_${customReactionMap ? 'MANUAL' : 'ANL'}`;
+    const overrideHash = customOverrides ? JSON.stringify(customOverrides) : 'NONE';
+    const cacheKey = `${fck}_${fy}_${model.supports.size}_${model.members.size}_${customReactionMap ? 'MANUAL' : 'ANL'}_${overrideHash}`;
     let modelCache = this.gradeBeamCache.get(model);
     if (modelCache && modelCache.has(cacheKey)) {
       return modelCache.get(cacheKey)!;
@@ -263,37 +306,48 @@ export class GradeBeamDesignEngine {
     for (const m of model.members.values()) {
       const n1 = model.nodes.get(m.startNodeId);
       const n2 = model.nodes.get(m.endNodeId);
-      if (n1 && n2 && Math.abs(n1.y) < 0.1 && Math.abs(n2.y) < 0.1 && model.supports.has(m.startNodeId) && model.supports.has(m.endNodeId)) {
-        const pairKey = `${Math.min(m.startNodeId, m.endNodeId)}-${Math.max(m.startNodeId, m.endNodeId)}`;
-        connectedPairs.add(pairKey);
+      if (n1 && n2 && Math.abs(n1.y) < 0.1 && Math.abs(n2.y) < 0.1) {
+        const isStartSup = model.supports.has(m.startNodeId);
+        const isEndSup = model.supports.has(m.endNodeId);
 
-        const col1 = columnMapping.get(m.startNodeId);
-        const col2 = columnMapping.get(m.endNodeId);
-        const pu1 = reactionMap.get(m.startNodeId) || 1200;
-        const pu2 = reactionMap.get(m.endNodeId) || 1200;
+        if (isStartSup || isEndSup) {
+          const pairKey = `${Math.min(m.startNodeId, m.endNodeId)}-${Math.max(m.startNodeId, m.endNodeId)}`;
+          if (connectedPairs.has(pairKey)) continue;
+          connectedPairs.add(pairKey);
 
-        const gbId = `GB-${col1?.columnSlNo || m.startNodeId}-${col2?.columnSlNo || m.endNodeId}`;
-        const b = Math.max(300, Math.round((m.section.zd || 0.3) * 1000));
-        const D = Math.max(450, Math.round((m.section.yd || 0.45) * 1000));
+          const col1 = columnMapping.get(m.startNodeId);
+          const col2 = columnMapping.get(m.endNodeId);
+          const pu1 = reactionMap.get(m.startNodeId) || 1200;
+          const pu2 = reactionMap.get(m.endNodeId) || 1200;
 
-        results.push(
-          this.design({
-            gradeBeamId: gbId,
-            startNodeId: m.startNodeId,
-            endNodeId: m.endNodeId,
-            startColumnLabel: col1?.columnLabel || `C${m.startNodeId}`,
-            endColumnLabel: col2?.columnLabel || `C${m.endNodeId}`,
-            startPileCapLabel: col1?.pileCapLabel || `PC-${m.startNodeId}`,
-            endPileCapLabel: col2?.pileCapLabel || `PC-${m.endNodeId}`,
-            spanLength: parseFloat(m.length.toFixed(2)),
-            b,
-            D,
-            fck,
-            fy,
-            factoredPu1: pu1,
-            factoredPu2: pu2,
-          })
-        );
+          const isPrimary = isStartSup && isEndSup;
+          const prefix = isPrimary ? 'GB' : 'SB';
+          const gbId = `${prefix}-${col1?.columnSlNo || m.startNodeId}-${col2?.columnSlNo || m.endNodeId}`;
+          const b = Math.max(isPrimary ? 300 : 250, Math.round((m.section.zd || 0.3) * 1000));
+          const D = Math.max(isPrimary ? 450 : 350, Math.round((m.section.yd || 0.45) * 1000));
+          const override = customOverrides?.[gbId];
+
+          results.push(
+            this.design({
+              gradeBeamId: gbId,
+              startNodeId: m.startNodeId,
+              endNodeId: m.endNodeId,
+              startColumnLabel: col1?.columnLabel || `C${m.startNodeId}`,
+              endColumnLabel: col2?.columnLabel || `C${m.endNodeId}`,
+              startPileCapLabel: col1?.pileCapLabel || `PC-${m.startNodeId}`,
+              endPileCapLabel: col2?.pileCapLabel || `PC-${m.endNodeId}`,
+              spanLength: parseFloat(m.length.toFixed(2)),
+              b,
+              D,
+              fck,
+              fy,
+              factoredPu1: pu1,
+              factoredPu2: pu2,
+              beamType: isPrimary ? 'PRIMARY' : 'SECONDARY',
+              override,
+            })
+          );
+        }
       }
     }
 
@@ -330,6 +384,7 @@ export class GradeBeamDesignEngine {
               const spanLength = parseFloat(dist.toFixed(2));
               const b = 300;
               const D = spanLength >= 4.5 ? 500 : 450;
+              const override = customOverrides?.[gbId];
 
               results.push(
                 this.design({
@@ -347,9 +402,151 @@ export class GradeBeamDesignEngine {
                   fy,
                   factoredPu1: pu1,
                   factoredPu2: pu2,
+                  beamType: 'PRIMARY',
+                  override,
                 })
               );
             }
+          }
+        }
+      }
+
+      // 3. Secondary Tie Beams: Ensure IS 13920 Cl. 11.2 orthogonal foundation tie connectivity
+      // Check each support to ensure it has tie connections in both X and Z directions.
+      // If missing a tie in one orthogonal direction, discover the nearest support/grade beam within span <= 6.5m.
+      const supportConnectionsX = new Map<number, number>();
+      const supportConnectionsZ = new Map<number, number>();
+
+      results.forEach((gb) => {
+        const n1 = model.nodes.get(gb.startNodeId);
+        const n2 = model.nodes.get(gb.endNodeId);
+        if (!n1 || !n2) return;
+        const dx = Math.abs(n1.x - n2.x);
+        const dz = Math.abs(n1.z - n2.z);
+        if (dx >= dz) {
+          supportConnectionsX.set(gb.startNodeId, (supportConnectionsX.get(gb.startNodeId) || 0) + 1);
+          supportConnectionsX.set(gb.endNodeId, (supportConnectionsX.get(gb.endNodeId) || 0) + 1);
+        } else {
+          supportConnectionsZ.set(gb.startNodeId, (supportConnectionsZ.get(gb.startNodeId) || 0) + 1);
+          supportConnectionsZ.set(gb.endNodeId, (supportConnectionsZ.get(gb.endNodeId) || 0) + 1);
+        }
+      });
+
+      for (let i = 0; i < supports.length; i++) {
+        const s1 = supports[i];
+        const n1 = model.nodes.get(s1.nodeId);
+        if (!n1) continue;
+
+        const hasX = (supportConnectionsX.get(s1.nodeId) || 0) > 0;
+        const hasZ = (supportConnectionsZ.get(s1.nodeId) || 0) > 0;
+
+        // Missing Z connection
+        if (!hasZ) {
+          let bestDist = Infinity;
+          let bestSupp: Support3D | null = null;
+          for (let j = 0; j < supports.length; j++) {
+            if (i === j) continue;
+            const s2 = supports[j];
+            const n2 = model.nodes.get(s2.nodeId);
+            if (!n2) continue;
+            const dx = Math.abs(n1.x - n2.x);
+            const dz = Math.abs(n1.z - n2.z);
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            if (dz > 0.5 && dist <= 6.5 && dist < bestDist) {
+              const pairKey = `${Math.min(s1.nodeId, s2.nodeId)}-${Math.max(s1.nodeId, s2.nodeId)}`;
+              if (!connectedPairs.has(pairKey)) {
+                bestDist = dist;
+                bestSupp = s2;
+              }
+            }
+          }
+
+          if (bestSupp && bestDist < Infinity) {
+            const pairKey = `${Math.min(s1.nodeId, bestSupp.nodeId)}-${Math.max(s1.nodeId, bestSupp.nodeId)}`;
+            connectedPairs.add(pairKey);
+            const col1 = columnMapping.get(s1.nodeId);
+            const col2 = columnMapping.get(bestSupp.nodeId);
+            const sbId = `SB-${col1?.columnSlNo || s1.nodeId}-${col2?.columnSlNo || bestSupp.nodeId}`;
+            const spanLength = parseFloat(bestDist.toFixed(2));
+            const override = customOverrides?.[sbId];
+
+            results.push(
+              this.design({
+                gradeBeamId: sbId,
+                startNodeId: s1.nodeId,
+                endNodeId: bestSupp.nodeId,
+                startColumnLabel: col1?.columnLabel || `C${s1.nodeId}`,
+                endColumnLabel: col2?.columnLabel || `C${bestSupp.nodeId}`,
+                startPileCapLabel: col1?.pileCapLabel || `PC-${s1.nodeId}`,
+                endPileCapLabel: col2?.pileCapLabel || `PC-${bestSupp.nodeId}`,
+                spanLength,
+                b: 250,
+                D: spanLength >= 4.5 ? 400 : 350,
+                fck,
+                fy,
+                factoredPu1: reactionMap.get(s1.nodeId) || 1200,
+                factoredPu2: reactionMap.get(bestSupp.nodeId) || 1200,
+                beamType: 'SECONDARY',
+                override,
+              })
+            );
+            supportConnectionsZ.set(s1.nodeId, (supportConnectionsZ.get(s1.nodeId) || 0) + 1);
+            supportConnectionsZ.set(bestSupp.nodeId, (supportConnectionsZ.get(bestSupp.nodeId) || 0) + 1);
+          }
+        }
+
+        // Missing X connection
+        if (!hasX) {
+          let bestDist = Infinity;
+          let bestSupp: Support3D | null = null;
+          for (let j = 0; j < supports.length; j++) {
+            if (i === j) continue;
+            const s2 = supports[j];
+            const n2 = model.nodes.get(s2.nodeId);
+            if (!n2) continue;
+            const dx = Math.abs(n1.x - n2.x);
+            const dz = Math.abs(n1.z - n2.z);
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            if (dx > 0.5 && dist <= 6.5 && dist < bestDist) {
+              const pairKey = `${Math.min(s1.nodeId, s2.nodeId)}-${Math.max(s1.nodeId, s2.nodeId)}`;
+              if (!connectedPairs.has(pairKey)) {
+                bestDist = dist;
+                bestSupp = s2;
+              }
+            }
+          }
+
+          if (bestSupp && bestDist < Infinity) {
+            const pairKey = `${Math.min(s1.nodeId, bestSupp.nodeId)}-${Math.max(s1.nodeId, bestSupp.nodeId)}`;
+            connectedPairs.add(pairKey);
+            const col1 = columnMapping.get(s1.nodeId);
+            const col2 = columnMapping.get(bestSupp.nodeId);
+            const sbId = `SB-${col1?.columnSlNo || s1.nodeId}-${col2?.columnSlNo || bestSupp.nodeId}`;
+            const spanLength = parseFloat(bestDist.toFixed(2));
+            const override = customOverrides?.[sbId];
+
+            results.push(
+              this.design({
+                gradeBeamId: sbId,
+                startNodeId: s1.nodeId,
+                endNodeId: bestSupp.nodeId,
+                startColumnLabel: col1?.columnLabel || `C${s1.nodeId}`,
+                endColumnLabel: col2?.columnLabel || `C${bestSupp.nodeId}`,
+                startPileCapLabel: col1?.pileCapLabel || `PC-${s1.nodeId}`,
+                endPileCapLabel: col2?.pileCapLabel || `PC-${bestSupp.nodeId}`,
+                spanLength,
+                b: 250,
+                D: spanLength >= 4.5 ? 400 : 350,
+                fck,
+                fy,
+                factoredPu1: reactionMap.get(s1.nodeId) || 1200,
+                factoredPu2: reactionMap.get(bestSupp.nodeId) || 1200,
+                beamType: 'SECONDARY',
+                override,
+              })
+            );
+            supportConnectionsX.set(s1.nodeId, (supportConnectionsX.get(s1.nodeId) || 0) + 1);
+            supportConnectionsX.set(bestSupp.nodeId, (supportConnectionsX.get(bestSupp.nodeId) || 0) + 1);
           }
         }
       }

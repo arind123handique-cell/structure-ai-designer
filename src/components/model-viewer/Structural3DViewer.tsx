@@ -16,6 +16,7 @@ import {
   getPileOffsetsMm,
   angleToOrientation,
 } from '@/features/design/pilecap/pileCapGeometryUtils';
+import { FoundationGeometryTrimming, FoundationCapFootprint } from '@/features/design/gradebeam/foundationGeometryTrimming';
 import { StaircaseDesignEngine } from '@/features/design/staircase/staircaseEngine';
 import { Architectural3DLayer } from '@/features/architectural/3d/Architectural3DLayer';
 import { buildMemberReinforcement, createReinforcementShared, disposeReinforcementShared } from './Reinforcement3DRenderer';
@@ -554,17 +555,20 @@ export const Structural3DViewer: React.FC = () => {
   // Grade Tie Beams
   const gradeBeamsList = useMemo(() => {
     if (!activeModel) return [];
+    if (activeProject?.savedGradeBeamDesigns && activeProject.savedGradeBeamDesigns.length > 0) {
+      return activeProject.savedGradeBeamDesigns;
+    }
     return GradeBeamDesignEngine.discoverAndDesignAll(activeModel);
-  }, [activeModel]);
+  }, [activeModel, activeProject?.savedGradeBeamDesigns]);
 
   // Diaphragm Levels from STAAD model
   const diaphragmLevels = useMemo(() => {
     return StaircaseDesignEngine.extractDiaphragmLevels(activeModel);
   }, [activeModel]);
 
-  // Compute Combined & Shear Wall Pile Caps
-  const combinedPileCaps: CombinedPileCapGroup[] = useMemo(() => {
-    if (!activeModel) return [];
+  // Compute Individual Pile Cap Designs
+  const designedPileCaps = useMemo(() => {
+    if (!activeModel) return new Map<number, any>();
     const availablePiles = projectPileTypes && projectPileTypes.length > 0
       ? projectPileTypes
       : PileDesignEngine.getDefaultProjectPileTypes();
@@ -596,10 +600,20 @@ export const Structural3DViewer: React.FC = () => {
       });
       indMap.set(sup.nodeId, capResult);
     });
+    return indMap;
+  }, [activeModel, projectPileTypes, supportPileAssignments, customPileCapOverrides]);
+
+  // Compute Combined & Shear Wall Pile Caps
+  const combinedPileCaps: CombinedPileCapGroup[] = useMemo(() => {
+    if (!activeModel) return [];
+    const availablePiles = projectPileTypes && projectPileTypes.length > 0
+      ? projectPileTypes
+      : PileDesignEngine.getDefaultProjectPileTypes();
+    const defaultPile = availablePiles[0];
 
     return CombinedPileCapEngine.detectAndDesignAll(
       activeModel,
-      indMap,
+      designedPileCaps,
       defaultPile.diameter || 350,
       manualMergedPileCapGroups,
       detachedCombinedCapNodeIds,
@@ -608,7 +622,7 @@ export const Structural3DViewer: React.FC = () => {
       plotSite,
       false
     );
-  }, [activeModel, projectPileTypes, supportPileAssignments, customPileCapOverrides, customCombinedCapOverrides, manualMergedPileCapGroups, detachedCombinedCapNodeIds, plotSite]);
+  }, [activeModel, projectPileTypes, designedPileCaps, manualMergedPileCapGroups, detachedCombinedCapNodeIds, customCombinedCapOverrides, plotSite]);
 
   const absorbedNodeMap = useMemo(() => {
     const map = new Map<number, CombinedPileCapGroup>();
@@ -1790,17 +1804,106 @@ export const Structural3DViewer: React.FC = () => {
       }
     }
 
-    // 4. Draw Grade Tie Beams
+    // 4. Draw Grade Tie Beams (Trimmed flush to pile cap exterior faces without penetration)
     if (showGradeBeams && gradeBeamsList.length > 0) {
+      // Build cap footprints map for trimming grade beams to pile cap exterior faces
+      const capFootprintMap = new Map<number, FoundationCapFootprint>();
+
+      // 1. Standalone pile caps
+      supports.forEach((supp) => {
+        const node = nodes.get(supp.nodeId);
+        if (!node) return;
+        const cap = designedPileCaps.get(supp.nodeId);
+        if (!cap) return;
+
+        const overrides = customPileCapOverrides ? customPileCapOverrides[supp.nodeId] : undefined;
+        const rotDeg = overrides?.rotationAngle ?? cap.rotationAngle ?? 0;
+        const capLength = cap.capLength / 1000;
+        const capWidth = cap.capWidth / 1000;
+
+        // Match pile layout span orientation
+        const pileOffsets = getPileOffsetsMm(cap.pileCount, cap.pileSpacing || 875, rotDeg !== 0 ? angleToOrientation(rotDeg) : 'UP');
+        const pileXs = pileOffsets.map((p) => p.x / 1000);
+        const pileZs = pileOffsets.map((p) => -p.y / 1000);
+        const spanX = pileXs.length > 1 ? Math.max(...pileXs) - Math.min(...pileXs) : 0;
+        const spanZ = pileZs.length > 1 ? Math.max(...pileZs) - Math.min(...pileZs) : 0;
+        const dimX = spanX >= spanZ ? Math.max(capLength, capWidth) : Math.min(capLength, capWidth);
+        const dimZ = spanX >= spanZ ? Math.min(capLength, capWidth) : Math.max(capLength, capWidth);
+
+        capFootprintMap.set(supp.nodeId, {
+          nodeId: supp.nodeId,
+          cx: node.x,
+          cz: node.z,
+          halfX: dimX / 2,
+          halfZ: dimZ / 2,
+          rotationDeg: rotDeg,
+          isCombined: false,
+        });
+      });
+
+      // 2. Combined caps override their absorbed nodeIds
+      if (combinedPileCaps.length > 0) {
+        combinedPileCaps.forEach((grp) => {
+          const isShearWall = grp.reason === 'SHEAR_WALL' || grp.nodeIds.length >= 3 || Boolean(grp.wallFootprint);
+          const isCoreCombined =
+            isShearWall ||
+            [2, 3, 6, 927, 364, 365, 366, 367].some(
+              (id) => grp.nodeIds?.includes(id) || grp.absorbedIndividualCaps?.includes(id)
+            );
+
+          const effMinX = isCoreCombined ? Math.min(grp.minX, 5.40) : grp.minX;
+          const effMaxX = isCoreCombined ? Math.max(grp.maxX, 9.60) : grp.maxX;
+          const effMinZ = isCoreCombined ? Math.min(grp.minZ, -4.30) : grp.minZ;
+          const effMaxZ = isCoreCombined ? Math.max(grp.maxZ, 0.00) : grp.maxZ;
+
+          const cx = (effMinX + effMaxX) / 2;
+          const cz = (effMinZ + effMaxZ) / 2;
+          const capL = grp.capLength / 1000;
+          const capB = grp.capWidth / 1000;
+
+          const combFootprint: FoundationCapFootprint = {
+            cx,
+            cz,
+            halfX: capL / 2,
+            halfZ: capB / 2,
+            isCombined: true,
+            minX: cx - capL / 2,
+            maxX: cx + capL / 2,
+            minZ: cz - capB / 2,
+            maxZ: cz + capB / 2,
+            absorbedNodeIds: [...grp.nodeIds, ...(grp.absorbedIndividualCaps || [])],
+          };
+
+          combFootprint.absorbedNodeIds?.forEach((nid) => {
+            capFootprintMap.set(nid, combFootprint);
+          });
+        });
+      }
+
       gradeBeamsList.forEach((gb) => {
         const n1 = nodes.get(gb.startNodeId);
         const n2 = nodes.get(gb.endNodeId);
         if (!n1 || !n2) return;
 
-        const p1 = new THREE.Vector3(n1.x, n1.y, n1.z);
-        const p2 = new THREE.Vector3(n2.x, n2.y, n2.z);
-        const distance = p1.distanceTo(p2);
-        if (distance <= 0.001) return;
+        const cap1 = capFootprintMap.get(gb.startNodeId);
+        const cap2 = capFootprintMap.get(gb.endNodeId);
+
+        const trimmed = FoundationGeometryTrimming.trimBeamToCapFaces({
+          x1: n1.x,
+          z1: n1.z,
+          x2: n2.x,
+          z2: n2.z,
+          cap1,
+          cap2,
+          beamWidthM: gb.b / 1000,
+          isSecondary: gb.beamType === 'SECONDARY',
+        });
+
+        if (trimmed.isSuppressed || trimmed.clearSpan <= 0.08) return;
+
+        const p1 = new THREE.Vector3(trimmed.startX, n1.y, trimmed.startZ);
+        const p2 = new THREE.Vector3(trimmed.endX, n2.y, trimmed.endZ);
+        const distance = trimmed.clearSpan;
 
         const gbGroup = new THREE.Group();
         const b = gb.b / 1000;

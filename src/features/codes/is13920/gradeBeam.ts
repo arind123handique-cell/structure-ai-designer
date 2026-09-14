@@ -14,6 +14,14 @@ export interface GradeBeamCheckInput {
   factoredPu2: number; // kN (Column 2 reaction)
   wallLoadKnPerM?: number; // kN/m (default: 18 kN/m for brick wall + SW)
   allowedDiameters?: number[];
+  // Optional user overrides for section and reinforcement
+  customTopCount?: number;
+  customTopDia?: number;
+  customBottomCount?: number;
+  customBottomDia?: number;
+  customStirrupDia?: number;
+  customEndSpacing?: number;
+  customMidSpacing?: number;
 }
 
 export interface GradeBeamCheckOutput {
@@ -91,36 +99,49 @@ export class IS13920GradeBeam {
     const astReqTotal = parseFloat(Math.max(Ast_flexure + Ast_axialTension / 2, astMinDuctile).toFixed(1));
 
     // Sizing Top & Bottom Rebars (Minimum 2 continuous bars top and bottom)
-    let throughTopDia = 16;
-    let throughTopCount = 2;
+    let throughTopDia = input.customTopDia || 16;
+    let throughTopCount = input.customTopCount || 2;
     let topAstProv = (throughTopCount * Math.PI * throughTopDia * throughTopDia) / 4;
 
-    for (const dia of validDias.filter((d) => d >= 12)) {
-      const a2 = (2 * Math.PI * dia * dia) / 4;
-      if (a2 >= astReqTotal) {
-        throughTopDia = dia;
-        throughTopCount = 2;
-        topAstProv = a2;
-        break;
+    if (!input.customTopDia && !input.customTopCount) {
+      for (const dia of validDias.filter((d) => d >= 12)) {
+        const a2 = (2 * Math.PI * dia * dia) / 4;
+        if (a2 >= astReqTotal) {
+          throughTopDia = dia;
+          throughTopCount = 2;
+          topAstProv = a2;
+          break;
+        }
+        const a3 = (3 * Math.PI * dia * dia) / 4;
+        if (a3 >= astReqTotal) {
+          throughTopDia = dia;
+          throughTopCount = 3;
+          topAstProv = a3;
+          break;
+        }
       }
-      const a3 = (3 * Math.PI * dia * dia) / 4;
-      if (a3 >= astReqTotal) {
-        throughTopDia = dia;
-        throughTopCount = 3;
-        topAstProv = a3;
-        break;
+
+      if (topAstProv < astReqTotal) {
+        const maxDia = validDias[validDias.length - 1];
+        throughTopDia = maxDia;
+        throughTopCount = Math.max(2, Math.ceil(astReqTotal / ((Math.PI * maxDia * maxDia) / 4)));
+        topAstProv = (throughTopCount * Math.PI * throughTopDia * throughTopDia) / 4;
+      }
+    } else {
+      if (topAstProv < astReqTotal) {
+        warnings.push(`Custom top steel ${throughTopCount}-T${throughTopDia} (${topAstProv.toFixed(0)} mm²) is less than required ${astReqTotal} mm².`);
       }
     }
 
-    if (topAstProv < astReqTotal) {
-      const maxDia = validDias[validDias.length - 1];
-      throughTopDia = maxDia;
-      throughTopCount = Math.max(2, Math.ceil(astReqTotal / ((Math.PI * maxDia * maxDia) / 4)));
-      topAstProv = (throughTopCount * Math.PI * throughTopDia * throughTopDia) / 4;
-    }
+    let throughBottomDia = input.customBottomDia || throughTopDia;
+    let throughBottomCount = input.customBottomCount || throughTopCount;
+    let botAstProv = (throughBottomCount * Math.PI * throughBottomDia * throughBottomDia) / 4;
 
-    let throughBottomDia = throughTopDia;
-    let throughBottomCount = throughTopCount;
+    if (input.customBottomDia || input.customBottomCount) {
+      if (botAstProv < astReqTotal) {
+        warnings.push(`Custom bottom steel ${throughBottomCount}-T${throughBottomDia} (${botAstProv.toFixed(0)} mm²) is less than required ${astReqTotal} mm².`);
+      }
+    }
 
     const topRebarCallout = `${throughTopCount}-T${throughTopDia} (Continuous Full Length)`;
     const bottomRebarCallout = `${throughBottomCount}-T${throughBottomDia} (Continuous Full Length)`;
@@ -130,11 +151,18 @@ export class IS13920GradeBeam {
     const confinementLength = 2 * D; // mm
     // End zone spacing s <= min(d/4, 8 * db, 100 mm)
     const minMainDia = Math.min(throughTopDia, throughBottomDia);
-    const endZoneSpacing = Math.max(75, Math.min(Math.floor(d / 4), 8 * minMainDia, 100));
-    // Mid zone spacing s <= min(d/2, 12 * db, 200 mm)
-    const midZoneSpacing = Math.max(100, Math.min(Math.floor(d / 2), 12 * minMainDia, 200));
+    const maxAllowedEndSpacing = Math.max(75, Math.min(Math.floor(d / 4), 8 * minMainDia, 100));
+    const maxAllowedMidSpacing = Math.max(100, Math.min(Math.floor(d / 2), 12 * minMainDia, 200));
 
-    const stirrupCallout = `2L-8mm @ ${endZoneSpacing}mm c/c (End ${confinementLength}mm zone) / ${midZoneSpacing}mm c/c (Mid)`;
+    const endZoneSpacing = input.customEndSpacing || maxAllowedEndSpacing;
+    const midZoneSpacing = input.customMidSpacing || maxAllowedMidSpacing;
+    const stirrupDia = input.customStirrupDia || 8;
+
+    if (input.customEndSpacing && input.customEndSpacing > maxAllowedEndSpacing) {
+      warnings.push(`End zone stirrup spacing (${input.customEndSpacing}mm) exceeds IS 13920 Cl. 6.3.5 maximum (${maxAllowedEndSpacing}mm).`);
+    }
+
+    const stirrupCallout = `2L-${stirrupDia}mm @ ${endZoneSpacing}mm c/c (End ${confinementLength}mm zone) / ${midZoneSpacing}mm c/c (Mid)`;
 
     const status: 'PASS' | 'WARNING' | 'FAIL' = warnings.length > 0 ? 'WARNING' : 'PASS';
 

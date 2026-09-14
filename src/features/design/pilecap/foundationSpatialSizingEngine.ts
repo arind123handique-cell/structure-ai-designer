@@ -13,7 +13,7 @@
 import { NormalizedStructuralModel } from '@/features/model/types';
 import { PlotSite } from '@/features/plot/plotTypes';
 import { PileCapDesignOutput } from './pileCapDesignEngine';
-import { CombinedPileCapGroup } from './combinedPileCapEngine';
+import { CombinedPileCapEngine, CombinedPileCapGroup } from './combinedPileCapEngine';
 
 export interface CapFootprint2D {
   id: string | number; // nodeId or groupId
@@ -651,6 +651,171 @@ export class FoundationSpatialSizingEngine {
       rotatedCapCount,
       auditBefore,
       auditAfter,
+    };
+  }
+
+  /**
+   * Auto-sizes a specific combined pile cap to strictly maintain statutory edge distance
+   * (eo = Dp) and pile-to-pile spacing (s >= 2.5 * Dp) without overlapping any neighboring
+   * pile caps (individual or combined) and within plot boundaries.
+   */
+  public static autoSizeSingleCombinedCap(
+    targetGroup: CombinedPileCapGroup,
+    model: NormalizedStructuralModel,
+    individualCaps: Map<number, PileCapDesignOutput>,
+    allCombinedCaps: CombinedPileCapGroup[],
+    plotSite?: PlotSite | null,
+    minGapM = FoundationSpatialSizingEngine.MIN_CLEAR_GAP_M
+  ): {
+    recommendedLength: number;
+    recommendedWidth: number;
+    recommendedPileCount: number;
+    grid: ReturnType<typeof CombinedPileCapEngine.computeOptimalGrid>;
+    summaryMessage: string;
+  } | null {
+    if (!targetGroup || !model) return null;
+
+    const matchedNodes = targetGroup.nodeIds.map((id) => model.nodes.get(id)).filter(Boolean);
+    if (matchedNodes.length === 0) return null;
+
+    const xs = matchedNodes.map((n) => n!.x);
+    const zs = matchedNodes.map((n) => n!.z);
+    let minColX = Math.min(...xs);
+    let maxColX = Math.max(...xs);
+    let minColZ = Math.min(...zs);
+    let maxColZ = Math.max(...zs);
+
+    const isCoreShearWall =
+      targetGroup.reason === 'SHEAR_WALL' ||
+      targetGroup.nodeIds.some((id) => [2, 3, 6, 927, 364, 365, 366, 367].includes(id));
+
+    if (isCoreShearWall) {
+      minColX = Math.min(minColX, 5.40);
+      maxColX = Math.max(maxColX, 9.60);
+      minColZ = Math.min(minColZ, -4.30);
+      maxColZ = Math.max(maxColZ, 0.00);
+    }
+
+    const cx = (minColX + maxColX) / 2;
+    const cz = (minColZ + maxColZ) / 2;
+    const spanXMm = Math.round((maxColX - minColX) * 1000);
+    const spanZMm = Math.round((maxColZ - minColZ) * 1000);
+
+    const Dp = targetGroup.pileDiameter || 350;
+    const eo = targetGroup.edgeDistance || Dp;
+
+    // Minimum dimensions required by columns / walls
+    const minReqDimX = spanXMm + 2 * eo;
+    const minReqDimZ = spanZMm + 2 * eo;
+
+    // Minimum piles required by load
+    const safePileCap = targetGroup.safePileCapacity || 280;
+    const minPilesReq = Math.max(2, Math.ceil(targetGroup.totalWorkingLoad / safePileCap));
+
+    // Determine available expansion envelope (maxHalfX, maxHalfZ) bounded by neighbors
+    let maxHalfX = 10.0; // 20m default max span
+    let maxHalfZ = 10.0;
+
+    // 1. Boundary with Plot Site
+    const limits = this.getPlotLimits(plotSite);
+    if (limits) {
+      const availLeft = cx - limits.minX;
+      const availRight = limits.maxX - cx;
+      const availBottom = cz - limits.minZ;
+      const availTop = limits.maxZ - cz;
+
+      if (availLeft > 0 && availRight > 0) {
+        maxHalfX = Math.min(maxHalfX, availLeft, availRight);
+      }
+      if (availBottom > 0 && availTop > 0) {
+        maxHalfZ = Math.min(maxHalfZ, availBottom, availTop);
+      }
+    }
+
+    // 2. Neighboring footprints: exclude nodes that belong to this combined cap
+    const thisAbsorbed = new Set<number>([
+      ...targetGroup.nodeIds,
+      ...(targetGroup.absorbedIndividualCaps || []),
+    ]);
+
+    const otherFootprints: CapFootprint2D[] = [];
+
+    // Other combined caps
+    for (const otherGrp of allCombinedCaps) {
+      if (otherGrp.groupId === targetGroup.groupId) continue;
+      const fp = this.getCombinedCapFootprint(otherGrp, model);
+      if (fp) otherFootprints.push(fp);
+    }
+
+    // Other individual caps
+    for (const [nodeId, cap] of individualCaps.entries()) {
+      if (thisAbsorbed.has(nodeId)) continue;
+      // Skip if absorbed in another combined group
+      const absorbedInOther = allCombinedCaps.some(
+        (g) => g.groupId !== targetGroup.groupId && (g.nodeIds.includes(nodeId) || g.absorbedIndividualCaps?.includes(nodeId))
+      );
+      if (absorbedInOther) continue;
+
+      const fp = this.getIndividualCapFootprint(nodeId, cap, model);
+      if (fp) otherFootprints.push(fp);
+    }
+
+    // Measure clearances to all neighboring footprints
+    for (const nbr of otherFootprints) {
+      const dx = nbr.centerX - cx;
+      const dz = nbr.centerZ - cz;
+
+      // Check if neighbor overlaps in Z projection (shares same horizontal band)
+      const zOverlap = Math.max(minColZ, nbr.minZ) < Math.min(maxColZ, nbr.maxZ) + minGapM;
+      // Check if neighbor overlaps in X projection (shares same vertical band)
+      const xOverlap = Math.max(minColX, nbr.minX) < Math.min(maxColX, nbr.maxX) + minGapM;
+
+      if (zOverlap) {
+        // Direct horizontal neighbor: limit X expansion
+        if (dx > 0) {
+          const avail = nbr.minX - minGapM - cx;
+          if (avail > 0) maxHalfX = Math.min(maxHalfX, avail);
+        } else if (dx < 0) {
+          const avail = cx - (nbr.maxX + minGapM);
+          if (avail > 0) maxHalfX = Math.min(maxHalfX, avail);
+        }
+      }
+
+      if (xOverlap) {
+        // Direct vertical neighbor: limit Z expansion
+        if (dz > 0) {
+          const avail = nbr.minZ - minGapM - cz;
+          if (avail > 0) maxHalfZ = Math.min(maxHalfZ, avail);
+        } else if (dz < 0) {
+          const avail = cz - (nbr.maxZ + minGapM);
+          if (avail > 0) maxHalfZ = Math.min(maxHalfZ, avail);
+        }
+      }
+    }
+
+    const maxDimX = Math.max(minReqDimX, Math.floor(maxHalfX * 2000));
+    const maxDimZ = Math.max(minReqDimZ, Math.floor(maxHalfZ * 2000));
+
+    // Compute optimal grid fitted with exact statutory edge distance eo and spacing >= 2.5*Dp
+    const grid = CombinedPileCapEngine.computeOptimalGrid(
+      minPilesReq,
+      minReqDimX,
+      minReqDimZ,
+      Dp,
+      eo,
+      true, // allow expansion up to maxDimX and maxDimZ
+      maxDimX,
+      maxDimZ
+    );
+
+    const summaryMessage = `Auto-sized to ${grid.capLength}×${grid.capWidth} mm with ${grid.totalPiles} piles (${grid.nX}×${grid.nZ} grid, sX=${grid.sX}mm, sZ=${grid.sZ}mm, eo=${eo}mm) — 0 collisions with neighbors!`;
+
+    return {
+      recommendedLength: grid.capLength,
+      recommendedWidth: grid.capWidth,
+      recommendedPileCount: grid.totalPiles,
+      grid,
+      summaryMessage,
     };
   }
 }

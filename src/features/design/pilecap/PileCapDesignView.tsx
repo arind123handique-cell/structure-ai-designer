@@ -385,6 +385,33 @@ export const PileCapDesignView: React.FC = () => {
     clearCustomCombinedCapOverride(groupId);
   };
 
+  // Auto-size single combined pile cap without overlapping neighboring pile caps
+  const handleAutoSizeSingleCombined = (grp: CombinedPileCapGroup) => {
+    if (!activeModel) return;
+    const result = FoundationSpatialSizingEngine.autoSizeSingleCombinedCap(
+      grp,
+      activeModel,
+      designedCaps,
+      combinedPileCaps,
+      plotSite
+    );
+    if (!result) return;
+
+    setCustomCombinedCapOverride(grp.groupId, {
+      customPileCount: result.recommendedPileCount,
+      customCapLength: result.recommendedLength,
+      customCapWidth: result.recommendedWidth,
+      customCapDepth: grp.capDepth,
+      customSafePileCapacity: grp.safePileCapacity,
+      customBottomRebar: grp.botRebarCallout,
+      customTopRebar: grp.topRebarCallout,
+      rotationAngle: grp.rotationAngle,
+    });
+
+    setAutoSizeFeedback(`[${grp.groupId}] ${result.summaryMessage}`);
+    setTimeout(() => setAutoSizeFeedback(null), 6000);
+  };
+
   const absorbedNodeMap = useMemo(() => {
     const map = new Map<number, CombinedPileCapGroup>();
     combinedPileCaps.forEach((grp) => {
@@ -1337,6 +1364,14 @@ export const PileCapDesignView: React.FC = () => {
 
                       <div className="flex items-center justify-end gap-2 pt-1">
                         <button
+                          onClick={() => handleAutoSizeSingleCombined(grp)}
+                          className="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-800 rounded border border-violet-300 text-[11px] font-mono shadow-2xs flex items-center gap-1 transition-all font-semibold"
+                          title="Auto-size dimensions and pile grid to match statutory edge distance (eo = Dp) and pile-to-pile spacing without overlapping neighboring pile caps"
+                        >
+                          <Zap className="w-3 h-3 text-violet-600" />
+                          <span>Auto-Size</span>
+                        </button>
+                        <button
                           onClick={() => setSelectedEditCombinedCap(grp)}
                           className="px-2.5 py-1 bg-white hover:bg-indigo-50 text-indigo-700 rounded border border-indigo-200 text-[11px] font-mono shadow-2xs flex items-center gap-1 transition-all"
                           title="Manually edit pile count, cap dimensions, and safe pile load capacity"
@@ -1453,6 +1488,7 @@ export const PileCapDesignView: React.FC = () => {
         onClose={() => setSelectedEditCombinedCap(null)}
         onSave={handleSaveCombinedOverride}
         onReset={handleResetCombinedOverride}
+        onAutoSize={handleAutoSizeSingleCombined}
       />
 
       {/* Auto-Design Optimization Modal */}
