@@ -73,21 +73,21 @@ export const STRIP_SCALE = 2;
 export const PLAN_SCALE = 1;
 
 export const TEXT_H = {
-  /** Dimension text, zone lengths, small notes (1.4 mm on A3). */
-  DIM: 140,
-  /** Rebar callouts, stirrup notes, bar marks (1.6 mm on A3). */
-  CALLOUT: 160,
-  /** Support labels, column marks, grid text (1.8 mm on A3). */
-  MARK: 180,
-  GRID: 180,
-  /** Beam size labels (B1:230x450), slab labels (2.2 mm on A3). */
-  LABEL: 220,
+  /** Dimension text, zone lengths, clear spans (clearly visible on ISO A3). */
+  DIM: 200,
+  /** Rebar callouts, stirrup notes, bar marks. */
+  CALLOUT: 200,
+  /** Support labels, column marks, grid text. */
+  MARK: 220,
+  GRID: 220,
+  /** Beam size labels (B1:230x450), slab labels. */
+  LABEL: 250,
   /** Grid bubbles in plans. */
-  GRID_BUBBLE: 250,
+  GRID_BUBBLE: 280,
   /** Major section titles (e.g. SECTION AA). */
-  SECTION_TITLE: 300,
+  SECTION_TITLE: 320,
   /** Sheet titles. */
-  SHEET_TITLE: 420,
+  SHEET_TITLE: 450,
 } as const;
 
 /** Nominal cover used across the detailing sheets, in mm. */
@@ -292,9 +292,9 @@ export class SheetBuilder {
     opts: { textHeight?: number; ext?: number; layer?: string } = {}
   ) {
     const layer = opts.layer || LAYER_DIMENSION.name;
-    const h = opts.textHeight ?? TEXT_H.CALLOUT;
-    const ext = opts.ext ?? h * 1.4;
-    const arrow = h * 0.9;
+    const h = opts.textHeight ?? TEXT_H.DIM;
+    const ext = opts.ext ?? h * 1.35;
+    const arrow = h * 0.85;
     const left = Math.min(x1, x2);
     const right = Math.max(x1, x2);
 
@@ -303,7 +303,7 @@ export class SheetBuilder {
     this.line(layer, left, y, right, y);
     this.arrowHead(layer, left, y, Math.PI, arrow);
     this.arrowHead(layer, right, y, 0, arrow);
-    this.text(layer, (left + right) / 2, y + ext * 0.9, String(text), h, { anchor: 'middle' });
+    this.text(layer, (left + right) / 2, y + ext * 0.75, String(text), h, { anchor: 'middle', bold: true });
     return this;
   }
 
@@ -316,9 +316,9 @@ export class SheetBuilder {
     opts: { textHeight?: number; ext?: number; layer?: string; side?: 'left' | 'right' } = {}
   ) {
     const layer = opts.layer || LAYER_DIMENSION.name;
-    const h = opts.textHeight ?? TEXT_H.CALLOUT;
-    const ext = opts.ext ?? h * 1.4;
-    const arrow = h * 0.9;
+    const h = opts.textHeight ?? TEXT_H.DIM;
+    const ext = opts.ext ?? h * 1.35;
+    const arrow = h * 0.85;
     const bottom = Math.min(y1, y2);
     const top = Math.max(y1, y2);
     const side = opts.side || 'right';
@@ -339,7 +339,7 @@ export class SheetBuilder {
       (bottom + top) / 2,
       String(text),
       h,
-      { anchor: side === 'left' ? 'end' : 'start' }
+      { anchor: side === 'left' ? 'end' : 'start', bold: true }
     );
     return this;
   }
@@ -507,22 +507,19 @@ export function drawA3BorderAndTitleBlock(b: SheetBuilder, opts: A3TitleBlockOpt
   const checked = opts.checkedBy || meta?.checkedBy || '';
   const jobDwg = opts.jobDwgNo || meta?.jobDwgNo || '1';
 
-  // 1. Outer Border (thick line around 420x297 mm paper extents)
-  b.rect(layerBorder, 0, 0, A3_WIDTH, A3_HEIGHT, 3.5);
-
-  // 2. Inner Margin Border (10mm in from edge)
+  // Inner Margin Border (10mm in from edge) — single border with increased line weight
   const x0 = A3_MARGIN;
   const y0 = A3_MARGIN;
   const w = A3_INNER_W;
   const h = A3_INNER_H;
-  b.rect(layerBorder, x0, y0, w, h, 2.0);
+  b.rect(layerBorder, x0, y0, w, h, 3.5);
 
   // 3. Title Block across bottom of inner border (Y from y0 to y0 + A3_TITLE_BLOCK_H)
   const tbY0 = y0;
   const tbH = A3_TITLE_BLOCK_H;
   const tbY1 = tbY0 + tbH;
 
-  b.line(layerBorder, x0, tbY1, x0 + w, tbY1, 2.0);
+  b.line(layerBorder, x0, tbY1, x0 + w, tbY1, 2.5);
 
   // Compartment widths:
   // [Client & Scale Bar: 10500] | [Dag/Patta/Ward: 7500] | [Revision Table: 8000] | [Sheet Title & Specs: 14000]
@@ -537,9 +534,9 @@ export function drawA3BorderAndTitleBlock(b: SheetBuilder, opts: A3TitleBlockOpt
   const col4X = col3X + col3W;
 
   // Vertical dividers
-  b.line(layerBorder, col2X, tbY0, col2X, tbY1, 1.5);
-  b.line(layerBorder, col3X, tbY0, col3X, tbY1, 1.5);
-  b.line(layerBorder, col4X, tbY0, col4X, tbY1, 1.5);
+  b.line(layerBorder, col2X, tbY0, col2X, tbY1, 2.0);
+  b.line(layerBorder, col3X, tbY0, col3X, tbY1, 2.0);
+  b.line(layerBorder, col4X, tbY0, col4X, tbY1, 2.0);
 
   // --- COL 1: Client & Print Reduction Bar ---
   b.text(layerHeader, col1X + 300, tbY1 - 450, 'CLIENT:', 180, { bold: true });
