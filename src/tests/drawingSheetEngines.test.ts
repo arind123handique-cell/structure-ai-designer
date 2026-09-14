@@ -395,6 +395,43 @@ describe('Beam reinforcement cross-section sheet engine', () => {
     expect(sheets[0].bounds.maxX - sheets[0].bounds.minX).toBe(42000);
     expect(sheets[1].bounds.maxX - sheets[1].bounds.minX).toBe(42000);
   });
+
+  it('builds a GA beam layout framing plan sheet with exact beam marks and CAD primitives when requested', () => {
+    const planSheet = BeamSectionSheetEngine.buildPlanSheet(input);
+    expect(planSheet.sheetNumber).toBe('STR-201-PLAN');
+    expect(planSheet.title).toContain('BEAM LAYOUT PLAN');
+
+    const texts = planSheet.primitives.filter((p) => p.t === 'text').map((p) => (p as any).text as string);
+    // Beam marks from model
+    expect(texts).toContain('B1');
+    expect(texts).toContain('B2');
+    expect(texts).toContain('B10');
+    expect(texts).toContain('B11');
+    expect(texts).toContain('B12');
+    // Column marks
+    expect(texts).toContain('C1');
+    expect(texts).toContain('C2');
+    expect(texts).toContain('C3');
+    // Slab marks and thickness
+    expect(texts).toContain('S1');
+    expect(texts).toContain('THK: 150mm');
+    // Grid bubbles
+    expect(texts).toContain('1');
+    expect(texts).toContain('A');
+    // Title and North arrow
+    expect(texts.some((t) => t.includes('FRAMING PLAN'))).toBe(true);
+    expect(texts).toContain('N');
+
+    // Drawing sheet bounding box
+    expect(planSheet.bounds.maxX - planSheet.bounds.minX).toBe(42000);
+    expect(planSheet.bounds.maxY - planSheet.bounds.minY).toBe(29700);
+
+    // When includePlanSheet: true is passed to buildSheets, Page 1 is the Plan sheet followed by sections
+    const allSheets = BeamSectionSheetEngine.buildSheets({ ...input, includePlanSheet: true });
+    expect(allSheets.length).toBeGreaterThanOrEqual(2);
+    expect(allSheets[0].sheetNumber).toBe('STR-201-PLAN');
+    expect(allSheets[1].sheetNumber).toContain('STR-201');
+  });
 });
 
 describe('Slab detailing sheet engine', () => {

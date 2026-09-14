@@ -515,7 +515,10 @@ export function drawA3BorderAndTitleBlock(b: SheetBuilder, opts: A3TitleBlockOpt
   const checked = opts.checkedBy || meta?.checkedBy || '';
   const jobDwg = opts.jobDwgNo || meta?.jobDwgNo || '1';
 
-  // Inner Margin Border (10mm in from edge) — single border with increased line weight
+  // 1. Outer Paper Extents Border (420 x 297 mm paper boundary)
+  b.rect(layerBorder, 0, 0, A3_WIDTH, A3_HEIGHT, 1.0);
+
+  // 2. Inner Margin Border (10mm in from edge)
   const x0 = A3_MARGIN;
   const y0 = A3_MARGIN;
   const w = A3_INNER_W;
@@ -595,8 +598,10 @@ export function drawA3BorderAndTitleBlock(b: SheetBuilder, opts: A3TitleBlockOpt
 
   // --- COL 4: Large Sheet Title & Drawing Metadata ---
   b.line(layerLine, col4X, tbY1 - 1800, x0 + w, tbY1 - 1800, 1.5);
+  b.text(layerHeader, col4X + 500, tbY1 - 450, 'STRUCTURE AI DESIGNER — AUTONOMOUS CAD SUITE', 150, { bold: true });
   const fullTitle = opts.pageInfo ? `${opts.title} (${opts.pageInfo})` : opts.title;
-  b.text(layerLabels, col4X + 500, tbY1 - 1100, fullTitle, 360, { bold: true });
+  const titleH = Math.min(300, Math.max(160, Math.floor(12500 / (fullTitle.length * 0.65))));
+  b.text(layerLabels, col4X + 500, tbY1 - 1100, fullTitle, titleH, { bold: true });
 
   const subRowY = tbY0 + 1000;
   b.line(layerLine, col4X, subRowY, x0 + w, subRowY, 1.0);
@@ -611,14 +616,15 @@ export function drawA3BorderAndTitleBlock(b: SheetBuilder, opts: A3TitleBlockOpt
   b.text(layerText, col4X + 300, tbY1 - 2200, 'SCALE', 160);
   b.text(layerHeader, col4X + 1600, tbY1 - 2200, opts.scale || 'N.T.S', 200, { bold: true });
 
-  b.text(layerText, col4Sub2 + 300, tbY1 - 2200, 'JOB-DRAWING No.', 150);
-  b.text(layerHeader, col4Sub2 + 1000, tbY1 - 2550, jobDwg, 260, { bold: true });
+  b.text(layerText, col4Sub1 + 300, tbY1 - 2200, 'JOB-DRAWING No.', 150);
+  b.text(layerHeader, col4Sub1 + 600, tbY1 - 2550, jobDwg, 240, { bold: true });
 
-  b.text(layerText, col4Sub2 + 3800, tbY1 - 2200, 'SHEET NO:', 150);
-  b.text(layerHeader, col4Sub2 + 4500, tbY1 - 2550, opts.sheetNumber, 280, { bold: true });
+  b.text(layerText, col4Sub2 + 300, tbY1 - 2200, 'DWG NO:', 150);
+  b.text(layerHeader, col4Sub2 + 300, tbY1 - 2550, `DWG NO: ${opts.sheetNumber}`, 240, { bold: true });
 
   b.text(layerText, col4X + 300, tbY0 + 400, 'DRAWN', 160);
   b.text(layerHeader, col4X + 1600, tbY0 + 400, drawn, 190, { bold: true });
+  b.text(layerText, col4Sub2 + 300, tbY0 + 400, 'STATUS: APPROVED', 160, { bold: true });
 }
 
 /**

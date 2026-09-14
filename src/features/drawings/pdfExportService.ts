@@ -1600,18 +1600,20 @@ export class PdfExportService {
       doc.triangle(naX, naY - 3, naX - 3, naY + 7, naX + 3, naY + 7, 'FD');
     }
 
-    // 7. Printable Area Calculation
-    const drawX0 = 16;
-    const drawY0 = 21;
-    const drawAreaW = pageWidth - 32;
-    const drawAreaH = tbY - drawY0 - 4;
-
     const bounds = sheet.bounds && Number.isFinite(sheet.bounds.minX)
       ? sheet.bounds
       : computeBounds(sheet.primitives || []);
 
     const spanX = Math.max(bounds.maxX - bounds.minX, 1);
     const spanY = Math.max(bounds.maxY - bounds.minY, 1);
+
+    // 7. Printable Area Calculation
+    // If the sheet already contains the full A3 drawing border (spanX >= 35000), use full paper area
+    const isFullA3Sheet = spanX >= 35000;
+    const drawX0 = isFullA3Sheet ? 6 : 16;
+    const drawY0 = isFullA3Sheet ? 6 : 21;
+    const drawAreaW = isFullA3Sheet ? pageWidth - 12 : pageWidth - 32;
+    const drawAreaH = isFullA3Sheet ? pageHeight - 12 : tbY - drawY0 - 4;
 
     if (!sheet.primitives || sheet.primitives.length === 0) {
       doc.setFont('helvetica', 'normal');
@@ -1622,8 +1624,8 @@ export class PdfExportService {
       return;
     }
 
-    // 2% padding so border lines don't collide with the drawing area boundary
-    const padRatio = 0.02;
+    // Small padding so border lines don't collide with the drawing area boundary
+    const padRatio = isFullA3Sheet ? 0.005 : 0.02;
     const paddedSpanX = spanX * (1 + padRatio * 2);
     const paddedSpanY = spanY * (1 + padRatio * 2);
 
@@ -1688,6 +1690,23 @@ export class PdfExportService {
           const lw = getLineWidthForLayer(p.layer, p.width);
           doc.setLineWidth(lw);
           doc.setDrawColor(r, g, b);
+
+          // Fast path for 4-point closed axis-aligned rectangles (borders, title blocks, columns)
+          if (p.closed && p.pts.length === 4) {
+            const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = p.pts;
+            const isAxisAligned =
+              (Math.abs(y0 - y1) < 1e-2 && Math.abs(x1 - x2) < 1e-2 && Math.abs(y2 - y3) < 1e-2 && Math.abs(x3 - x0) < 1e-2) ||
+              (Math.abs(x0 - x1) < 1e-2 && Math.abs(y1 - y2) < 1e-2 && Math.abs(x2 - x3) < 1e-2 && Math.abs(y3 - y0) < 1e-2);
+            if (isAxisAligned) {
+              const minPx = Math.min(x0, x1, x2, x3);
+              const maxPx = Math.max(x0, x1, x2, x3);
+              const minPy = Math.min(y0, y1, y2, y3);
+              const maxPy = Math.max(y0, y1, y2, y3);
+              doc.rect(toPdfX(minPx), toPdfY(maxPy), (maxPx - minPx) * scale, (maxPy - minPy) * scale);
+              break;
+            }
+          }
+
           for (let j = 0; j < p.pts.length - 1; j++) {
             doc.line(
               toPdfX(p.pts[j][0]),

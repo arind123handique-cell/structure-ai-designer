@@ -215,6 +215,8 @@ export const FloorPlanViewer: React.FC = () => {
             },
             fck: fckGrade,
             fy: fyGrade,
+            includePlanSheet: true,
+            staircases: architecturalStaircases,
           });
         } else if (sheetMode === 'SLAB_DETAILS') {
           const single = SlabDetailSheetEngine.buildSheet({
@@ -330,6 +332,8 @@ export const FloorPlanViewer: React.FC = () => {
               },
               fck: fckGrade,
               fy: fyGrade,
+              includePlanSheet: true,
+              staircases: architecturalStaircases,
             });
           } else {
             sheetsToExport = [
@@ -410,6 +414,8 @@ export const FloorPlanViewer: React.FC = () => {
               },
               fck: fckGrade,
               fy: fyGrade,
+              includePlanSheet: true,
+              staircases: architecturalStaircases,
             });
             allSheets.push(...fresh);
           }
@@ -1229,36 +1235,6 @@ export const FloorPlanViewer: React.FC = () => {
                 theme={cadTheme === 'BLUEPRINT_DARK' ? 'dark' : 'light'}
                 width={sheetOrientation === 'PORTRAIT' ? 1188 : 1680}
                 maxHeight={zoomFit ? 820 : undefined}
-                viewportChild={
-                  sheetMode === 'BEAM_SECTIONS' && currentPageIdx === 0 && activePlan
-                    ? (
-                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ffffff' }}>
-                        <FloorPlanSvg
-                          floorPlan={activePlan}
-                          project={activeProject}
-                          width={40000}
-                          height={24200}
-                          showGrids={true}
-                          showDimensions={true}
-                          showMemberLabels={true}
-                          showSectionSizes={false}
-                          showSlabs={true}
-                          showPileCaps={false}
-                          showGradeBeams={false}
-                          showCrossSections={false}
-                          showStaircases={false}
-                          cadTheme="AUTOCAD_WHITE"
-                          fitScreen={true}
-                        />
-                      </div>
-                    )
-                    : undefined
-                }
-                viewportRect={
-                  sheetMode === 'BEAM_SECTIONS' && currentPageIdx === 0
-                    ? { x: 1000, y: 5000, w: 40000, h: 24200 }
-                    : undefined
-                }
               />
             ) : (
               /* High-Performance On-Demand CAD Sheet Generation Card */

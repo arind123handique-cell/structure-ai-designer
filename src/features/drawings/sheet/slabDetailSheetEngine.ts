@@ -373,7 +373,7 @@ export class SlabDetailSheetEngine {
     // 1. Draw standard ISO A3 CAD Sheet Border & Title Block matching media_1789398719721.png
     drawA3BorderAndTitleBlock(b, {
       title: `${level.levelName.toUpperCase()} SLAB DETAILING & SCHEDULE`,
-      sheetNumber: '12',
+      sheetNumber,
       levelName: level.levelName,
       scale: 'PLAN 1:100 / SEC 1:50',
       jobDwgNo: '2',
@@ -822,35 +822,35 @@ export class SlabDetailSheetEngine {
     }
 
     // 3. Dimension Chains (Stratified without overlap)
-    // Row 1: Clear spans at slabTopY + 500
+    // Row 1: Clear spans at slabTopY + 550
     for (let i = 0; i < N; i++) {
-      b.dimHorizontal(bays[i].xClearStart, bays[i].xClearEnd, slabTopY + 500, `${bays[i].clearSpanMm}`, {
-        textHeight: 130,
+      b.dimHorizontal(bays[i].xClearStart, bays[i].xClearEnd, slabTopY + 550, `${bays[i].clearSpanMm}`, {
+        textHeight: TEXT_H.DIM + 20,
       });
     }
 
-    // Row 2: Support widths at slabTopY + 1050
+    // Row 2: Support widths at slabTopY + 1150
     for (let i = 0; i <= N; i++) {
-      b.dimHorizontal(supports[i].xStart, supports[i].xEnd, slabTopY + 1050, `${supports[i].widthMm}`, {
-        textHeight: 130,
+      b.dimHorizontal(supports[i].xStart, supports[i].xEnd, slabTopY + 1150, `${supports[i].widthMm}`, {
+        textHeight: TEXT_H.DIM,
       });
     }
 
-    // Row 3: Crank offset dimensions at slabTopY + 1550 (L/6 from support face)
+    // Row 3: Crank offset dimensions at slabTopY + 1750 (L/6 from support face)
     for (let i = 0; i < N; i++) {
       const crankMm = calcCrankOffsetMm(bays[i].clearSpanMm);
       const crankDist = crankMm * S;
-      b.dimHorizontal(bays[i].xClearStart, bays[i].xClearStart + crankDist, slabTopY + 1550, `${crankMm}`, {
-        textHeight: 120,
+      b.dimHorizontal(bays[i].xClearStart, bays[i].xClearStart + crankDist, slabTopY + 1750, `${crankMm}`, {
+        textHeight: TEXT_H.DIM,
       });
     }
 
-    // Row 4: Top negative moment curtailment dimensions (0.25L) at slabTopY + 2050
+    // Row 4: Top negative moment curtailment dimensions (0.25L) at slabTopY + 2350
     for (let i = 0; i < N; i++) {
       const curtMm = calcCurtailmentMm(bays[i].clearSpanMm);
       const curtDist = curtMm * S;
-      b.dimHorizontal(bays[i].xClearStart, bays[i].xClearStart + curtDist, slabTopY + 2050, `${curtMm}`, {
-        textHeight: 120,
+      b.dimHorizontal(bays[i].xClearStart, bays[i].xClearStart + curtDist, slabTopY + 2350, `${curtMm}`, {
+        textHeight: TEXT_H.DIM,
       });
     }
 
@@ -866,9 +866,9 @@ export class SlabDetailSheetEngine {
     b.text(
       LAYER_TEXT.name,
       secMidX,
-      slabTopY + 2500,
+      slabTopY + 2850,
       `TOP EXTRA REINF. OVER SUPPORTS: T${transDia}@${transSpacing} C/C`,
-      140,
+      TEXT_H.CALLOUT,
       { anchor: 'middle', bold: true }
     );
 
