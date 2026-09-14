@@ -36,9 +36,9 @@ export const PipelineStepper: React.FC = React.memo(() => {
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {/* Stage dots + labels */}
-      <div className="flex items-center justify-between gap-1">
+      <div className="flex items-center justify-between gap-0.5">
         {PIPELINE_STAGES.map((stage) => {
           const active = currentStage?.id === stage.id;
           const done = currentStage ? stage.index < currentStage.index : false;
@@ -47,20 +47,20 @@ export const PipelineStepper: React.FC = React.memo(() => {
               key={stage.id}
               onClick={() => goToStage(stage.id)}
               title={`${stage.index}. ${stage.title} — ${stage.description}`}
-              className={`flex-1 flex flex-col items-center gap-1 group`}
+              className="flex-1 flex flex-col items-center gap-0.5 group py-0.5"
             >
               <span
-                className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border transition-all ${
+                className={`w-5 h-5 rounded-full flex items-center justify-center text-[9.5px] font-bold border transition-all ${
                   active
-                    ? 'bg-emerald-500 text-white border-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.6)]'
+                    ? 'bg-emerald-500 text-white border-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.6)] ring-1 ring-emerald-400/40'
                     : done
                       ? 'bg-emerald-950 text-emerald-400 border-emerald-800 group-hover:border-emerald-600'
                       : 'bg-slate-800 text-slate-500 border-slate-700 group-hover:text-slate-300'
                 }`}
               >
-                {done ? <Check className="w-3 h-3" /> : stage.index}
+                {done ? <Check className="w-2.5 h-2.5" /> : stage.index}
               </span>
-              <span className={`text-[8px] font-mono leading-tight text-center ${active ? 'text-emerald-400 font-bold' : 'text-slate-500'}`}>
+              <span className={`text-[7.5px] font-mono leading-tight text-center truncate w-full ${active ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
                 {stage.shortTitle}
               </span>
             </button>
@@ -68,34 +68,40 @@ export const PipelineStepper: React.FC = React.memo(() => {
         })}
       </div>
 
-      {/* Current stage description + next/prev */}
+      {/* Current stage compact bar + next/prev */}
       {currentStage ? (
-        <div className="px-2 py-1.5 rounded bg-slate-800/70 border border-slate-700">
-          <div className="text-[10px] text-slate-300">
-            <span className="text-emerald-400 font-bold">STAGE {currentStage.index}/6</span>{' '}
-            <span className="font-bold text-white">{currentStage.title}</span>
+        <div className="flex items-center justify-between gap-1 px-1.5 py-1 rounded bg-slate-800/80 border border-slate-700/80 shadow-2xs">
+          <button
+            onClick={() => prevStage && goToStage(prevStage.id)}
+            disabled={!prevStage}
+            className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-slate-900/90 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700/80 text-[9.5px] font-mono disabled:opacity-25 disabled:pointer-events-none transition-all shrink-0"
+            title={prevStage ? `Previous: Stage ${prevStage.index} · ${prevStage.shortTitle}` : 'First Stage'}
+          >
+            <ArrowLeft className="w-2.5 h-2.5" />
+            <span>Prev</span>
+          </button>
+
+          <div
+            className="flex items-center gap-1 min-w-0 truncate text-center cursor-default px-1"
+            title={`${currentStage.title}: ${currentStage.description}`}
+          >
+            <span className="text-emerald-400 font-bold text-[9.5px] font-mono shrink-0">S{currentStage.index}</span>
+            <span className="text-white font-semibold text-[10.5px] truncate font-mono">{currentStage.title}</span>
           </div>
-          <div className="text-[9px] text-slate-500 mt-0.5 leading-snug">{currentStage.description}</div>
-          <div className="flex items-center gap-1.5 mt-1.5">
-            <button
-              onClick={() => prevStage && goToStage(prevStage.id)}
-              disabled={!prevStage}
-              className="flex items-center gap-1 px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700 text-[10px] font-mono disabled:opacity-30 disabled:pointer-events-none transition-all"
-            >
-              <ArrowLeft className="w-3 h-3" /> Back
-            </button>
-            <button
-              onClick={() => nextStage && goToStage(nextStage.id)}
-              disabled={!nextStage}
-              className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-mono font-bold border border-emerald-600 disabled:opacity-30 disabled:pointer-events-none transition-all"
-            >
-              Next: {nextStage?.shortTitle || '—'} <ArrowRight className="w-3 h-3" />
-            </button>
-          </div>
+
+          <button
+            onClick={() => nextStage && goToStage(nextStage.id)}
+            disabled={!nextStage}
+            className="flex items-center gap-0.5 px-2 py-0.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-[9.5px] font-mono font-bold border border-emerald-600/90 disabled:opacity-25 disabled:pointer-events-none transition-all shrink-0 shadow-2xs"
+            title={nextStage ? `Next: Stage ${nextStage.index} · ${nextStage.shortTitle}` : 'Final Stage'}
+          >
+            <span>Next</span>
+            <ArrowRight className="w-2.5 h-2.5" />
+          </button>
         </div>
       ) : (
-        <div className="px-2 py-1.5 rounded bg-slate-800/70 border border-slate-700 text-[10px] text-slate-400">
-          Guided pipeline: start with <strong className="text-emerald-400">Stage 1 — Plot &amp; Site</strong>
+        <div className="px-2 py-1 rounded bg-slate-800/70 border border-slate-700 text-[10px] text-slate-400 text-center font-mono">
+          Stage 1: Plot &amp; Site
         </div>
       )}
     </div>
