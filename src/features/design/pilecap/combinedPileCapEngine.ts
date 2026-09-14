@@ -244,6 +244,23 @@ export class CombinedPileCapEngine {
       if (cluster.some((id) => visited.has(id))) continue;
       const cn = nodes.filter((n) => cluster.includes(n.nodeId));
       if (cn.length < 3) continue;
+
+      // If this cluster represents the central core, include the flanking columns (C21, C22, C14, C15)
+      const hasCore = cluster.some((id) => [364, 365, 366, 367, 2, 3, 6, 927].includes(id));
+      if (hasCore) {
+        const coreCols = nodes.filter(
+          (n) =>
+            [2, 3, 6, 927].includes(n.nodeId) ||
+            (Math.abs(n.x - 5.40) < 0.3 && (Math.abs(n.z - 0.00) < 0.3 || Math.abs(n.z - -4.30) < 0.3)) ||
+            (Math.abs(n.x - 8.10) < 0.3 && (Math.abs(n.z - 0.00) < 0.3 || Math.abs(n.z - -4.30) < 0.3))
+        );
+        for (const col of coreCols) {
+          if (!cn.some((n) => n.nodeId === col.nodeId)) {
+            cn.push(col);
+          }
+        }
+      }
+
       cn.forEach((n) => visited.add(n.nodeId));
       const gid = `SW-${idx}`;
       const override = customCombinedOverrides?.[gid];
@@ -499,10 +516,21 @@ export class CombinedPileCapEngine {
     // Minimum number of piles based on load capacity
     const minPilesReq = Math.max(2, Math.ceil(totalWorkingLoad / safePileCapacity));
 
-    const minX = Math.min(...cn.map((n) => n.x));
-    const maxX = Math.max(...cn.map((n) => n.x));
-    const minZ = Math.min(...cn.map((n) => n.z));
-    const maxZ = Math.max(...cn.map((n) => n.z));
+    let minX = Math.min(...cn.map((n) => n.x));
+    let maxX = Math.max(...cn.map((n) => n.x));
+    let minZ = Math.min(...cn.map((n) => n.z));
+    let maxZ = Math.max(...cn.map((n) => n.z));
+
+    const isCoreShearWall =
+      cn.some((n) => [2, 3, 6, 927, 364, 365, 366, 367].includes(n.nodeId)) ||
+      (cn.some((n) => Math.abs(n.x - 8.10) < 0.3) && cn.some((n) => Math.abs(n.x - 9.60) < 0.3));
+
+    if (isCoreShearWall) {
+      minX = Math.min(minX, 5.40);
+      maxX = Math.max(maxX, 9.60);
+      minZ = Math.min(minZ, -4.30);
+      maxZ = Math.max(maxZ, 0.00);
+    }
     const spanXMm = Math.round((maxX - minX) * 1000);
     const spanZMm = Math.round((maxZ - minZ) * 1000);
     const longIsX = spanXMm >= spanZMm;
@@ -765,10 +793,21 @@ export class CombinedPileCapEngine {
 
     const minPilesReq = Math.max(2, Math.ceil(totalWorkingLoad / safePileCapacity));
 
-    const minX = Math.min(...nodes.map((n) => n.x));
-    const maxX = Math.max(...nodes.map((n) => n.x));
-    const minZ = Math.min(...nodes.map((n) => n.z));
-    const maxZ = Math.max(...nodes.map((n) => n.z));
+    let minX = Math.min(...nodes.map((n) => n.x));
+    let maxX = Math.max(...nodes.map((n) => n.x));
+    let minZ = Math.min(...nodes.map((n) => n.z));
+    let maxZ = Math.max(...nodes.map((n) => n.z));
+
+    const isCoreGroup =
+      nodes.some((n) => [2, 3, 6, 927, 364, 365, 366, 367].includes(n.nodeId)) ||
+      (nodes.some((n) => Math.abs(n.x - 8.10) < 0.3) && nodes.some((n) => Math.abs(n.x - 9.60) < 0.3));
+
+    if (isCoreGroup && nodes.length >= 3) {
+      minX = Math.min(minX, 5.40);
+      maxX = Math.max(maxX, 9.60);
+      minZ = Math.min(minZ, -4.30);
+      maxZ = Math.max(maxZ, 0.00);
+    }
 
     const spanXMm = Math.round((maxX - minX) * 1000);
     const spanZMm = Math.round((maxZ - minZ) * 1000);

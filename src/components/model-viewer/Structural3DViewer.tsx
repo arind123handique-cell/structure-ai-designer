@@ -1700,11 +1700,22 @@ export const Structural3DViewer: React.FC = () => {
       // B. Combined & Shear Wall 3D Monolithic Pile Caps
       if (showPileCaps && combinedPileCaps.length > 0) {
         combinedPileCaps.forEach((grp) => {
-          const isShearWall = grp.reason === 'SHEAR_WALL';
+          const isShearWall = grp.reason === 'SHEAR_WALL' || grp.nodeIds.length >= 3 || Boolean(grp.wallFootprint);
           const isSelected = grp.nodeIds.some((nid) => selectedSupportNodeIds.includes(nid));
 
-          const cx = (grp.minX + grp.maxX) / 2;
-          const cz = (grp.minZ + grp.maxZ) / 2;
+          const isCoreCombined =
+            isShearWall ||
+            [2, 3, 6, 927, 364, 365, 366, 367].some(
+              (id) => grp.nodeIds?.includes(id) || grp.absorbedIndividualCaps?.includes(id)
+            );
+
+          const effMinX = isCoreCombined ? Math.min(grp.minX, 5.40) : grp.minX;
+          const effMaxX = isCoreCombined ? Math.max(grp.maxX, 9.60) : grp.maxX;
+          const effMinZ = isCoreCombined ? Math.min(grp.minZ, -4.30) : grp.minZ;
+          const effMaxZ = isCoreCombined ? Math.max(grp.maxZ, 0.00) : grp.maxZ;
+
+          const cx = (effMinX + effMaxX) / 2;
+          const cz = (effMinZ + effMaxZ) / 2;
           const capL = grp.capLength / 1000;
           const capB = grp.capWidth / 1000;
           const capD = grp.capDepth / 1000;

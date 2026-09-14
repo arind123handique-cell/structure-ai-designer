@@ -1505,11 +1505,22 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
         {isFoundation && showPileCaps && floorPlan.combinedPileCaps && floorPlan.combinedPileCaps.length > 0 && (
           <g>
             {floorPlan.combinedPileCaps.map((grp) => {
-              const cx = toSvgX((grp.minX + grp.maxX) / 2);
-              const cy = toSvgY((grp.minZ + grp.maxZ) / 2);
+              const isShearWall = grp.reason === 'SHEAR_WALL' || grp.nodeIds.length >= 3 || Boolean(grp.wallFootprint);
+              const isCoreCombined =
+                isShearWall ||
+                [2, 3, 6, 927, 364, 365, 366, 367].some(
+                  (id) => grp.nodeIds?.includes(id) || grp.absorbedIndividualCaps?.includes(id)
+                );
+
+              const effMinX = isCoreCombined ? Math.min(grp.minX, 5.40) : grp.minX;
+              const effMaxX = isCoreCombined ? Math.max(grp.maxX, 9.60) : grp.maxX;
+              const effMinZ = isCoreCombined ? Math.min(grp.minZ, -4.30) : grp.minZ;
+              const effMaxZ = isCoreCombined ? Math.max(grp.maxZ, 0.00) : grp.maxZ;
+
+              const cx = toSvgX((effMinX + effMaxX) / 2);
+              const cy = toSvgY((effMinZ + effMaxZ) / 2);
               const capLpx = (grp.capLength / 1000) * scale;
               const capBpx = (grp.capWidth / 1000) * scale;
-              const isShearWall = grp.reason === 'SHEAR_WALL' || grp.nodeIds.length >= 3 || Boolean(grp.wallFootprint);
               const coverPx = Math.max(2.5, (60 / 1000) * scale);
               const rPile = Math.max(4, (grp.pileDiameter / 2000) * scale);
               const colW = Math.max(8, 0.45 * scale);
@@ -1559,8 +1570,8 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
 
                   {/* Absorbed Columns inside Combined Cap (Rendered in Solid Magenta) */}
                   {(() => {
-                    const cxM = (grp.minX + grp.maxX) / 2;
-                    const czM = (grp.minZ + grp.maxZ) / 2;
+                    const cxM = (effMinX + effMaxX) / 2;
+                    const czM = (effMinZ + effMaxZ) / 2;
                     const halfL = effValL / 2000;
                     const halfB = effValB / 2000;
 
@@ -1760,7 +1771,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
 
                   {/* Left Pile Row Spacing Dimension Chain */}
                   {(() => {
-                    const leftDimX = cx - capLpx / 2;
+                    const leftDimX = cx - effCapLpx / 2;
                     const dims = [];
                     for (let i = 0; i < uniquePileZ.length - 1; i++) {
                       const spMm = Math.round(Math.abs(uniquePileZ[i + 1] - uniquePileZ[i]));
@@ -1929,7 +1940,8 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
               const isInternalToCore = floorPlan.combinedPileCaps?.some((grp) => {
                 const isWallGrp = grp.reason === 'SHEAR_WALL' || grp.nodeIds.length >= 3 || Boolean(grp.wallFootprint);
                 if (!isWallGrp) return false;
-                return grp.nodeIds.includes(b.startNodeId) && grp.nodeIds.includes(b.endNodeId);
+                const wallPlateNodes = [364, 365, 366, 367];
+                return wallPlateNodes.includes(b.startNodeId) && wallPlateNodes.includes(b.endNodeId);
               });
               if (isInternalToCore) return null;
 

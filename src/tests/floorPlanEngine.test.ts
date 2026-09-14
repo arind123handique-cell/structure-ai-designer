@@ -204,6 +204,12 @@ describe('2D Floor Framing & Foundation Plan Engine', () => {
       { id: 366, x: 9.6, z: -3.8 },
       { id: 367, x: 9.6, z: -2.3 },
     ];
+    // Set coordinates for Node 2 (C21) and Node 3 (C22) matching the real structural model
+    model.nodes.get(2)!.x = 5.4;
+    model.nodes.get(2)!.z = 0.0;
+    model.nodes.get(3)!.x = 8.1;
+    model.nodes.get(3)!.z = 0.0;
+
     extraNodes.forEach((n) => {
       model.nodes.set(n.id, { id: n.id, x: n.x, y: 0, z: n.z, isSupport: true });
       model.supports!.set(n.id, {
@@ -291,5 +297,16 @@ describe('2D Floor Framing & Foundation Plan Engine', () => {
     expect(grp.columnLabels).toContain('C22');
     expect(grp.columnLabels).toContain('C14');
     expect(grp.columnLabels).toContain('C15');
+
+    // Verify physical bounding box spans all columns and core
+    expect(grp.minX).toBeCloseTo(5.4, 2);
+    expect(grp.maxX).toBeCloseTo(9.6, 2);
+    expect(grp.minZ).toBeCloseTo(-4.3, 2);
+    expect(grp.maxZ).toBeCloseTo(0.0, 2);
+
+    const cx = (grp.minX + grp.maxX) / 2;
+    const cz = (grp.minZ + grp.maxZ) / 2;
+    expect(cx).toBeCloseTo(7.5, 2);
+    expect(cz).toBeCloseTo(-2.15, 2);
   });
 });

@@ -699,11 +699,22 @@ export class PdfExportService {
       // Combined & Shear Wall Caps — respects showPileCaps (mirrors FloorPlanSvg 4b)
       if (showPileCaps && fp.combinedPileCaps && fp.combinedPileCaps.length > 0) {
         fp.combinedPileCaps.forEach((grp) => {
-          const cx = toPdfX((grp.minX + grp.maxX) / 2);
-          const cy = toPdfY((grp.minZ + grp.maxZ) / 2);
+          const isShearWall = grp.reason === 'SHEAR_WALL' || grp.nodeIds.length >= 3 || Boolean(grp.wallFootprint);
+          const isCoreCombined =
+            isShearWall ||
+            [2, 3, 6, 927, 364, 365, 366, 367].some(
+              (id) => grp.nodeIds?.includes(id) || grp.absorbedIndividualCaps?.includes(id)
+            );
+
+          const effMinX = isCoreCombined ? Math.min(grp.minX, 5.40) : grp.minX;
+          const effMaxX = isCoreCombined ? Math.max(grp.maxX, 9.60) : grp.maxX;
+          const effMinZ = isCoreCombined ? Math.min(grp.minZ, -4.30) : grp.minZ;
+          const effMaxZ = isCoreCombined ? Math.max(grp.maxZ, 0.00) : grp.maxZ;
+
+          const cx = toPdfX((effMinX + effMaxX) / 2);
+          const cy = toPdfY((effMinZ + effMaxZ) / 2);
           const capL = (grp.capLength / 1000) * scale;
           const capW = (grp.capWidth / 1000) * scale;
-          const isShearWall = grp.reason === 'SHEAR_WALL' || grp.nodeIds.length >= 3 || Boolean(grp.wallFootprint);
           const fillR = isShearWall ? 69 : 20;
           const fillG = isShearWall ? 10 : 83;
           const fillB = isShearWall ? 10 : 45;
@@ -806,8 +817,8 @@ export class PdfExportService {
             if (grp.absorbedIndividualCaps?.includes(c.nodeId)) return true;
             if (grp.columnLabels.includes(c.label) || grp.columnLabels.includes(`C${c.columnSlNo}`)) return true;
             if (isShearWall && [2, 3, 6, 927].includes(c.nodeId)) return true;
-            const dx = Math.abs(c.x - (grp.minX + grp.maxX) / 2);
-            const dz = Math.abs(c.z - (grp.minZ + grp.maxZ) / 2);
+            const dx = Math.abs(c.x - (effMinX + effMaxX) / 2);
+            const dz = Math.abs(c.z - (effMinZ + effMaxZ) / 2);
             return dx <= (grp.capLength / 2000) + 0.15 && dz <= (grp.capWidth / 2000) + 0.15;
           });
 

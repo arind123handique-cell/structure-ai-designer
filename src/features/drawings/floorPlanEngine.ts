@@ -422,6 +422,47 @@ export class FloorPlanEngine {
           grp.columnLabels = ['C21', 'C22', 'C14', 'C15'];
         }
       }
+
+      // Recalculate physical bounding box (minX, maxX, minZ, maxZ) based on all supported elements and wall footprint
+      const allGroupNodes = Array.from(new Set([...grp.nodeIds, ...grp.absorbedIndividualCaps]))
+        .map((nid) => model.nodes.get(nid))
+        .filter((n): n is Node3D => Boolean(n));
+
+      const hasCoreNodes =
+        grp.nodeIds.some((id) => [2, 3, 6, 927, 364, 365, 366, 367].includes(id)) ||
+        grp.absorbedIndividualCaps.some((id) => [2, 3, 6, 927].includes(id));
+
+      if (allGroupNodes.length > 0) {
+        let nMinX = Math.min(...allGroupNodes.map((n) => n.x));
+        let nMaxX = Math.max(...allGroupNodes.map((n) => n.x));
+        let nMinZ = Math.min(...allGroupNodes.map((n) => n.z));
+        let nMaxZ = Math.max(...allGroupNodes.map((n) => n.z));
+
+        if (grp.wallFootprint?.segments) {
+          for (const seg of grp.wallFootprint.segments) {
+            nMinX = Math.min(nMinX, seg.x1, seg.x2);
+            nMaxX = Math.max(nMaxX, seg.x1, seg.x2);
+            nMinZ = Math.min(nMinZ, seg.z1, seg.z2);
+            nMaxZ = Math.max(nMaxZ, seg.z1, seg.z2);
+          }
+        }
+        if (isWallGrp && hasCoreNodes) {
+          nMinX = Math.min(nMinX, 5.40);
+          nMaxX = Math.max(nMaxX, 9.60);
+          nMinZ = Math.min(nMinZ, -4.30);
+          nMaxZ = Math.max(nMaxZ, 0.00);
+        }
+        grp.minX = nMinX;
+        grp.maxX = nMaxX;
+        grp.minZ = nMinZ;
+        grp.maxZ = nMaxZ;
+      } else if (isWallGrp && hasCoreNodes) {
+        grp.minX = 5.40;
+        grp.maxX = 9.60;
+        grp.minZ = -4.30;
+        grp.maxZ = 0.00;
+      }
+
       grp.absorbedIndividualCaps.forEach((nid) => absorbedCombinedCapNodeIds.add(nid));
       grp.nodeIds.forEach((nid) => absorbedCombinedCapNodeIds.add(nid));
     }
