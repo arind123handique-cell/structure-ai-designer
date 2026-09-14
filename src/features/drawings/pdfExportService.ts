@@ -2,6 +2,55 @@ import jsPDF from 'jspdf';
 import { FloorPlanLevel, FloorColumnInfo } from './floorPlanEngine';
 import { StoredProject } from '@/features/projects/types';
 import { PileCapDesignOutput } from '@/features/design/pilecap/pileCapDesignEngine';
+import {
+  determineCapOrientation,
+  get3PileDimensionsMm,
+  getPileOffsetsMm,
+  getTruncated3PilePolygonMm,
+} from '@/features/design/pilecap/pileCapGeometryUtils';
+
+/**
+ * Renders an authentic quarter-shaded AutoCAD circular pile symbol into jsPDF.
+ */
+function drawQuarterShadedPilePdf(
+  doc: jsPDF,
+  cx: number,
+  cy: number,
+  r: number,
+  strokeColor: [number, number, number] = [30, 58, 138],
+  fillColor: [number, number, number] = [59, 130, 246]
+) {
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(strokeColor[0], strokeColor[1], strokeColor[2]);
+  doc.setLineWidth(0.2);
+  doc.circle(cx, cy, r, 'FD');
+
+  const drawQuadrant = (startAngleRad: number, endAngleRad: number) => {
+    const steps = 8;
+    const pts: [number, number][] = [[cx, cy]];
+    for (let i = 0; i <= steps; i++) {
+      const angle = startAngleRad + (i / steps) * (endAngleRad - startAngleRad);
+      pts.push([cx + r * Math.cos(angle), cy + r * Math.sin(angle)]);
+    }
+    const lines: [number, number][] = pts.slice(1).map((pt, i) => [pt[0] - pts[i][0], pt[1] - pts[i][1]]);
+    doc.lines(lines, pts[0][0], pts[0][1], [1, 1], 'F', true);
+  };
+
+  doc.setFillColor(fillColor[0], fillColor[1], fillColor[2]);
+  // Quadrant 1 (Top-Right in screen coordinates)
+  drawQuadrant(1.5 * Math.PI, 2 * Math.PI);
+  // Quadrant 3 (Bottom-Left in screen coordinates)
+  drawQuadrant(0.5 * Math.PI, Math.PI);
+
+  // Crosshairs extending slightly beyond circle
+  doc.setDrawColor(strokeColor[0], strokeColor[1], strokeColor[2]);
+  doc.setLineWidth(0.2);
+  doc.line(cx - r - 0.3, cy, cx + r + 0.3, cy);
+  doc.line(cx, cy - r - 0.3, cx, cy + r + 0.3);
+
+  // Sharp circle outline
+  doc.circle(cx, cy, r, 'S');
+}
 
 export interface PdfExportOptions {
   showGrids?: boolean;
@@ -56,18 +105,35 @@ function computeUniquePileCapTypes(floorPlan: FloorPlanLevel): UniquePileCapType
 
     if (!typeMap.has(key)) {
       const secNum = typeMap.size + 1;
-      const L = cap.capLength || (count === 5 ? 2316 : 1900);
-      const B = cap.capWidth || (count === 5 ? 2399 : 1900);
       const Dp = cap.pileDiameter || 350;
       const s = cap.pileSpacing || 3 * Dp;
       const eo = cap.edgeDistance || Dp;
-      const Rp = s / (2 * Math.sin(Math.PI / 5));
-      const Rcap = Rp + eo;
-      const facetDim = Math.round(2 * Rcap * Math.sin(Math.PI / 5));
+
+      let L = cap.capLength;
+      let B = cap.capWidth;
+      let facetDim: number | undefined = undefined;
+
+      if (count === 3) {
+        const dims3p = get3PileDimensionsMm(s, eo);
+        L = cap.capLength || dims3p.lengthMm;
+        B = cap.capWidth || dims3p.widthMm;
+      } else if (count === 5) {
+        L = cap.capLength || 2316;
+        B = cap.capWidth || 2399;
+        const Rp = s / (2 * Math.sin(Math.PI / 5));
+        const Rcap = Rp + eo;
+        facetDim = Math.round(2 * Rcap * Math.sin(Math.PI / 5));
+      } else if (count === 2) {
+        L = cap.capLength || s + 2 * eo;
+        B = cap.capWidth || Dp + 2 * eo;
+      } else {
+        L = cap.capLength || s + 2 * eo;
+        B = cap.capWidth || s + 2 * eo;
+      }
 
       typeMap.set(key, {
         typeId: `TYPE-${secNum}`,
-        typeName: `${count}-PILE ${shape}`,
+        typeName: count === 3 ? '3-PILE TRUNCATED TRAPEZOIDAL' : `${count}-PILE ${shape}`,
         cap,
         representativeColumn: col,
         associatedColumns: [col.label],
@@ -81,7 +147,7 @@ function computeUniquePileCapTypes(floorPlan: FloorPlanLevel): UniquePileCapType
         Dp,
         s,
         eo,
-        facetDim: shape === 'PENTAGONAL' ? (cap.capLength ? 1461 : facetDim) : undefined,
+        facetDim,
       });
     } else {
       typeMap.get(key)!.associatedColumns.push(col.label);
@@ -543,20 +609,13 @@ export class PdfExportService {
           doc.setDrawColor(129, 140, 248);
           doc.setLineWidth(0.6);
 
-          if (shape === 'TRIANGULAR') {
-            const Rp = (cap.pileSpacing / Math.sqrt(3) / 1000) * scale;
-            const eo = (cap.edgeDistance / 1000) * scale;
-            const topY = cy - (Rp + eo * 1.155);
-            const btmY = cy + (Rp / 2 + eo);
-            const halfB = (cap.pileSpacing / 2 / 1000) * scale + eo * 1.155;
-            const p1 = [cx, topY];
-            const p2 = [cx - halfB, btmY];
-            const p3 = [cx + halfB, btmY];
-            const triLines: [number, number][] = [
-              [p2[0] - p1[0], p2[1] - p1[1]],
-              [p3[0] - p2[0], p3[1] - p2[1]],
-            ];
-            doc.lines(triLines, p1[0], p1[1], [1, 1], 'FD', true);
+          const orientation = determineCapOrientation(col.x, col.z, bounds);
+
+          if (shape === 'TRIANGULAR' || count === 3) {
+            const polyMm = getTruncated3PilePolygonMm(cap.pileSpacing, cap.edgeDistance, orientation);
+            const pts: [number, number][] = polyMm.map((p) => [cx + (p.x / 1000) * scale, cy - (p.y / 1000) * scale]);
+            const lines: [number, number][] = pts.slice(1).map((pt, i) => [pt[0] - pts[i][0], pt[1] - pts[i][1]]);
+            doc.lines(lines, pts[0][0], pts[0][1], [1, 1], 'FD', true);
           } else if (shape === 'PENTAGONAL') {
             const Rp = (cap.pileSpacing / (2 * Math.sin(Math.PI / 5)) / 1000) * scale;
             const Rcap = Rp + (cap.edgeDistance / 1000) * scale;
@@ -580,16 +639,16 @@ export class PdfExportService {
             doc.rect(cx - capL / 2, cy - capW / 2, capL, capW, 'FD');
           }
 
-          if (cap.pileOffsets) {
-            doc.setFillColor(49, 46, 129);
-            doc.setDrawColor(192, 132, 252);
-            cap.pileOffsets.forEach((off) => {
-              const px = cx + (off.x / 1000) * scale;
-              const py = cy - (off.y / 1000) * scale;
-              const rPile = Math.max(1.2, (cap.pileDiameter / 2000) * scale);
-              doc.circle(px, py, rPile, 'FD');
-            });
-          }
+          const offsets = count === 3
+            ? getPileOffsetsMm(3, cap.pileSpacing, orientation)
+            : (cap.pileOffsets || getPileOffsetsMm(count, cap.pileSpacing));
+
+          offsets.forEach((off) => {
+            const px = cx + (off.x / 1000) * scale;
+            const py = cy - (off.y / 1000) * scale;
+            const rPile = Math.max(1.2, (cap.pileDiameter / 2000) * scale);
+            drawQuarterShadedPilePdf(doc, px, py, rPile, [129, 140, 248], [49, 46, 129]);
+          });
 
           if (showMemberLabels) {
             doc.setFont('helvetica', 'bold');
@@ -639,12 +698,7 @@ export class PdfExportService {
             const px = cx + (off.x / 1000) * scale;
             const py = cy - (oy / 1000) * scale;
             const rPile = Math.max(1.0, (grp.pileDiameter / 2000) * scale);
-            doc.setFillColor(fillR, fillG, fillB);
-            doc.setDrawColor(strokeR, strokeG, strokeB);
-            doc.circle(px, py, rPile, 'FD');
-            doc.setLineWidth(0.25);
-            doc.line(px - rPile, py, px + rPile, py);
-            doc.line(px, py - rPile, px, py + rPile);
+            drawQuarterShadedPilePdf(doc, px, py, rPile, [strokeR, strokeG, strokeB], [fillR, fillG, fillB]);
           });
 
           // Shear wall footprint — figure always visible, text hidden when showLiftCore=false
@@ -1016,7 +1070,12 @@ export class PdfExportService {
         // PCC
         doc.setDrawColor(37, 99, 235);
         doc.setLineWidth(0.35);
-        if (item.shape === 'PENTAGONAL') {
+        if (item.count === 3) {
+          const polyMm = getTruncated3PilePolygonMm(item.s, item.eo + 150, 'UP');
+          const pts: [number, number][] = polyMm.map((p) => [plCx + p.x * dScale, plCy - p.y * dScale]);
+          const lines: [number, number][] = pts.slice(1).map((pt, i) => [pt[0] - pts[i][0], pt[1] - pts[i][1]]);
+          doc.lines(lines, pts[0][0], pts[0][1], [1, 1], 'S', true);
+        } else if (item.shape === 'PENTAGONAL') {
           const Rp = (item.s * dScale) / (2 * Math.sin(Math.PI / 5));
           const Rcap = Rp + (item.eo + 150) * dScale;
           const cos18 = Math.cos(Math.PI / 10);
@@ -1046,7 +1105,12 @@ export class PdfExportService {
         doc.setFillColor(item.shape === 'COMBINED' ? 240 : 253, item.shape === 'COMBINED' ? 253 : 244, item.shape === 'COMBINED' ? 244 : 255);
         doc.setDrawColor(item.shape === 'COMBINED' ? 244 : 192, item.shape === 'COMBINED' ? 63 : 38, item.shape === 'COMBINED' ? 94 : 211);
         doc.setLineWidth(0.6);
-        if (item.shape === 'PENTAGONAL') {
+        if (item.count === 3) {
+          const polyMm = getTruncated3PilePolygonMm(item.s, item.eo, 'UP');
+          const pts: [number, number][] = polyMm.map((p) => [plCx + p.x * dScale, plCy - p.y * dScale]);
+          const lines: [number, number][] = pts.slice(1).map((pt, i) => [pt[0] - pts[i][0], pt[1] - pts[i][1]]);
+          doc.lines(lines, pts[0][0], pts[0][1], [1, 1], 'FD', true);
+        } else if (item.shape === 'PENTAGONAL') {
           const Rp = (item.s * dScale) / (2 * Math.sin(Math.PI / 5));
           const Rcap = Rp + item.eo * dScale;
           const cos18 = Math.cos(Math.PI / 10);
@@ -1070,34 +1134,45 @@ export class PdfExportService {
         }
 
         // Piles
-        doc.setFillColor(240, 253, 244);
-        doc.setDrawColor(22, 163, 74);
-        doc.setLineWidth(0.35);
-        const offsets = item.shape === 'COMBINED' && item.pileOffsets ? item.pileOffsets : ((item as any).cap?.pileOffsets || (item as any).offsets || []);
-        // For dynamic types, if pileOffsets missing, generate for RECTANGULAR 4-pile etc from web fallback
-        let pileOffsets = offsets;
-        if (!pileOffsets || pileOffsets.length === 0) {
-          if (item.count === 4) {
-            const off = 525;
-            pileOffsets = [{ x: -off, y: -off }, { x: off, y: -off }, { x: -off, y: off }, { x: off, y: off }];
-          } else if (item.shape === 'COMBINED') {
-            pileOffsets = item.pileOffsets || [];
-          }
-        }
+        const pileOffsets = item.count === 3
+          ? getPileOffsetsMm(3, item.s, 'UP')
+          : item.shape === 'COMBINED' && item.pileOffsets
+          ? item.pileOffsets
+          : ((item as any).cap?.pileOffsets || getPileOffsetsMm(item.count, item.s, 'UP'));
+
         pileOffsets.forEach((off: any) => {
-          const px = plCx + (off.x / 1000) * (dScale * 1000);
-          const py = plCy - (off.y / 1000) * (dScale * 1000);
-          const rP = (item.Dp / 2) * dScale;
-          doc.circle(px, py, rP, 'FD');
-          doc.line(px - rP - 0.4, py, px + rP + 0.4, py);
-          doc.line(px, py - rP - 0.4, px, py + rP + 0.4);
+          const px = plCx + off.x * dScale;
+          const py = plCy - off.y * dScale;
+          const rP = Math.max(1.0, (item.Dp / 2) * dScale);
+          drawQuarterShadedPilePdf(doc, px, py, rP, [22, 163, 74], [220, 252, 231]);
         });
 
         doc.setFillColor(202, 138, 4);
         doc.setDrawColor(234, 179, 8);
         doc.rect(plCx - 3.2, plCy - 3.2, 6.4, 6.4, 'FD');
 
-        if (item.shape === 'RECTANGULAR' || item.shape === 'COMBINED') {
+        if (item.count === 3) {
+          const dims3p = get3PileDimensionsMm(item.s, item.eo);
+          // Top Flat Apex Width
+          const topApexY = plCy - (dims3p.RpMm + item.eo) * dScale - 4.5;
+          const x1 = plCx - item.eo * dScale;
+          const x2 = plCx + item.eo * dScale;
+          drawHorizDim(x1, x2, topApexY, `${dims3p.apexWidthMm}`);
+
+          // Bottom Base Spacing Chain: eo | s | eo
+          const btmChainY = plCy + (dims3p.halfRpMm + item.eo) * dScale + 4.5;
+          const xLeft = plCx - (dims3p.lengthMm / 2) * dScale;
+          const xP1 = plCx - (item.s / 2) * dScale;
+          const xP2 = plCx + (item.s / 2) * dScale;
+          const xRight = plCx + (dims3p.lengthMm / 2) * dScale;
+          drawHorizDim(xLeft, xP1, btmChainY, `${Math.round(item.eo)}`);
+          drawHorizDim(xP1, xP2, btmChainY, `${item.s}`);
+          drawHorizDim(xP2, xRight, btmChainY, `${Math.round(item.eo)}`);
+
+          // Right Height Dimension
+          const rDimX = plCx + (dims3p.lengthMm / 2) * dScale + 4.5;
+          drawVertDim(rDimX, plCy - (dims3p.RpMm + item.eo) * dScale, plCy + (dims3p.halfRpMm + item.eo) * dScale, `${dims3p.widthMm}`);
+        } else if (item.shape === 'RECTANGULAR' || item.shape === 'COMBINED') {
           const topDimY = plCy - planH_mm / 2 - 4.5;
           doc.setDrawColor(220, 38, 38);
           doc.setLineWidth(0.15);
@@ -1125,13 +1200,19 @@ export class PdfExportService {
         doc.text(`PILE CAP ${item.typeId} - PLAN (SCALE 1:50)`, plCx, plCy + planH_mm / 2 + 6.5, { align: 'center' });
 
         // Cross-section elevation
+        const dims3p = item.count === 3 ? get3PileDimensionsMm(item.s, item.eo) : null;
+        const totalSecLength = item.count === 3 && dims3p ? dims3p.lengthMm : item.count === 2 ? item.s + 2 * item.eo : item.L;
         const secX = pBoxX + 66;
         const secY = subBoxY + 28;
         const secW = 54;
         const secH = 22;
+        const secScale = secW / totalSecLength;
+
+        // Column Stub
         doc.setFillColor(255, 255, 255);
         doc.setDrawColor(234, 179, 8);
         doc.rect(secX + secW / 2 - 4.5, secY - 9, 9, 9, 'FD');
+        // Column Links
         doc.setDrawColor(220, 38, 38);
         doc.line(secX + secW / 2 - 4.5, secY - 6.5, secX + secW / 2 + 4.5, secY - 6.5);
         doc.line(secX + secW / 2 - 4.5, secY - 3.5, secX + secW / 2 + 4.5, secY - 3.5);
@@ -1139,17 +1220,31 @@ export class PdfExportService {
         doc.setFontSize(3.8);
         doc.setTextColor(220, 38, 38);
         doc.text('LINKS', secX + secW / 2, secY - 4.5, { align: 'center' });
+
+        // Column starter bars with 90° horizontal hooks outward onto bottom mat
+        doc.setDrawColor(6, 182, 212);
+        doc.setLineWidth(0.45);
+        doc.line(secX + secW / 2 - 3.0, secY - 9, secX + secW / 2 - 3.0, secY + secH - 4);
+        doc.line(secX + secW / 2 - 3.0, secY + secH - 4, secX + secW / 2 - 7.5, secY + secH - 4);
+        doc.line(secX + secW / 2 + 3.0, secY - 9, secX + secW / 2 + 3.0, secY + secH - 4);
+        doc.line(secX + secW / 2 + 3.0, secY + secH - 4, secX + secW / 2 + 7.5, secY + secH - 4);
+
+        // Cap concrete
         doc.setFillColor(253, 244, 255);
         doc.setDrawColor(192, 38, 211);
         doc.setLineWidth(0.6);
         doc.rect(secX, secY, secW, secH, 'FD');
+
+        // PCC bedding
         doc.setFillColor(180, 83, 9);
         doc.setDrawColor(120, 53, 15);
         doc.rect(secX - 2.5, secY + secH, secW + 5, 3.5, 'FD');
+
+        // Piles
         doc.setFillColor(240, 253, 244);
         doc.setDrawColor(22, 163, 74);
-        const p1_x = secX + 11;
-        const p2_x = secX + secW - 11;
+        const p1_x = secX + item.eo * secScale;
+        const p2_x = secX + (item.eo + item.s) * secScale;
         doc.rect(p1_x - 4.5, secY + secH - 1, 9, 12, 'FD');
         doc.rect(p2_x - 4.5, secY + secH - 1, 9, 12, 'FD');
         if (item.shape === 'PENTAGONAL') {
@@ -1184,7 +1279,7 @@ export class PdfExportService {
         doc.line(secX, secY, secX, secTopDimY - 1);
         doc.line(secX + secW, secY, secX + secW, secTopDimY - 1);
         doc.setLineDashPattern([], 0);
-        drawHorizDim(secX, secX + secW, secTopDimY, `${item.L}`);
+        drawHorizDim(secX, secX + secW, secTopDimY, `${item.count === 3 && dims3p ? dims3p.lengthMm : item.L}`);
         const secRDimX = secX + secW + 4;
         doc.setLineDashPattern([0.8, 0.8], 0);
         doc.line(secX + secW, secY, secRDimX + 1, secY);

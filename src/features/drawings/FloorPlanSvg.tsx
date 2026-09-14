@@ -5,6 +5,15 @@ import { PileCapDesignOutput } from '@/features/design/pilecap/pileCapDesignEngi
 import { CombinedPileCapGroup } from '@/features/design/pilecap/combinedPileCapEngine';
 import { ArchitecturalStaircase } from '@/features/architectural/types/architecturalTypes';
 import { StaircasePlacementEngine } from '@/features/architectural/engines/staircasePlacementEngine';
+import {
+  CapOrientation,
+  getTruncated3PilePolygonMm,
+  get3PileDimensionsMm,
+  renderQuarteredPileSvg,
+  getSectionRebarPaths,
+  getPileOffsetsMm,
+  determineCapOrientation,
+} from '@/features/design/pilecap/pileCapGeometryUtils';
 import { Footprints, Move, RotateCw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface FloorPlanSvgProps {
@@ -165,20 +174,34 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
 
       if (!typeMap.has(key)) {
         const secNum = typeMap.size + 1;
-        const L = cap.capLength || (count === 5 ? 2316 : 1900);
-        const B = cap.capWidth || (count === 5 ? 2399 : 1900);
         const Dp = cap.pileDiameter || 350;
         const s = cap.pileSpacing || 3 * Dp;
         const eo = cap.edgeDistance || Dp;
+        let L = cap.capLength;
+        let B = cap.capWidth;
+        let facetDim: number | undefined = undefined;
 
-        // Calculate facet length for pentagon (e.g. 1461 mm)
-        const Rp = s / (2 * Math.sin(Math.PI / 5));
-        const Rcap = Rp + eo;
-        const facetDim = Math.round(2 * Rcap * Math.sin(Math.PI / 5));
+        if (count === 3) {
+          const dims3p = get3PileDimensionsMm(s, eo);
+          L = cap.capLength || dims3p.lengthMm;
+          B = cap.capWidth || dims3p.widthMm;
+        } else if (count === 5) {
+          L = cap.capLength || 2316;
+          B = cap.capWidth || 2399;
+          const Rp = s / (2 * Math.sin(Math.PI / 5));
+          const Rcap = Rp + eo;
+          facetDim = Math.round(2 * Rcap * Math.sin(Math.PI / 5));
+        } else if (count === 2) {
+          L = cap.capLength || s + 2 * eo;
+          B = cap.capWidth || Dp + 2 * eo;
+        } else {
+          L = cap.capLength || s + 2 * eo;
+          B = cap.capWidth || s + 2 * eo;
+        }
 
         typeMap.set(key, {
           typeId: `TYPE-${secNum}`,
-          typeName: `${count}-PILE ${shape}`,
+          typeName: count === 3 ? '3-PILE TRUNCATED TRAPEZOIDAL' : `${count}-PILE ${shape}`,
           cap,
           representativeColumn: col,
           associatedColumns: [col.label],
@@ -192,7 +215,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
           Dp,
           s,
           eo,
-          facetDim: shape === 'PENTAGONAL' ? (cap.capLength ? 1461 : facetDim) : undefined,
+          facetDim,
         });
       } else {
         typeMap.get(key)!.associatedColumns.push(col.label);
@@ -642,10 +665,26 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                 const capW = (cap.capWidth / 1000) * scale;
                 const count = cap.pileCount;
                 const shape = cap.capShape || (count === 3 ? 'TRIANGULAR' : count === 5 ? 'PENTAGONAL' : 'RECTANGULAR');
+                const orient = count === 3 ? determineCapOrientation(col.x, col.z, bounds) : 'UP';
 
                 return (
                   <g key={`pc_${col.columnSlNo}_${col.nodeId}`}>
-                    {shape === 'PENTAGONAL' ? (
+                    {count === 3 || shape === 'TRIANGULAR' ? (
+                      (() => {
+                        const pts = getTruncated3PilePolygonMm(cap.pileSpacing, cap.edgeDistance, orient, 0);
+                        const polyStr = pts.map((p) => `${cx + (p.x / 1000) * scale},${cy - (p.y / 1000) * scale}`).join(' ');
+                        return (
+                          <polygon
+                            points={polyStr}
+                            fill="#1e1b4b"
+                            fillOpacity="0.85"
+                            stroke="#818cf8"
+                            strokeWidth="1.8"
+                            strokeLinejoin="round"
+                          />
+                        );
+                      })()
+                    ) : shape === 'PENTAGONAL' ? (
                       (() => {
                         const Rp = ((cap.pileSpacing / (2 * Math.sin(Math.PI / 5))) / 1000) * scale;
                         const Rcap = Rp + (cap.edgeDistance / 1000) * scale;
@@ -682,24 +721,29 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                       />
                     )}
 
-                    {/* Bored Piles in Plan */}
-                    {cap.pileOffsets &&
-                      cap.pileOffsets.map((off, pIdx) => {
+                    {/* Bored Piles in Plan — Authentic Quarter-Shaded Symbols */}
+                    {(() => {
+                      const pileOffsets = count === 3
+                        ? getPileOffsetsMm(3, cap.pileSpacing, orient)
+                        : (cap.pileOffsets || getPileOffsetsMm(count, cap.pileSpacing, orient));
+                      const rPile = Math.max(3.5, (cap.pileDiameter / 2000) * scale);
+
+                      return pileOffsets.map((off, pIdx) => {
                         const px = cx + (off.x / 1000) * scale;
                         const py = cy - (off.y / 1000) * scale;
-                        const rPile = Math.max(3.5, (cap.pileDiameter / 2000) * scale);
+                        const pileSvg = renderQuarteredPileSvg(px, py, rPile, '#38bdf8', '#818cf8', 1.0);
+
                         return (
-                          <circle
-                            key={`p_${pIdx}`}
-                            cx={px}
-                            cy={py}
-                            r={rPile}
-                            fill="#312e81"
-                            stroke="#c084fc"
-                            strokeWidth="1.5"
-                          />
+                          <g key={`p_${pIdx}`}>
+                            <circle cx={px} cy={py} r={rPile} fill="#0f172a" stroke="#818cf8" strokeWidth="1.2" />
+                            <path d={pileSvg.shadedQuadrantPath} fill="#6366f1" stroke="#818cf8" strokeWidth="0.6" />
+                            {pileSvg.crosshairs.map((ch, cIdx) => (
+                              <line key={`pch_${cIdx}`} x1={ch.x1} y1={ch.y1} x2={ch.x2} y2={ch.y2} stroke="#a5b4fc" strokeWidth="0.7" />
+                            ))}
+                          </g>
                         );
-                      })}
+                      });
+                    })()}
 
                     {/* Pile Cap Text Badge — PC per pile count: 2P=PC1, 3P=PC2, 4P=PC3 */}
                     <text x={cx} y={cy - capW / 2 - 4} fill="#a5b4fc" fontSize="7.5" fontWeight="bold" textAnchor="middle">
@@ -767,16 +811,19 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                     rx="2"
                   />
 
-                  {/* Piles in plan view */}
+                  {/* Piles in plan view — Authentic Quarter-Shaded Symbols */}
                   {grp.pileOffsets.map((off, pIdx) => {
                     const px = cx + (off.x / 1000) * scale;
                     const py = cy - (off.z / 1000) * scale;
                     const rPile = Math.max(4, (grp.pileDiameter / 2000) * scale);
+                    const pileSvg = renderQuarteredPileSvg(px, py, rPile, pileColor, pileColor, 1.2);
                     return (
                       <g key={`cpc_pile_${pIdx}`}>
-                        <circle cx={px} cy={py} r={rPile} fill={capColor} stroke={pileColor} strokeWidth="1.8" />
-                        <line x1={px - rPile} y1={py} x2={px + rPile} y2={py} stroke={pileColor} strokeWidth="0.8" />
-                        <line x1={px} y1={py - rPile} x2={px} y2={py + rPile} stroke={pileColor} strokeWidth="0.8" />
+                        <circle cx={px} cy={py} r={rPile} fill={capColor} stroke={pileColor} strokeWidth="1.4" />
+                        <path d={pileSvg.shadedQuadrantPath} fill={pileColor} stroke={pileColor} strokeWidth="0.6" />
+                        {pileSvg.crosshairs.map((ch, cIdx) => (
+                          <line key={`cpch_${cIdx}`} x1={ch.x1} y1={ch.y1} x2={ch.x2} y2={ch.y2} stroke={textColor} strokeWidth="0.7" />
+                        ))}
                       </g>
                     );
                   })}
@@ -1695,7 +1742,10 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
               const planH_px = item.B * dScale;
 
               // Section Dimensions
-              const capW_px = Math.max(140, item.L * dScale);
+              const dims3p = item.count === 3 ? get3PileDimensionsMm(item.s, item.eo) : null;
+              const totalSecLengthMm = item.count === 3 && dims3p ? dims3p.lengthMm : item.count === 2 ? item.s + 2 * item.eo : item.L;
+              const capW_px = Math.max(140, totalSecLengthMm * dScale);
+              const secScale = capW_px / totalSecLengthMm;
               const capH_px = Math.max(70, item.D * dScale * 1.15);
               const secX = plCx - capW_px / 2;
               const secY = cardY + 295;
@@ -1712,28 +1762,33 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
 
               // Compute Plan Piles Points
               const planPilePoints = () => {
-                if (item.shape === 'PENTAGONAL') {
-                  const Rp = item.s / (2 * Math.sin(Math.PI / 5));
-                  const cos18 = Math.cos(Math.PI / 10);
-                  const sin18 = Math.sin(Math.PI / 10);
-                  const sin36 = Math.sin(Math.PI / 5);
-                  const cos36 = Math.cos(Math.PI / 5);
-                  return [
-                    { px: plCx, py: plCy - Rp * dScale },
-                    { px: plCx - Rp * cos18 * dScale, py: plCy - Rp * sin18 * dScale },
-                    { px: plCx - Rp * sin36 * dScale, py: plCy + Rp * cos36 * dScale },
-                    { px: plCx + Rp * sin36 * dScale, py: plCy + Rp * cos36 * dScale },
-                    { px: plCx + Rp * cos18 * dScale, py: plCy - Rp * sin18 * dScale },
-                  ];
-                } else {
-                  // 4 piles
-                  return [
-                    { px: plCx - (item.s / 2) * dScale, py: plCy - (item.s / 2) * dScale },
-                    { px: plCx + (item.s / 2) * dScale, py: plCy - (item.s / 2) * dScale },
-                    { px: plCx - (item.s / 2) * dScale, py: plCy + (item.s / 2) * dScale },
-                    { px: plCx + (item.s / 2) * dScale, py: plCy + (item.s / 2) * dScale },
-                  ];
+                if (item.count === 3) {
+                  const offsets = getPileOffsetsMm(3, item.s, 'UP');
+                  return offsets.map((p) => ({
+                    px: plCx + p.x * dScale,
+                    py: plCy - p.y * dScale,
+                  }));
                 }
+                if (item.shape === 'PENTAGONAL') {
+                  const offsets = getPileOffsetsMm(5, item.s, 'UP');
+                  return offsets.map((p) => ({
+                    px: plCx + p.x * dScale,
+                    py: plCy - p.y * dScale,
+                  }));
+                }
+                if (item.count === 2) {
+                  const offsets = getPileOffsetsMm(2, item.s, 'UP');
+                  return offsets.map((p) => ({
+                    px: plCx + p.x * dScale,
+                    py: plCy - p.y * dScale,
+                  }));
+                }
+                // 4 piles (default)
+                const offsets = getPileOffsetsMm(4, item.s, 'UP');
+                return offsets.map((p) => ({
+                  px: plCx + p.x * dScale,
+                  py: plCy - p.y * dScale,
+                }));
               };
 
               const pilesInPlan = planPilePoints();
@@ -1757,6 +1812,10 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
 
               // Compute Plan Polygon
               const getPolygon = (extraMm: number) => {
+                if (item.count === 3 || item.shape === 'TRIANGULAR') {
+                  const pts = getTruncated3PilePolygonMm(item.s, item.eo, 'UP', extraMm);
+                  return pts.map((p) => `${plCx + p.x * dScale},${plCy - p.y * dScale}`).join(' ');
+                }
                 if (item.shape === 'PENTAGONAL') {
                   const pts = pentagonVertices(extraMm);
                   return pts.map((p) => `${p.x},${p.y}`).join(' ');
@@ -1770,8 +1829,21 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
               const capPoly = getPolygon(0);
 
               // Section Piles X positions
-              const p1_secX = item.shape === 'PENTAGONAL' ? plCx - (item.s / 2) * 0.95 * dScale : plCx - (item.s / 2) * dScale;
-              const p2_secX = item.shape === 'PENTAGONAL' ? plCx + (item.s / 2) * 0.95 * dScale : plCx + (item.s / 2) * dScale;
+              const p1_secX = item.shape === 'PENTAGONAL' ? plCx - (item.s / 2) * 0.95 * dScale : secX + item.eo * secScale;
+              const p2_secX = item.shape === 'PENTAGONAL' ? plCx + (item.s / 2) * 0.95 * dScale : secX + (item.eo + item.s) * secScale;
+
+              // Section Rebar Paths
+              const rebarPaths = getSectionRebarPaths(
+                secX,
+                secY,
+                secW,
+                secH,
+                14,
+                10,
+                10,
+                colW_px,
+                plCx - colW_px / 2
+              );
 
               return (
                 <g key={item.typeId}>
@@ -1781,14 +1853,14 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                   {/* Card Header Banner */}
                   <rect x={cardX} y={cardY} width={cardW} height={22} fill="#0f172a" rx="3" />
                   <text x={cardX + 8} y={cardY + 15} fill="#a5b4fc" fontSize="9" fontWeight="bold">
-                    {item.typeId}: {item.typeName} ({item.shape === 'PENTAGONAL' ? `1461mm × 5 Sides × ${item.D}` : `${item.L}×${item.B}×${item.D}`} mm)
+                    {item.typeId}: {item.typeName} ({item.count === 3 && dims3p ? `${dims3p.lengthMm}×${dims3p.widthMm}×${item.D}` : item.shape === 'PENTAGONAL' ? `1461mm × 5 Sides × ${item.D}` : `${item.L}×${item.B}×${item.D}`} mm)
                   </text>
                   <text x={cardX + cardW - 8} y={cardY + 15} fill="#64748b" fontSize="7.5" textAnchor="end">
                     Cols: {item.associatedColumns.slice(0, 4).join(', ')}{item.associatedColumns.length > 4 ? '...' : ''}
                   </text>
 
                   {/* ---------------- A. PLAN VIEW (TOP HALF OF CARD) ---------------- */}
-                  {/* Section Cut Line (Across the Plan with Blue Indicator Arrows) */}
+                  {/* Section Cut Line */}
                   <line x1={plCx - planW_px / 2 - 28} y1={plCy} x2={plCx + planW_px / 2 + 28} y2={plCy} stroke="#6366f1" strokeWidth="0.8" strokeDasharray="5,3" />
                   <polygon points={`${plCx - planW_px / 2 - 28},${plCy - 4} ${plCx - planW_px / 2 - 35},${plCy} ${plCx - planW_px / 2 - 28},${plCy + 4}`} fill="#4f46e5" />
                   <polygon points={`${plCx + planW_px / 2 + 28},${plCy - 4} ${plCx + planW_px / 2 + 35},${plCy} ${plCx + planW_px / 2 + 28},${plCy + 4}`} fill="#4f46e5" />
@@ -1803,7 +1875,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                   <polygon points={pccPoly} fill="none" stroke="#2563eb" strokeWidth="1.3" />
 
                   {/* 2. Concrete Cap Perimeter (Magenta Line) */}
-                  <polygon points={capPoly} fill="#fdf4ff" fillOpacity="0.08" stroke="#c026d3" strokeWidth="2.0" />
+                  <polygon points={capPoly} fill="#fdf4ff" fillOpacity="0.08" stroke="#c026d3" strokeWidth="2.0" strokeLinejoin="round" />
 
                   {/* 3. Internal Rebar Mesh (Cyan Lines) */}
                   {[-25, 0, 25].map((dx, i) => (
@@ -1813,14 +1885,19 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                     <line key={`pmy_${i}`} x1={plCx - planW_px / 2 + 10} y1={plCy + dy} x2={plCx + planW_px / 2 - 10} y2={plCy + dy} stroke="#06b6d4" strokeWidth="0.8" strokeDasharray="2,2" />
                   ))}
 
-                  {/* 4. Bored Piles in Plan View (Green Circles with Center Crosshairs) */}
-                  {pilesInPlan.map((pt, pIdx) => (
-                    <g key={`dp_${item.typeId}_${pIdx}`}>
-                      <circle cx={pt.px} cy={pt.py} r={rPilePx} fill="#052e16" stroke="#22c55e" strokeWidth="1.6" />
-                      <line x1={pt.px - rPilePx - 2} y1={pt.py} x2={pt.px + rPilePx + 2} y2={pt.py} stroke="#22c55e" strokeWidth="0.8" strokeDasharray="1.5,1.5" />
-                      <line x1={pt.px} y1={pt.py - rPilePx - 2} x2={pt.px} y2={pt.py + rPilePx + 2} stroke="#22c55e" strokeWidth="0.8" strokeDasharray="1.5,1.5" />
-                    </g>
-                  ))}
+                  {/* 4. Bored Piles in Plan View (Authentic Quarter-Shaded AutoCAD Symbols) */}
+                  {pilesInPlan.map((pt, pIdx) => {
+                    const pileSvg = renderQuarteredPileSvg(pt.px, pt.py, rPilePx, '#38bdf8', '#818cf8', 1.2);
+                    return (
+                      <g key={`dp_${item.typeId}_${pIdx}`}>
+                        <circle cx={pt.px} cy={pt.py} r={rPilePx} fill="#0f172a" stroke="#818cf8" strokeWidth="1.4" />
+                        <path d={pileSvg.shadedQuadrantPath} fill="#6366f1" stroke="#818cf8" strokeWidth="0.6" />
+                        {pileSvg.crosshairs.map((ch, cIdx) => (
+                          <line key={`ch_${pIdx}_${cIdx}`} x1={ch.x1} y1={ch.y1} x2={ch.x2} y2={ch.y2} stroke="#a5b4fc" strokeWidth="0.8" />
+                        ))}
+                      </g>
+                    );
+                  })}
 
                   {/* 5. Center Column Pedestal (Golden Brown with Yellow Border) */}
                   <rect x={plCx - colW_px / 2} y={plCy - colH_px / 2} width={colW_px} height={colH_px} fill="#ca8a04" stroke="#eab308" strokeWidth="1.5" />
@@ -1829,9 +1906,56 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                   </text>
 
                   {/* ---------------- PLAN VIEW ALIGNED DIMENSIONS WITH ARROW LINES ---------------- */}
-                  {item.shape === 'RECTANGULAR' ? (
+                  {item.count === 3 && dims3p ? (
                     <g>
-                      {/* Top Horizontal Dimension: L = 1900 / 2500 (Spanning EXACT Edge to Edge of Concrete Cap) */}
+                      {/* Top Apex Width */}
+                      {(() => {
+                        const topY = plCy - (dims3p.RpMm + item.eo) * dScale - 18;
+                        const x1 = plCx - item.eo * dScale;
+                        const x2 = plCx + item.eo * dScale;
+                        return (
+                          <g>
+                            <line x1={x1} y1={topY + 12} x2={x1} y2={topY - 3} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                            <line x1={x2} y1={topY + 12} x2={x2} y2={topY - 3} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                            <line x1={x1} y1={topY} x2={x2} y2={topY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                            <rect x={plCx - 14} y={topY - 6} width={28} height={9} fill="#020617" rx="2" />
+                            <text x={plCx} y={topY + 1} fill="#f87171" fontSize="7.5" fontWeight="bold" textAnchor="middle">
+                              {dims3p.apexWidthMm}
+                            </text>
+                          </g>
+                        );
+                      })()}
+
+                      {/* Bottom Base Chain: eo | s | eo */}
+                      {(() => {
+                        const btmY = plCy + (dims3p.halfRpMm + item.eo) * dScale + 18;
+                        const xLeft = plCx - (dims3p.lengthMm / 2) * dScale;
+                        const xP1 = plCx - (item.s / 2) * dScale;
+                        const xP2 = plCx + (item.s / 2) * dScale;
+                        const xRight = plCx + (dims3p.lengthMm / 2) * dScale;
+                        return (
+                          <g>
+                            <line x1={xLeft} y1={btmY - 12} x2={xLeft} y2={btmY + 3} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                            <line x1={xRight} y1={btmY - 12} x2={xRight} y2={btmY + 3} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                            <line x1={xLeft} y1={btmY} x2={xP1} y2={btmY} stroke="#dc2626" strokeWidth="0.7" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                            <text x={(xLeft + xP1) / 2} y={btmY - 2} fill="#f87171" fontSize="6.5" fontWeight="bold" textAnchor="middle">
+                              {Math.round(item.eo)}
+                            </text>
+                            <line x1={xP1} y1={btmY} x2={xP2} y2={btmY} stroke="#dc2626" strokeWidth="0.7" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                            <text x={plCx} y={btmY - 2} fill="#f87171" fontSize="7" fontWeight="bold" textAnchor="middle">
+                              {item.s}
+                            </text>
+                            <line x1={xP2} y1={btmY} x2={xRight} y2={btmY} stroke="#dc2626" strokeWidth="0.7" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                            <text x={(xP2 + xRight) / 2} y={btmY - 2} fill="#f87171" fontSize="6.5" fontWeight="bold" textAnchor="middle">
+                              {Math.round(item.eo)}
+                            </text>
+                          </g>
+                        );
+                      })()}
+                    </g>
+                  ) : item.shape === 'RECTANGULAR' ? (
+                    <g>
+                      {/* Top Horizontal Dimension: L */}
                       {(() => {
                         const dimY = plCy - planH_px / 2 - 20;
                         const x1 = plCx - planW_px / 2;
@@ -1850,7 +1974,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                         );
                       })()}
 
-                      {/* Right Vertical Dimension: B = 1900 / 2500 (Spanning EXACT Edge to Edge of Concrete Cap) */}
+                      {/* Right Vertical Dimension: B */}
                       {(() => {
                         const dimX = plCx + planW_px / 2 + 20;
                         const y1 = plCy - planH_px / 2;
@@ -1870,7 +1994,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                       })()}
                     </g>
                   ) : (
-                    /* Pentagon 5 Aligned Facet Dimensions with Outward Extension Lines & Arrowheads */
+                    /* Pentagon 5 Aligned Facet Dimensions */
                     <g>
                       {(() => {
                         const pts = pentagonVertices(0);
@@ -1900,12 +2024,9 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
 
                           return (
                             <g key={`p_dim_${i}`}>
-                              {/* Extension Lines */}
                               <line x1={v1.x + nx * 2} y1={v1.y + ny * 2} x2={v1.x + nx * (off + 3)} y2={v1.y + ny * (off + 3)} stroke="#dc2626" strokeWidth="0.4" strokeDasharray="1,1" />
                               <line x1={v2.x + nx * 2} y1={v2.y + ny * 2} x2={v2.x + nx * (off + 3)} y2={v2.y + ny * (off + 3)} stroke="#dc2626" strokeWidth="0.4" strokeDasharray="1,1" />
-                              {/* Aligned Dimension Line with Arrowheads */}
                               <line x1={p1x} y1={p1y} x2={p2x} y2={p2y} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                              {/* Aligned Dimension Text with Knockout */}
                               <g transform={`translate(${midX}, ${midY}) rotate(${angleDeg})`}>
                                 <rect x="-14" y="-5" width="28" height="10" fill="#020617" rx="2" />
                                 <text x="0" y="2.5" fill="#f87171" fontSize="7.5" fontWeight="bold" textAnchor="middle">
@@ -1930,10 +2051,9 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                   {/* ---------------- B. SECTION ELEVATION (BOTTOM HALF OF CARD) ---------------- */}
                   {/* Column Stub with Starter Bars & Links */}
                   <rect x={plCx - colW_px / 2} y={secY - 36} width={colW_px} height={36} fill="#0f172a" stroke="#eab308" strokeWidth="1.4" />
-                  <line x1={plCx - 6} y1={secY - 34} x2={plCx - 6} y2={secY + secH - 8} stroke="#06b6d4" strokeWidth="1.6" />
-                  <line x1={plCx + 6} y1={secY - 34} x2={plCx + 6} y2={secY + secH - 8} stroke="#06b6d4" strokeWidth="1.6" />
-                  <line x1={plCx - 6} y1={secY + secH - 8} x2={plCx - 16} y2={secY + secH - 8} stroke="#06b6d4" strokeWidth="1.6" />
-                  <line x1={plCx + 6} y1={secY + secH - 8} x2={plCx + 16} y2={secY + secH - 8} stroke="#06b6d4" strokeWidth="1.6" />
+                  {/* Column starter bars hooking 90 deg into cap */}
+                  <path d={rebarPaths.columnStarterPaths[0]} fill="none" stroke="#06b6d4" strokeWidth="1.6" />
+                  <path d={rebarPaths.columnStarterPaths[1]} fill="none" stroke="#06b6d4" strokeWidth="1.6" />
 
                   {/* Column Links */}
                   {[secY - 26, secY - 16, secY - 6].map((ly, i) => (
@@ -1944,7 +2064,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                   </text>
 
                   {/* Concrete Cap Body (Magenta) */}
-                  <rect x={secX} y={secY} width={secW} height={secH} fill="#fdf4ff" fillOpacity="0.08" stroke="#c026d3" strokeWidth="2.0" />
+                  <rect x={secX} y={secY} width={secW} height={secH} fill="#fdf4ff" fillOpacity="0.08" stroke="#c026d3" strokeWidth="2.0" strokeLinejoin="round" />
 
                   {/* 150 THK PCC Bedding Layer (Brown) */}
                   <rect x={secX - 10} y={secY + secH} width={secW + 20} height={10} fill="#b45309" stroke="#78350f" strokeWidth="1" />
@@ -1964,24 +2084,19 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                   <line x1={p2_secX - rPilePx + 4} y1={secY + secH - 24} x2={p2_secX - rPilePx + 4} y2={secY + secH + 30} stroke="#22c55e" strokeWidth="1.4" />
                   <line x1={p2_secX + rPilePx - 4} y1={secY + secH - 24} x2={p2_secX + rPilePx - 4} y2={secY + secH + 30} stroke="#22c55e" strokeWidth="1.4" />
 
-                  {/* Bottom Main Rebar Mat (Red Line with Upward Hooks) */}
-                  <line x1={secX + 8} y1={secY + secH - 8} x2={secX + secW - 8} y2={secY + secH - 8} stroke="#dc2626" strokeWidth="2.2" />
-                  <line x1={secX + 8} y1={secY + secH - 8} x2={secX + 8} y2={secY + 22} stroke="#dc2626" strokeWidth="2.2" />
-                  <line x1={secX + secW - 8} y1={secY + secH - 8} x2={secX + secW - 8} y2={secY + 22} stroke="#dc2626" strokeWidth="2.2" />
+                  {/* Bottom Main Rebar Mat (Red Line with 90 deg Upward Hooks) */}
+                  <path d={rebarPaths.bottomMatPath} fill="none" stroke="#dc2626" strokeWidth="2.2" strokeLinejoin="round" />
 
-                  {/* Top Shrinkage Rebar Mat (Cyan Line with Downward Hooks) */}
-                  <line x1={secX + 8} y1={secY + 8} x2={secX + secW - 8} y2={secY + 8} stroke="#06b6d4" strokeWidth="1.8" />
-                  <line x1={secX + 8} y1={secY + 8} x2={secX + 8} y2={secY + 32} stroke="#06b6d4" strokeWidth="1.8" />
-                  <line x1={secX + secW - 8} y1={secY + 8} x2={secX + secW - 8} y2={secY + 32} stroke="#06b6d4" strokeWidth="1.8" />
+                  {/* Top Shrinkage Rebar Mat (Cyan Line with 90 deg Downward Hooks) */}
+                  <path d={rebarPaths.topMatPath} fill="none" stroke="#06b6d4" strokeWidth="1.8" strokeLinejoin="round" />
 
                   {/* Side Ties (Green Dots) */}
-                  <circle cx={secX + 8} cy={secY + 28} r={2.8} fill="#22c55e" />
-                  <circle cx={secX + 8} cy={secY + 48} r={2.8} fill="#22c55e" />
-                  <circle cx={secX + secW - 8} cy={secY + 28} r={2.8} fill="#22c55e" />
-                  <circle cx={secX + secW - 8} cy={secY + 48} r={2.8} fill="#22c55e" />
+                  {rebarPaths.sideTiePoints.map((spt, i) => (
+                    <circle key={`stp_${i}`} cx={spt.x} cy={spt.y} r="2.8" fill="#22c55e" />
+                  ))}
 
                   {/* ---------------- AUTOCAD ALIGNED DIMENSIONS ON CROSS-SECTION ---------------- */}
-                  {/* 1. Top Width Dimension: L = 1900 / 2500 (Placed ABOVE THE COLUMN) */}
+                  {/* 1. Top Width Dimension: L (Placed ABOVE THE COLUMN) */}
                   {(() => {
                     const topDimY = secY - 44;
                     return (
@@ -1991,13 +2106,13 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                         <line x1={secX} y1={topDimY} x2={secX + secW} y2={topDimY} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
                         <rect x={plCx - 18} y={topDimY - 8} width={36} height={10} fill="#020617" rx="2" />
                         <text x={plCx} y={topDimY - 1} fill="#f87171" fontSize="8" fontWeight="bold" textAnchor="middle">
-                          {item.L}
+                          {item.count === 3 && dims3p ? dims3p.lengthMm : item.L}
                         </text>
                       </g>
                     );
                   })()}
 
-                  {/* 2. Right Depth Dimension: D = 750 (with Extension Lines & CAD Arrows) */}
+                  {/* 2. Right Depth Dimension: D */}
                   {(() => {
                     const rDimX = secX + secW + 20;
                     return (
@@ -2013,12 +2128,11 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                     );
                   })()}
 
-                  {/* 3. Bottom Spacing Dimension Chain: eo | s | eo (with CAD Arrows) */}
+                  {/* 3. Bottom Spacing Dimension Chain: eo | s | eo */}
                   {(() => {
                     const btmDimY = secY + secH + 52;
                     return (
                       <g>
-                        {/* Extension Lines from edges and piles */}
                         <line x1={secX} y1={secY + secH} x2={secX} y2={btmDimY + 4} stroke="#dc2626" strokeWidth="0.4" strokeDasharray="1,1" />
                         <line x1={p1_secX} y1={secY + secH + 32} x2={p1_secX} y2={btmDimY + 4} stroke="#dc2626" strokeWidth="0.4" strokeDasharray="1,1" />
                         <line x1={p2_secX} y1={secY + secH + 32} x2={p2_secX} y2={btmDimY + 4} stroke="#dc2626" strokeWidth="0.4" strokeDasharray="1,1" />

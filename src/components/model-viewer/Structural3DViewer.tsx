@@ -10,6 +10,11 @@ import { GradeBeamDesignEngine } from '@/features/design/gradebeam/gradeBeamEngi
 import { PileCapDesignEngine } from '@/features/design/pilecap/pileCapDesignEngine';
 import { PileDesignEngine } from '@/features/design/pile/pileDesignEngine';
 import { CombinedPileCapEngine, CombinedPileCapGroup } from '@/features/design/pilecap/combinedPileCapEngine';
+import {
+  determineCapOrientation,
+  getTruncated3PilePolygonMm,
+  getPileOffsetsMm,
+} from '@/features/design/pilecap/pileCapGeometryUtils';
 import { StaircaseDesignEngine } from '@/features/design/staircase/staircaseEngine';
 import { Architectural3DLayer } from '@/features/architectural/3d/Architectural3DLayer';
 import { buildMemberReinforcement, createReinforcementShared, disposeReinforcementShared } from './Reinforcement3DRenderer';
@@ -1548,8 +1553,14 @@ export const Structural3DViewer: React.FC = () => {
           const pileRadius = (capResult.pileDiameter / 1000) / 2;
           const pileLength = 4.5;
 
+          const bounds = activeModel.boundingBox || { minX: -10, maxX: 10, minZ: -10, maxZ: 10 };
+          const orientation = determineCapOrientation(node.x, node.z, bounds);
+
           let pileOffsets: { x: number; z: number }[] = [];
-          if (capResult.pileOffsets && capResult.pileOffsets.length > 0) {
+          if (capResult.pileCount === 3 || capResult.capShape === 'TRIANGULAR') {
+            const offsetsMm = getPileOffsetsMm(3, capResult.pileSpacing, orientation);
+            pileOffsets = offsetsMm.map((p) => ({ x: p.x / 1000, z: -p.y / 1000 }));
+          } else if (capResult.pileOffsets && capResult.pileOffsets.length > 0) {
             pileOffsets = capResult.pileOffsets.map((p) => ({ x: p.x / 1000, z: -p.y / 1000 }));
           } else {
             const s_m = (3 * capResult.pileDiameter) / 1000;
@@ -1564,7 +1575,25 @@ export const Structural3DViewer: React.FC = () => {
           let capMesh: THREE.Mesh;
           let capLine: THREE.LineSegments;
 
-          if (capResult.pileCount === 5) {
+          if (capResult.pileCount === 3 || capResult.capShape === 'TRIANGULAR') {
+            const polyMm = getTruncated3PilePolygonMm(capResult.pileSpacing, capResult.edgeDistance, orientation);
+            const shape = new THREE.Shape();
+            polyMm.forEach((pt, idx) => {
+              if (idx === 0) shape.moveTo(pt.x / 1000, pt.y / 1000);
+              else shape.lineTo(pt.x / 1000, pt.y / 1000);
+            });
+            shape.closePath();
+            const capGeom = new THREE.ExtrudeGeometry(shape, { depth: capDepth, bevelEnabled: false });
+            capGeom.rotateX(-Math.PI / 2);
+            capGeom.translate(0, -capDepth, 0);
+
+            capMesh = new THREE.Mesh(capGeom, isSelected ? selectedPileCapMaterial : pileCapMaterial);
+            const capEdges = new THREE.EdgesGeometry(capGeom);
+            capLine = new THREE.LineSegments(
+              capEdges,
+              isSelected ? edgeSelectedPileCapMaterial : edgePileCapMaterial
+            );
+          } else if (capResult.pileCount === 5) {
             const Rp = (capResult.pileSpacing / 1000) / (2 * Math.sin(Math.PI / 5));
             const overhangM = (capResult.edgeDistance || 300) / 1000;
             const R = Rp + overhangM;

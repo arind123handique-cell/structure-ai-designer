@@ -1,44 +1,62 @@
 import React from 'react';
 import { PileCapDesignOutput } from './pileCapDesignEngine';
+import {
+  CapOrientation,
+  getTruncated3PilePolygonMm,
+  get3PileDimensionsMm,
+  renderQuarteredPileSvg,
+  getSectionRebarPaths,
+  getPileOffsetsMm,
+} from './pileCapGeometryUtils';
 
 interface PileCapDrawingSvgProps {
   pileCap: PileCapDesignOutput;
   width?: number;
   height?: number;
+  orientation?: CapOrientation;
 }
 
 export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
   pileCap,
-  width = 820,
-  height = 420,
+  width = 860,
+  height = 440,
+  orientation = 'UP',
 }) => {
-  const L = pileCap.capLength;
-  const B = pileCap.capWidth;
-  const D = pileCap.capDepth;
-  const Dp = pileCap.pileDiameter;
-  const count = pileCap.pileCount;
+  const L = pileCap.capLength || 1800;
+  const B = pileCap.capWidth || 1800;
+  const D = pileCap.capDepth || 750;
+  const Dp = pileCap.pileDiameter || 500;
+  const count = pileCap.pileCount || 4;
   const shape = pileCap.capShape || (count === 3 ? 'TRIANGULAR' : count === 5 ? 'PENTAGONAL' : 'RECTANGULAR');
   const s = pileCap.pileSpacing || 3 * Dp;
   const eo = pileCap.edgeDistance || Dp;
   const pccThk = 150; // 150mm THK PCC Bedding
 
   // Center of Plan View SVG
-  const cx = 155;
-  const cy = 155;
+  const cx = 175;
+  const cy = 165;
 
   // Dynamic Scale
-  const maxDim = Math.max(L, B, 2600);
-  const scale = 175 / maxDim;
+  const maxDim = Math.max(L, B, count === 3 ? s + 2 * eo : 2400);
+  const scale = 180 / maxDim;
 
   // Pile Radius in pixels
   const rPilePx = Math.max(12, (Dp / 2) * scale);
 
   // Column Size in pixels
-  const colW = Math.max(22, 450 * scale);
+  const colW = Math.max(24, 450 * scale);
   const colH = Math.max(26, 550 * scale);
 
-  // Scaled Pile Positions
+  // Scaled Pile Positions in Plan
   const getScaledPileOffsets = () => {
+    if (count === 3) {
+      const offsets = getPileOffsetsMm(3, s, orientation);
+      return offsets.map((p) => ({
+        px: cx + p.x * scale,
+        py: cy - p.y * scale,
+      }));
+    }
+
     if (pileCap.pileOffsets && pileCap.pileOffsets.length > 0) {
       return pileCap.pileOffsets.map((p) => ({
         px: cx + p.x * scale,
@@ -46,64 +64,23 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
       }));
     }
 
-    if (count === 3) {
-      const Rp = s / Math.sqrt(3);
-      return [
-        { px: cx, py: cy - Rp * scale },
-        { px: cx - (s / 2) * scale, py: cy + (Rp / 2) * scale },
-        { px: cx + (s / 2) * scale, py: cy + (Rp / 2) * scale },
-      ];
-    } else if (count === 5) {
-      const Rp = s / (2 * Math.sin(Math.PI / 5));
-      const cos18 = Math.cos(Math.PI / 10);
-      const sin18 = Math.sin(Math.PI / 10);
-      const sin36 = Math.sin(Math.PI / 5);
-      const cos36 = Math.cos(Math.PI / 5);
-      return [
-        { px: cx, py: cy - Rp * scale },
-        { px: cx - Rp * cos18 * scale, py: cy - Rp * sin18 * scale },
-        { px: cx - Rp * sin36 * scale, py: cy + Rp * cos36 * scale },
-        { px: cx + Rp * sin36 * scale, py: cy + Rp * cos36 * scale },
-        { px: cx + Rp * cos18 * scale, py: cy - Rp * sin18 * scale },
-      ];
-    } else if (count === 2) {
-      return [
-        { px: cx - (s / 2) * scale, py: cy },
-        { px: cx + (s / 2) * scale, py: cy },
-      ];
-    } else if (count === 4) {
-      return [
-        { px: cx - (s / 2) * scale, py: cy - (s / 2) * scale },
-        { px: cx + (s / 2) * scale, py: cy - (s / 2) * scale },
-        { px: cx - (s / 2) * scale, py: cy + (s / 2) * scale },
-        { px: cx + (s / 2) * scale, py: cy + (s / 2) * scale },
-      ];
-    } else {
-      return [
-        { px: cx - s * scale, py: cy - (s / 2) * scale },
-        { px: cx, py: cy - (s / 2) * scale },
-        { px: cx + s * scale, py: cy - (s / 2) * scale },
-        { px: cx - s * scale, py: cy + (s / 2) * scale },
-        { px: cx, py: cy + (s / 2) * scale },
-        { px: cx + s * scale, py: cy + (s / 2) * scale },
-      ];
-    }
+    const defaultOffsets = getPileOffsetsMm(count, s, orientation);
+    return defaultOffsets.map((p) => ({
+      px: cx + p.x * scale,
+      py: cy - p.y * scale,
+    }));
   };
 
   const pilePoints = getScaledPileOffsets();
 
-  // Compute Outer Polygon Points (offsetFactor: 1.0 for Cap, >1.0 for PCC, <1.0 for Rebar Cage)
-  const getCapPolygonPoints = (extraOffsetMm: number = 0) => {
-    if (shape === 'TRIANGULAR') {
-      const Rp = s / Math.sqrt(3);
-      const curEo = eo + extraOffsetMm;
-      const topY = cy - (Rp + curEo * 1.155) * scale;
-      const btmY = cy + (Rp / 2 + curEo) * scale;
-      const halfB = (s / 2 + curEo * 1.155) * scale;
-      return `${cx},${topY} ${cx - halfB},${btmY} ${cx + halfB},${btmY}`;
+  // Compute Outer Polygon Points for Plan
+  const getCapPolygonPoints = (extraOffsetMm = 0) => {
+    if (count === 3 || shape === 'TRIANGULAR') {
+      const pts = getTruncated3PilePolygonMm(s, eo, orientation, extraOffsetMm);
+      return pts.map((p) => `${cx + p.x * scale},${cy - p.y * scale}`).join(' ');
     }
 
-    if (shape === 'PENTAGONAL') {
+    if (count === 5 || shape === 'PENTAGONAL') {
       const Rp = s / (2 * Math.sin(Math.PI / 5));
       const Rcap = (Rp + eo + extraOffsetMm) * scale;
       const cos18 = Math.cos(Math.PI / 10);
@@ -119,8 +96,11 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
       return `${p1} ${p2} ${p3} ${p4} ${p5}`;
     }
 
-    const halfW = ((L + 2 * extraOffsetMm) / 2) * scale;
-    const halfH = ((B + 2 * extraOffsetMm) / 2) * scale;
+    // Rectangular / Square (2-pile, 4-pile, 6-pile)
+    const curL = count === 2 ? s + 2 * (eo + extraOffsetMm) : L + 2 * extraOffsetMm;
+    const curB = count === 2 ? Dp + 2 * (eo + extraOffsetMm) : B + 2 * extraOffsetMm;
+    const halfW = (curL / 2) * scale;
+    const halfH = (curB / 2) * scale;
     return `${cx - halfW},${cy - halfH} ${cx + halfW},${cy - halfH} ${cx + halfW},${cy + halfH} ${cx - halfW},${cy + halfH}`;
   };
 
@@ -128,283 +108,651 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
   const pccPolygon = getCapPolygonPoints(pccThk);
   const rebarPolygon = getCapPolygonPoints(-60); // 60mm clear cover
 
-  const botRebarText = pileCap.rebarCalloutX ? pileCap.rebarCalloutX.split(' (')[0] : 'T16@150 C/C (B)';
-  const topRebarText = pileCap.topRebarCallout ? pileCap.topRebarCallout.split(' (')[0] : 'T12@100 C/C (T)';
-  const sideRebarText = '3-T10';
+  // Rebar Callouts
+  const botRebarText = pileCap.rebarCalloutX
+    ? pileCap.rebarCalloutX.split(' (')[0]
+    : `T${pileCap.bottomBarDia || 16}@${pileCap.bottomBarSpacing || 125} C/C (B)`;
+  const topRebarText = pileCap.topRebarCallout
+    ? pileCap.topRebarCallout.split(' (')[0]
+    : `T${pileCap.topBarDia || 12}@${pileCap.topBarSpacing || 150} C/C (T)`;
+  const sideRebarText = pileCap.sideFaceRebarCallout
+    ? pileCap.sideFaceRebarCallout.split(' (')[0]
+    : `${pileCap.numSideLayers || 2}-T${pileCap.sideBarDia || 12}`;
+
+  // 3-pile cap geometric details
+  const dims3p = count === 3 ? get3PileDimensionsMm(s, eo) : null;
+
+  // ---------------------------------------------------------------------------
+  // SECTION 1-1 GEOMETRY & COORDINATES
+  // ---------------------------------------------------------------------------
+  const secBaseX = 430;
+  const secBaseY = 30;
+  const secCapW = Math.max(220, Math.min(320, (count === 3 ? dims3p!.lengthMm : L) * scale * 1.05));
+  const secCapH = Math.max(80, Math.min(130, D * scale * 1.25));
+  const secCapX = secBaseX + 60;
+  const secCapY = secBaseY + 95;
+
+  const secColW = Math.max(36, 450 * scale);
+  const secColH = 65;
+  const secColX = secCapX + (secCapW - secColW) / 2;
+  const secColY = secCapY - secColH;
+
+  // Pile positions in Section cut
+  const totalLengthMm = count === 3 ? dims3p!.lengthMm : count === 2 ? s + 2 * eo : L;
+  const secScale = secCapW / totalLengthMm;
+  const secPile1X = secCapX + eo * secScale;
+  const secPile2X = secCapX + (eo + s) * secScale;
+
+  // Rebar Paths for Section
+  const rebarPaths = getSectionRebarPaths(
+    secCapX,
+    secCapY,
+    secCapW,
+    secCapH,
+    14, // scaled cover bottom
+    10, // scaled cover top
+    12, // scaled cover side
+    secColW,
+    secColX
+  );
 
   return (
-    <div className="flex flex-col items-center bg-white p-4 rounded-lg border border-slate-300 shadow-xl overflow-x-auto font-sans text-slate-800">
+    <div className="flex flex-col items-center bg-white p-4 rounded-xl border border-slate-300 shadow-xl overflow-x-auto font-sans text-slate-800">
       {/* Top Title Bar */}
-      <div className="flex items-center justify-between w-full mb-1 px-2 text-xs font-mono font-bold text-slate-700">
-        <span className="text-sky-700">
-          PILE CAP PC-{pileCap.supportNodeId} ({count}-PILE {shape}) — CAD DETAILING
+      <div className="flex items-center justify-between w-full mb-2 px-2 text-xs font-mono font-bold text-slate-700">
+        <span className="text-sky-700 flex items-center gap-2">
+          <span className="px-2 py-0.5 bg-sky-100 text-sky-800 rounded border border-sky-300">
+            PC-{pileCap.supportNodeId}
+          </span>
+          <span>
+            {count}-PILE {count === 3 ? 'TRUNCATED TRAPEZOIDAL' : shape} PILE CAP ({count === 3 ? `${dims3p!.lengthMm}×${dims3p!.widthMm}×${D}` : `${L}×${B}×${D}`} mm)
+          </span>
         </span>
-        <span className="text-slate-500 font-normal">IS 2911 (Part 1/Sec 2) &amp; SP:34 Standard</span>
+        <span className="text-slate-500 font-normal">
+          IS 2911:2010 (Part 1/Sec 2) &amp; SP:34 Architectural Detailing
+        </span>
       </div>
 
-      <svg width={width} height={height} viewBox="0 0 820 400" className="select-none text-xs">
-        {/* Definitions for Markers */}
+      <svg width={width} height={height} viewBox="0 0 860 430" className="select-none text-xs">
         <defs>
           <marker id="tick-45" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6">
-            <line x1="2" y1="8" x2="8" y2="2" stroke="#dc2626" strokeWidth="1.5" />
+            <line x1="2" y1="8" x2="8" y2="2" stroke="#dc2626" strokeWidth="1.6" />
           </marker>
-          <marker id="tick-45-slate" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6">
-            <line x1="2" y1="8" x2="8" y2="2" stroke="#64748b" strokeWidth="1.5" />
+          <marker id="cad-arrow" viewBox="0 0 12 6" refX="12" refY="3" markerWidth="7" markerHeight="4" orient="auto">
+            <path d="M 0 0 L 12 3 L 0 6 z" fill="#dc2626" />
+          </marker>
+          <marker id="cad-arrow-start" viewBox="0 0 12 6" refX="0" refY="3" markerWidth="7" markerHeight="4" orient="auto">
+            <path d="M 12 0 L 0 3 L 12 6 z" fill="#dc2626" />
+          </marker>
+          <marker id="cad-leader-arrow" viewBox="0 0 10 6" refX="0" refY="3" markerWidth="6" markerHeight="4" orient="auto-start-reverse">
+            <polygon points="0 3, 10 0, 10 6" fill="#dc2626" />
           </marker>
         </defs>
 
-        {/* ------------------------------------------------------------------------- */}
+        {/* ========================================================================= */}
         {/* 1. PLAN VIEW (LEFT)                                                      */}
-        {/* ------------------------------------------------------------------------- */}
-        <g transform="translate(15, 10)">
-          {/* Section Cut Line 1-1 / 2-2 */}
-          <line x1="20" y1={cy} x2="290" y2={cy} stroke="#6366f1" strokeWidth="0.9" strokeDasharray="6,3" />
-          <polygon points="20,150 10,155 20,160" fill="#4f46e5" />
-          <polygon points="290,150 300,155 290,160" fill="#4f46e5" />
-          <text x="8" y="145" fill="#4f46e5" fontSize="10" fontWeight="bold">
+        {/* ========================================================================= */}
+        <g transform="translate(10, 10)">
+          {/* Section Cut Line 1-1 */}
+          <line x1="20" y1={cy} x2="330" y2={cy} stroke="#4f46e5" strokeWidth="1.2" strokeDasharray="8,4" />
+          <polygon points="20,158 10,165 20,172" fill="#4f46e5" />
+          <polygon points="330,158 340,165 330,172" fill="#4f46e5" />
+          <circle cx="8" cy="165" r="8" fill="#e0e7ff" stroke="#4f46e5" strokeWidth="1.2" />
+          <text x="8" y="168.5" fill="#4f46e5" fontSize="9" fontWeight="bold" textAnchor="middle">
             1
           </text>
-          <text x="302" y="145" fill="#4f46e5" fontSize="10" fontWeight="bold">
+          <circle cx="342" cy="165" r="8" fill="#e0e7ff" stroke="#4f46e5" strokeWidth="1.2" />
+          <text x="342" y="168.5" fill="#4f46e5" fontSize="9" fontWeight="bold" textAnchor="middle">
             1
           </text>
 
           {/* 1. 150 THK PCC Bedding Boundary (Blue Line) */}
-          <polygon points={pccPolygon} fill="none" stroke="#2563eb" strokeWidth="1.4" />
+          <polygon points={pccPolygon} fill="none" stroke="#2563eb" strokeWidth="1.5" />
 
           {/* 2. Cap Concrete Perimeter (Magenta Line) */}
-          <polygon points={capPolygon} fill="#fdf4ff" fillOpacity="0.6" stroke="#c026d3" strokeWidth="2.0" />
+          <polygon points={capPolygon} fill="#fdf4ff" fillOpacity="0.8" stroke="#c026d3" strokeWidth="2.2" strokeLinejoin="round" />
 
-          {/* 3. Rebar Cage Outline / Mesh (Cyan Line) */}
-          <polygon points={rebarPolygon} fill="none" stroke="#06b6d4" strokeWidth="1.2" strokeDasharray="3,3" />
+          {/* 3. Rebar Cage Outline (Cyan Dashed) */}
+          <polygon points={rebarPolygon} fill="none" stroke="#06b6d4" strokeWidth="1.1" strokeDasharray="3,3" />
 
-          {/* Internal Rebar Grid Mesh */}
-          {[-45, -15, 15, 45].map((dx, i) => (
+          {/* Rebar Grid Lines inside Plan */}
+          {[-30, 0, 30].map((dx, i) => (
             <line
-              key={`rx_${i}`}
+              key={`pgx_${i}`}
               x1={cx + dx}
-              y1={cy - (B / 2.4) * scale}
+              y1={cy - 50}
               x2={cx + dx}
-              y2={cy + (B / 2.4) * scale}
+              y2={cy + 50}
               stroke="#06b6d4"
-              strokeWidth="0.9"
-              strokeOpacity="0.75"
+              strokeWidth="0.8"
+              strokeOpacity="0.6"
+              strokeDasharray="2,2"
             />
           ))}
-          {[-45, -15, 15, 45].map((dy, i) => (
+          {[-30, 0, 30].map((dy, i) => (
             <line
-              key={`ry_${i}`}
-              x1={cx - (L / 2.4) * scale}
+              key={`pgy_${i}`}
+              x1={cx - 50}
               y1={cy + dy}
-              x2={cx + (L / 2.4) * scale}
+              x2={cx + 50}
               y2={cy + dy}
               stroke="#06b6d4"
-              strokeWidth="0.9"
-              strokeOpacity="0.75"
+              strokeWidth="0.8"
+              strokeOpacity="0.6"
+              strokeDasharray="2,2"
             />
           ))}
 
-          {/* 4. Bored Piles in Plan View (Bright Green Circles with Center Cross) */}
-          {pilePoints.map((pt, idx) => (
-            <g key={`pile_${idx}`}>
-              <circle cx={pt.px} cy={pt.py} r={rPilePx} fill="#f0fdf4" stroke="#16a34a" strokeWidth="1.8" />
-              <line x1={pt.px - rPilePx - 2} y1={pt.py} x2={pt.px + rPilePx + 2} y2={pt.py} stroke="#16a34a" strokeWidth="0.8" strokeDasharray="2,2" />
-              <line x1={pt.px} y1={pt.py - rPilePx - 2} x2={pt.px} y2={pt.py + rPilePx + 2} stroke="#16a34a" strokeWidth="0.8" strokeDasharray="2,2" />
-            </g>
-          ))}
+          {/* 4. Bored Piles in Plan (AUTHENTIC QUARTER-SHADED AutoCAD Symbols) */}
+          {pilePoints.map((pt, idx) => {
+            const pileSvg = renderQuarteredPileSvg(pt.px, pt.py, rPilePx, '#1d4ed8', '#1e3a8a', 1.4);
+            return (
+              <g key={`p_sym_${idx}`}>
+                {/* Outer white disc with stroke */}
+                <circle cx={pt.px} cy={pt.py} r={rPilePx} fill="#ffffff" stroke="#1e3a8a" strokeWidth="1.5" />
+                {/* Opposite Shaded Quadrants (Quadrant 1 & Quadrant 3) */}
+                <path d={pileSvg.shadedQuadrantPath} fill="#2563eb" stroke="#1e3a8a" strokeWidth="0.8" />
+                {/* Crosshairs extending through center */}
+                {pileSvg.crosshairs.map((ch, cIdx) => (
+                  <line
+                    key={`ch_${idx}_${cIdx}`}
+                    x1={ch.x1}
+                    y1={ch.y1}
+                    x2={ch.x2}
+                    y2={ch.y2}
+                    stroke="#1e3a8a"
+                    strokeWidth="1.0"
+                  />
+                ))}
+              </g>
+            );
+          })}
 
-          {/* 5. Center Column Pedestal (Golden Brown with Yellow Border) */}
+          {/* 5. Center Column Pedestal (Golden Brown with Yellow Border & Centerlines) */}
           <rect
             x={cx - colW / 2}
             y={cy - colH / 2}
             width={colW}
             height={colH}
             fill="#ca8a04"
-            fillOpacity="0.75"
+            fillOpacity="0.8"
             stroke="#eab308"
-            strokeWidth="1.5"
+            strokeWidth="1.6"
           />
+          {/* Column Center Crosshairs */}
+          <line x1={cx - colW / 2 - 8} y1={cy} x2={cx + colW / 2 + 8} y2={cy} stroke="#ca8a04" strokeWidth="0.8" strokeDasharray="3,2" />
+          <line x1={cx} y1={cy - colH / 2 - 8} x2={cx} y2={cy + colH / 2 + 8} stroke="#ca8a04" strokeWidth="0.8" strokeDasharray="3,2" />
+          <text x={cx} y={cy + 3.5} fill="#fef08a" fontSize="8" fontWeight="bold" textAnchor="middle">
+            COL
+          </text>
 
-          {/* 6. Dimension Lines (Along Top & Right Edges with Red Ticks) */}
-          {shape === 'RECTANGULAR' ? (
+          {/* ======================================================================= */}
+          {/* PLAN VIEW MULTI-TIERED RED CAD DIMENSION CHAINS                        */}
+          {/* ======================================================================= */}
+          {count === 3 && dims3p ? (
             <g>
-              {/* Top Width Dimension: L */}
-              <line x1={cx - (L / 2) * scale} y1="35" x2={cx + (L / 2) * scale} y2="35" stroke="#dc2626" strokeWidth="0.9" markerStart="url(#tick-45)" markerEnd="url(#tick-45)" />
-              <line x1={cx - (L / 2) * scale} y1="30" x2={cx - (L / 2) * scale} y2={cy - (B / 2) * scale} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
-              <line x1={cx + (L / 2) * scale} y1="30" x2={cx + (L / 2) * scale} y2={cy - (B / 2) * scale} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
-              <text x={cx} y="30" fill="#dc2626" fontSize="9" fontWeight="bold" textAnchor="middle">
-                {L}
-              </text>
+              {/* 1. Top Flat Apex Width: 2 * eo (e.g. 900) */}
+              {(() => {
+                const topY = cy - (dims3p.RpMm + eo) * scale - 20;
+                const x1 = cx - eo * scale;
+                const x2 = cx + eo * scale;
+                const yEdge = cy - (dims3p.RpMm + eo) * scale;
+                return (
+                  <g>
+                    <line x1={x1} y1={yEdge} x2={x1} y2={topY - 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                    <line x1={x2} y1={yEdge} x2={x2} y2={topY - 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                    <line x1={x1} y1={topY} x2={x2} y2={topY} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <rect x={cx - 16} y={topY - 7} width={32} height={10} fill="#ffffff" rx="2" />
+                    <text x={cx} y={topY} fill="#dc2626" fontSize="8" fontWeight="bold" textAnchor="middle">
+                      {dims3p.apexWidthMm}
+                    </text>
+                  </g>
+                );
+              })()}
 
-              {/* Right Height Dimension: B */}
-              <line x1="275" y1={cy - (B / 2) * scale} x2="275" y2={cy + (B / 2) * scale} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#tick-45)" markerEnd="url(#tick-45)" />
-              <line x1={cx + (L / 2) * scale} y1={cy - (B / 2) * scale} x2="280" y2={cy - (B / 2) * scale} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
-              <line x1={cx + (L / 2) * scale} y1={cy + (B / 2) * scale} x2="280" y2={cy + (B / 2) * scale} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
-              <text x="290" y={cy + 3} fill="#dc2626" fontSize="9" fontWeight="bold" textAnchor="start">
-                {B}
+              {/* 2. Bottom Base Spacing Chain: eo | s | eo and Overall Base Width */}
+              {(() => {
+                const btmDimY1 = cy + (dims3p.halfRpMm + eo) * scale + 20;
+                const btmDimY2 = cy + (dims3p.halfRpMm + eo) * scale + 38;
+                const halfBaseW = (dims3p.lengthMm / 2) * scale;
+                const xLeft = cx - halfBaseW;
+                const xP1 = cx - (s / 2) * scale;
+                const xP2 = cx + (s / 2) * scale;
+                const xRight = cx + halfBaseW;
+                const yEdge = cy + (dims3p.halfRpMm + eo) * scale;
+
+                return (
+                  <g>
+                    {/* Extension lines */}
+                    <line x1={xLeft} y1={yEdge} x2={xLeft} y2={btmDimY2 + 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                    <line x1={xP1} y1={yEdge - eo * scale} x2={xP1} y2={btmDimY1 + 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                    <line x1={xP2} y1={yEdge - eo * scale} x2={xP2} y2={btmDimY1 + 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                    <line x1={xRight} y1={yEdge} x2={xRight} y2={btmDimY2 + 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+
+                    {/* Tier 1: eo | s | eo */}
+                    <line x1={xLeft} y1={btmDimY1} x2={xP1} y2={btmDimY1} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <text x={(xLeft + xP1) / 2} y={btmDimY1 - 2} fill="#dc2626" fontSize="7" fontWeight="bold" textAnchor="middle">
+                      {Math.round(eo)}
+                    </text>
+
+                    <line x1={xP1} y1={btmDimY1} x2={xP2} y2={btmDimY1} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <text x={cx} y={btmDimY1 - 2} fill="#dc2626" fontSize="7.5" fontWeight="bold" textAnchor="middle">
+                      {s}
+                    </text>
+
+                    <line x1={xP2} y1={btmDimY1} x2={xRight} y2={btmDimY1} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <text x={(xP2 + xRight) / 2} y={btmDimY1 - 2} fill="#dc2626" fontSize="7" fontWeight="bold" textAnchor="middle">
+                      {Math.round(eo)}
+                    </text>
+
+                    {/* Tier 2: Overall Base Width (dims3p.lengthMm) */}
+                    <line x1={xLeft} y1={btmDimY2} x2={xRight} y2={btmDimY2} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <rect x={cx - 18} y={btmDimY2 - 6} width={36} height={10} fill="#ffffff" rx="2" />
+                    <text x={cx} y={btmDimY2 + 1.5} fill="#dc2626" fontSize="8" fontWeight="bold" textAnchor="middle">
+                      {dims3p.lengthMm}
+                    </text>
+                  </g>
+                );
+              })()}
+
+              {/* 3. Right Vertical Dimension Chain: Top to Apex Pile (eo) | Apex to Col (Rp) | Col to Base (Rp/2) | Base to Bottom (eo) */}
+              {(() => {
+                const dimX = cx + (dims3p.lengthMm / 2) * scale + 24;
+                const yTop = cy - (dims3p.RpMm + eo) * scale;
+                const yP_apex = cy - dims3p.RpMm * scale;
+                const yCol = cy;
+                const yP_base = cy + dims3p.halfRpMm * scale;
+                const yBtm = cy + (dims3p.halfRpMm + eo) * scale;
+
+                return (
+                  <g>
+                    {/* Horizontal Extension Lines */}
+                    <line x1={cx + eo * scale} y1={yTop} x2={dimX + 24} y2={yTop} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                    <line x1={cx} y1={yP_apex} x2={dimX + 4} y2={yP_apex} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                    <line x1={cx} y1={yCol} x2={dimX + 4} y2={yCol} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                    <line x1={cx + (s / 2) * scale} y1={yP_base} x2={dimX + 4} y2={yP_base} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                    <line x1={cx + (dims3p.lengthMm / 2) * scale} y1={yBtm} x2={dimX + 24} y2={yBtm} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+
+                    {/* Chain 1: yTop -> yP_apex (eo) */}
+                    <line x1={dimX} y1={yTop} x2={dimX} y2={yP_apex} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <text x={dimX + 4} y={(yTop + yP_apex) / 2 + 2.5} fill="#dc2626" fontSize="6.5" fontWeight="bold">
+                      {Math.round(eo)}
+                    </text>
+
+                    {/* Chain 2: yP_apex -> yCol (Rp) */}
+                    <line x1={dimX} y1={yP_apex} x2={dimX} y2={yCol} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <text x={dimX + 4} y={(yP_apex + yCol) / 2 + 2.5} fill="#dc2626" fontSize="6.5" fontWeight="bold">
+                      {dims3p.RpMm}
+                    </text>
+
+                    {/* Chain 3: yCol -> yP_base (halfRp) */}
+                    <line x1={dimX} y1={yCol} x2={dimX} y2={yP_base} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <text x={dimX + 4} y={(yCol + yP_base) / 2 + 2.5} fill="#dc2626" fontSize="6.5" fontWeight="bold">
+                      {dims3p.halfRpMm}
+                    </text>
+
+                    {/* Chain 4: yP_base -> yBtm (eo) */}
+                    <line x1={dimX} y1={yP_base} x2={dimX} y2={yBtm} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <text x={dimX + 4} y={(yP_base + yBtm) / 2 + 2.5} fill="#dc2626" fontSize="6.5" fontWeight="bold">
+                      {Math.round(eo)}
+                    </text>
+
+                    {/* Overall Height (dims3p.widthMm) */}
+                    <line x1={dimX + 18} y1={yTop} x2={dimX + 18} y2={yBtm} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <rect x={dimX + 13} y={cy - 6} width={26} height={10} fill="#ffffff" rx="2" />
+                    <text x={dimX + 22} y={cy + 2} fill="#dc2626" fontSize="8" fontWeight="bold">
+                      {dims3p.widthMm}
+                    </text>
+                  </g>
+                );
+              })()}
+
+              {/* 4. Diagonal Chamfer Dimension along Slanted Edge (e.g. 1851) */}
+              <text
+                x={cx - (dims3p.lengthMm / 4) * scale - 22}
+                y={cy - 12}
+                fill="#dc2626"
+                fontSize="7.5"
+                fontWeight="bold"
+                transform={`rotate(-56 ${cx - (dims3p.lengthMm / 4) * scale - 22} ${cy - 12})`}
+              >
+                {dims3p.diagonalChamferMm}
               </text>
             </g>
           ) : (
+            /* Rectangular 2-Pile / 4-Pile / 6-Pile Dimensions */
             <g>
-              {/* Pentagon/Triangle Facet Dimension */}
-              <text x={cx} y="28" fill="#dc2626" fontSize="8.5" fontWeight="bold" textAnchor="middle">
-                s = {s} mm c/c • eo = {eo} mm
-              </text>
+              {/* Top Width Dimension: L */}
+              {(() => {
+                const topY = cy - (B / 2) * scale - 22;
+                const x1 = cx - (L / 2) * scale;
+                const x2 = cx + (L / 2) * scale;
+                const yEdge = cy - (B / 2) * scale;
+                return (
+                  <g>
+                    <line x1={x1} y1={yEdge} x2={x1} y2={topY - 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                    <line x1={x2} y1={yEdge} x2={x2} y2={topY - 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                    <line x1={x1} y1={topY} x2={x2} y2={topY} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <rect x={cx - 18} y={topY - 7} width={36} height={10} fill="#ffffff" rx="2" />
+                    <text x={cx} y={topY} fill="#dc2626" fontSize="8.5" fontWeight="bold" textAnchor="middle">
+                      {L}
+                    </text>
+                  </g>
+                );
+              })()}
+
+              {/* Right Height Dimension: B */}
+              {(() => {
+                const rightX = cx + (L / 2) * scale + 24;
+                const y1 = cy - (B / 2) * scale;
+                const y2 = cy + (B / 2) * scale;
+                const xEdge = cx + (L / 2) * scale;
+                return (
+                  <g>
+                    <line x1={xEdge} y1={y1} x2={rightX + 4} y2={y1} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                    <line x1={xEdge} y1={y2} x2={rightX + 4} y2={y2} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                    <line x1={rightX} y1={y1} x2={rightX} y2={y2} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <rect x={rightX - 16} y={cy - 5} width={32} height={10} fill="#ffffff" rx="2" />
+                    <text x={rightX} y={cy + 2.5} fill="#dc2626" fontSize="8.5" fontWeight="bold" textAnchor="middle">
+                      {B}
+                    </text>
+                  </g>
+                );
+              })()}
+
+              {/* Bottom Internal Spacing Chain: eo | s | eo */}
+              {(() => {
+                const btmY = cy + (B / 2) * scale + 20;
+                const x1 = cx - (L / 2) * scale;
+                const xP1 = cx - (s / 2) * scale;
+                const xP2 = cx + (s / 2) * scale;
+                const x2 = cx + (L / 2) * scale;
+                return (
+                  <g>
+                    <line x1={x1} y1={btmY} x2={xP1} y2={btmY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <text x={(x1 + xP1) / 2} y={btmY - 2} fill="#dc2626" fontSize="7" fontWeight="bold" textAnchor="middle">
+                      {Math.round(eo)}
+                    </text>
+                    <line x1={xP1} y1={btmY} x2={xP2} y2={btmY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <text x={cx} y={btmY - 2} fill="#dc2626" fontSize="7.5" fontWeight="bold" textAnchor="middle">
+                      {s}
+                    </text>
+                    <line x1={xP2} y1={btmY} x2={x2} y2={btmY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                    <text x={(xP2 + x2) / 2} y={btmY - 2} fill="#dc2626" fontSize="7" fontWeight="bold" textAnchor="middle">
+                      {Math.round(eo)}
+                    </text>
+                  </g>
+                );
+              })()}
             </g>
           )}
 
-          {/* 7. Rebar Callout Leaders (Red Text with Leaders) */}
-          <line x1={cx + 35} y1={cy + 45} x2="280" y2="280" stroke="#dc2626" strokeWidth="0.8" />
-          <line x1="280" y1="280" x2="310" y2="280" stroke="#dc2626" strokeWidth="0.8" />
-          <text x="282" y="275" fill="#dc2626" fontSize="8.5" fontWeight="bold">
+          {/* Plan View Leader Callouts */}
+          <line x1={cx + 30} y1={cy + 35} x2="300" y2="300" stroke="#dc2626" strokeWidth="0.8" />
+          <line x1="300" y1="300" x2="335" y2="300" stroke="#dc2626" strokeWidth="0.8" />
+          <text x="302" y="295" fill="#dc2626" fontSize="8" fontWeight="bold">
             {topRebarText}
           </text>
-          <text x="282" y="290" fill="#dc2626" fontSize="8.5" fontWeight="bold">
+          <text x="302" y="310" fill="#dc2626" fontSize="8" fontWeight="bold">
             {botRebarText}
           </text>
 
           {/* 150 THK PCC Callout */}
-          <line x1={cx - (L / 2) * scale - 12} y1={cy - 20} x2="35" y2="35" stroke="#dc2626" strokeWidth="0.8" />
+          <line x1={cx - 55} y1={cy - 20} x2="35" y2="35" stroke="#dc2626" strokeWidth="0.8" />
           <line x1="35" y1="35" x2="10" y2="35" stroke="#dc2626" strokeWidth="0.8" />
           <text x="10" y="30" fill="#dc2626" fontSize="8" fontWeight="bold">
             150THK PCC
           </text>
 
-          {/* Side Ties Callout */}
-          <line x1={cx - (L / 2) * scale + 5} y1={cy + 25} x2="40" y2="250" stroke="#dc2626" strokeWidth="0.8" />
-          <line x1="40" y1="250" x2="15" y2="250" stroke="#dc2626" strokeWidth="0.8" />
-          <text x="15" y="245" fill="#dc2626" fontSize="8.5" fontWeight="bold">
-            {sideRebarText}
-          </text>
-
-          {/* Plan View Title (Cyan with Underline) */}
-          <text x={cx} y="335" fill="#0891b2" fontSize="11" fontWeight="bold" textAnchor="middle">
+          {/* Plan View Title */}
+          <text x={cx} y="375" fill="#0284c7" fontSize="11" fontWeight="bold" textAnchor="middle">
             PILE CAP PC{pileCap.supportNodeId} - PLAN
           </text>
-          <text x={cx} y="350" fill="#0891b2" fontSize="9" textAnchor="middle">
+          <text x={cx} y="390" fill="#0284c7" fontSize="8.5" textAnchor="middle">
             (SCALE 1:50)
           </text>
         </g>
 
-        {/* ------------------------------------------------------------------------- */}
+        {/* ========================================================================= */}
         {/* 2. SECTION 1-1 ELEVATION (RIGHT)                                          */}
-        {/* ------------------------------------------------------------------------- */}
-        <g transform="translate(420, 15)">
-          {/* 1. Column Extending Above Cap with Links */}
-          <rect x="135" y="10" width="50" height="70" fill="#ffffff" stroke="#eab308" strokeWidth="1.5" />
-          {/* Column Starter Bars */}
-          <line x1="145" y1="15" x2="145" y2="210" stroke="#06b6d4" strokeWidth="2.0" />
-          <line x1="175" y1="15" x2="175" y2="210" stroke="#06b6d4" strokeWidth="2.0" />
-          {/* Column Starter Hook Anchors into Cap */}
-          <line x1="145" y1="210" x2="125" y2="210" stroke="#06b6d4" strokeWidth="2.0" />
-          <line x1="175" y1="210" x2="195" y2="210" stroke="#06b6d4" strokeWidth="2.0" />
+        {/* ========================================================================= */}
+        <g transform="translate(10, 10)">
+          {/* 1. Column Stub Extending Above Cap */}
+          <rect
+            x={secColX}
+            y={secColY}
+            width={secColW}
+            height={secColH}
+            fill="#ffffff"
+            stroke="#eab308"
+            strokeWidth="1.6"
+          />
 
-          {/* Column Ties / Links */}
-          {[25, 40, 55, 70].map((ly, i) => (
-            <line key={`link_${i}`} x1="135" y1={ly} x2="185" y2={ly} stroke="#dc2626" strokeWidth="1.2" />
+          {/* Column Longitudinal Starter Bars hooking 90 deg into cap */}
+          <path d={rebarPaths.columnStarterPaths[0]} fill="none" stroke="#06b6d4" strokeWidth="2.0" />
+          <path d={rebarPaths.columnStarterPaths[1]} fill="none" stroke="#06b6d4" strokeWidth="2.0" />
+
+          {/* Column Confinement Ties / Hoops */}
+          {[secColY + 12, secColY + 28, secColY + 44, secColY + 60].map((ly, i) => (
+            <line key={`clk_${i}`} x1={secColX} y1={ly} x2={secColX + secColW} y2={ly} stroke="#dc2626" strokeWidth="1.2" />
           ))}
-          <text x="160" y="50" fill="#dc2626" fontSize="7.5" fontWeight="bold" textAnchor="middle">
+          <text x={secColX + secColW / 2} y={secColY + 22} fill="#dc2626" fontSize="6.5" fontWeight="bold" textAnchor="middle">
             LINKS
           </text>
 
-          {/* 2. Cap Concrete Body (Magenta Border) */}
-          <rect x="25" y="80" width="270" height="145" fill="#fdf4ff" fillOpacity="0.6" stroke="#c026d3" strokeWidth="2.2" />
+          {/* 2. Concrete Cap Body (Magenta Outline) */}
+          <rect
+            x={secCapX}
+            y={secCapY}
+            width={secCapW}
+            height={secCapH}
+            fill="#fdf4ff"
+            fillOpacity="0.8"
+            stroke="#c026d3"
+            strokeWidth="2.2"
+            strokeLinejoin="round"
+          />
 
-          {/* 3. 150 THK PCC Bedding Layer (Brown / Dark Hatch) */}
-          <rect x="10" y="225" width="300" height="15" fill="#b45309" fillOpacity="0.8" stroke="#78350f" strokeWidth="1.2" />
+          {/* 3. 150 THK PCC Bedding Layer (Brown Solid) */}
+          <rect
+            x={secCapX - 12}
+            y={secCapY + secCapH}
+            width={secCapW + 24}
+            height={14}
+            fill="#b45309"
+            fillOpacity="0.85"
+            stroke="#78350f"
+            strokeWidth="1.2"
+          />
 
-          {/* 4. Bored Concrete Piles Shafts Entering Cap (Green Outlines) */}
-          <rect x="55" y="220" width="50" height="75" fill="#f0fdf4" stroke="#16a34a" strokeWidth="1.8" />
-          <rect x="215" y="220" width="50" height="75" fill="#f0fdf4" stroke="#16a34a" strokeWidth="1.8" />
+          {/* 4. Bored Concrete Piles Shafts Entering Cap by 50mm */}
+          {/* Pile 1 */}
+          <rect
+            x={secPile1X - rPilePx}
+            y={secCapY + secCapH - 6}
+            width={rPilePx * 2}
+            height={68}
+            fill="#f0fdf4"
+            stroke="#16a34a"
+            strokeWidth="1.8"
+          />
+          {/* Pile 1 Starter Dowels into Cap */}
+          <line x1={secPile1X - rPilePx + 4} y1={secCapY + secCapH - 35} x2={secPile1X - rPilePx + 4} y2={secCapY + secCapH + 55} stroke="#16a34a" strokeWidth="1.8" />
+          <line x1={secPile1X + rPilePx - 4} y1={secCapY + secCapH - 35} x2={secPile1X + rPilePx - 4} y2={secCapY + secCapH + 55} stroke="#16a34a" strokeWidth="1.8" />
 
-          {/* Pile Dowels Projecting into Cap */}
-          <line x1="65" y1="165" x2="65" y2="280" stroke="#16a34a" strokeWidth="1.8" />
-          <line x1="95" y1="165" x2="95" y2="280" stroke="#16a34a" strokeWidth="1.8" />
-          <line x1="225" y1="165" x2="225" y2="280" stroke="#16a34a" strokeWidth="1.8" />
-          <line x1="255" y1="165" x2="255" y2="280" stroke="#16a34a" strokeWidth="1.8" />
+          {/* Pile 2 */}
+          <rect
+            x={secPile2X - rPilePx}
+            y={secCapY + secCapH - 6}
+            width={rPilePx * 2}
+            height={68}
+            fill="#f0fdf4"
+            stroke="#16a34a"
+            strokeWidth="1.8"
+          />
+          {/* Pile 2 Starter Dowels into Cap */}
+          <line x1={secPile2X - rPilePx + 4} y1={secCapY + secCapH - 35} x2={secPile2X - rPilePx + 4} y2={secCapY + secCapH + 55} stroke="#16a34a" strokeWidth="1.8" />
+          <line x1={secPile2X + rPilePx - 4} y1={secCapY + secCapH - 35} x2={secPile2X + rPilePx - 4} y2={secCapY + secCapH + 55} stroke="#16a34a" strokeWidth="1.8" />
 
-          {/* Pile Embedment Dimension 50mm / 150mm */}
-          <line x1="45" y1="225" x2="45" y2="220" stroke="#dc2626" strokeWidth="0.8" />
-          <text x="40" y="224" fill="#dc2626" fontSize="7.5" fontWeight="bold" textAnchor="end">
-            50
+          {/* Center Pile if 5-Pile Cap */}
+          {count === 5 && (
+            <>
+              <rect
+                x={secCapX + secCapW / 2 - rPilePx}
+                y={secCapY + secCapH - 6}
+                width={rPilePx * 2}
+                height={68}
+                fill="#f0fdf4"
+                stroke="#16a34a"
+                strokeWidth="1.8"
+              />
+              <line x1={secCapX + secCapW / 2 - rPilePx + 4} y1={secCapY + secCapH - 35} x2={secCapX + secCapW / 2 - rPilePx + 4} y2={secCapY + secCapH + 55} stroke="#16a34a" strokeWidth="1.8" />
+              <line x1={secCapX + secCapW / 2 + rPilePx - 4} y1={secCapY + secCapH - 35} x2={secCapX + secCapW / 2 + rPilePx - 4} y2={secCapY + secCapH + 55} stroke="#16a34a" strokeWidth="1.8" />
+            </>
+          )}
+
+          {/* 5. Bottom Main Flexural Rebar Mat (90 deg Upward Hooks) */}
+          <path d={rebarPaths.bottomMatPath} fill="none" stroke="#dc2626" strokeWidth="2.6" strokeLinejoin="round" />
+
+          {/* 6. Top Shrinkage Rebar Mat (90 deg Downward Hooks) */}
+          <path d={rebarPaths.topMatPath} fill="none" stroke="#06b6d4" strokeWidth="1.8" strokeLinejoin="round" />
+
+          {/* 7. Side Face Ties (Green Circles & Dashed Lines) */}
+          {rebarPaths.sideTiePoints.map((pt, i) => (
+            <circle key={`spt_${i}`} cx={pt.x} cy={pt.y} r="3.2" fill="#16a34a" stroke="#15803d" strokeWidth="0.8" />
+          ))}
+          <line
+            x1={secCapX + 12}
+            y1={secCapY + secCapH * 0.35}
+            x2={secCapX + secCapW - 12}
+            y2={secCapY + secCapH * 0.35}
+            stroke="#16a34a"
+            strokeWidth="0.8"
+            strokeDasharray="3,3"
+          />
+          <line
+            x1={secCapX + 12}
+            y1={secCapY + secCapH * 0.65}
+            x2={secCapX + secCapW - 12}
+            y2={secCapY + secCapH * 0.65}
+            stroke="#16a34a"
+            strokeWidth="0.8"
+            strokeDasharray="3,3"
+          />
+
+          {/* ======================================================================= */}
+          {/* SECTION ELEVATION CAD DIMENSIONS                                        */}
+          {/* ======================================================================= */}
+          {/* Top Width Dimension above Column: L */}
+          {(() => {
+            const topDimY = secColY - 14;
+            return (
+              <g>
+                <line x1={secCapX} y1={secCapY} x2={secCapX} y2={topDimY - 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                <line x1={secCapX + secCapW} y1={secCapY} x2={secCapX + secCapW} y2={topDimY - 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                <line x1={secCapX} y1={topDimY} x2={secCapX + secCapW} y2={topDimY} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                <rect x={secCapX + secCapW / 2 - 18} y={topDimY - 7} width={36} height={10} fill="#ffffff" rx="2" />
+                <text x={secCapX + secCapW / 2} y={topDimY} fill="#dc2626" fontSize="8.5" fontWeight="bold" textAnchor="middle">
+                  {count === 3 && dims3p ? dims3p.lengthMm : L}
+                </text>
+              </g>
+            );
+          })()}
+
+          {/* Right Cap Depth Dimension: D */}
+          {(() => {
+            const rDimX = secCapX + secCapW + 26;
+            return (
+              <g>
+                <line x1={secCapX + secCapW} y1={secCapY} x2={rDimX + 4} y2={secCapY} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                <line x1={secCapX + secCapW} y1={secCapY + secCapH} x2={rDimX + 4} y2={secCapY + secCapH} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                <line x1={rDimX} y1={secCapY} x2={rDimX} y2={secCapY + secCapH} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                <rect x={rDimX - 4} y={secCapY + secCapH / 2 - 5} width={28} height={10} fill="#ffffff" rx="2" />
+                <text x={rDimX + 10} y={secCapY + secCapH / 2 + 3} fill="#dc2626" fontSize="8.5" fontWeight="bold">
+                  {D}
+                </text>
+              </g>
+            );
+          })()}
+
+          {/* Bottom Spacing Dimension Chain: eo | s | eo */}
+          {(() => {
+            const btmDimY = secCapY + secCapH + 52;
+            return (
+              <g>
+                {/* Extension lines */}
+                <line x1={secCapX} y1={secCapY + secCapH + 14} x2={secCapX} y2={btmDimY + 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                <line x1={secPile1X} y1={secCapY + secCapH + 62} x2={secPile1X} y2={btmDimY + 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                <line x1={secPile2X} y1={secCapY + secCapH + 62} x2={secPile2X} y2={btmDimY + 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+                <line x1={secCapX + secCapW} y1={secCapY + secCapH + 14} x2={secCapX + secCapW} y2={btmDimY + 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
+
+                {/* Left Overhang: eo */}
+                <line x1={secCapX} y1={btmDimY} x2={secPile1X} y2={btmDimY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                <text x={(secCapX + secPile1X) / 2} y={btmDimY - 2} fill="#dc2626" fontSize="7" fontWeight="bold" textAnchor="middle">
+                  {Math.round(eo)}
+                </text>
+
+                {/* Pile Spacing: s */}
+                <line x1={secPile1X} y1={btmDimY} x2={secPile2X} y2={btmDimY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                <text x={(secPile1X + secPile2X) / 2} y={btmDimY - 2} fill="#dc2626" fontSize="7.5" fontWeight="bold" textAnchor="middle">
+                  {s}
+                </text>
+
+                {/* Right Overhang: eo */}
+                <line x1={secPile2X} y1={btmDimY} x2={secCapX + secCapW} y2={btmDimY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
+                <text x={(secPile2X + secCapX + secCapW) / 2} y={btmDimY - 2} fill="#dc2626" fontSize="7" fontWeight="bold" textAnchor="middle">
+                  {Math.round(eo)}
+                </text>
+              </g>
+            );
+          })()}
+
+          {/* Clear cover and Embedment annotations */}
+          <line x1={secCapX + 16} y1={secCapY + secCapH - 14} x2={secCapX + 16} y2={secCapY + secCapH} stroke="#dc2626" strokeWidth="0.7" />
+          <text x={secCapX + 12} y={secCapY + secCapH - 4} fill="#dc2626" fontSize="6.5" fontWeight="bold" textAnchor="end">
+            60 COVER
           </text>
 
-          {/* 5. Bottom Main Rebar Mat (Red Line with 90 deg Upward Hooks) */}
-          <line x1="40" y1="213" x2="280" y2="213" stroke="#dc2626" strokeWidth="2.5" />
-          <line x1="40" y1="213" x2="40" y2="135" stroke="#dc2626" strokeWidth="2.5" />
-          <line x1="280" y1="213" x2="280" y2="135" stroke="#dc2626" strokeWidth="2.5" />
-
-          {/* 6. Top Shrinkage Rebar Mat (Cyan Line with Downward Hooks) */}
-          <line x1="40" y1="92" x2="280" y2="92" stroke="#06b6d4" strokeWidth="2.0" />
-          <line x1="40" y1="92" x2="40" y2="140" stroke="#06b6d4" strokeWidth="2.0" />
-          <line x1="280" y1="92" x2="280" y2="140" stroke="#06b6d4" strokeWidth="2.0" />
-
-          {/* 7. Side Face Skin Reinforcement Ties (Green Circles / Horizontal Lines) */}
-          <circle cx="40" cy="135" r="3.5" fill="#16a34a" />
-          <circle cx="40" cy="170" r="3.5" fill="#16a34a" />
-          <circle cx="280" cy="135" r="3.5" fill="#16a34a" />
-          <circle cx="280" cy="170" r="3.5" fill="#16a34a" />
-          <line x1="40" y1="135" x2="280" y2="135" stroke="#16a34a" strokeWidth="0.8" strokeDasharray="3,3" />
-          <line x1="40" y1="170" x2="280" y2="170" stroke="#16a34a" strokeWidth="0.8" strokeDasharray="3,3" />
-
-          {/* 8. Elevation Dimension Lines (Depth, Cover, PCC) */}
-          {/* Depth D Dimension */}
-          <line x1="320" y1="80" x2="320" y2="225" stroke="#dc2626" strokeWidth="0.9" markerStart="url(#tick-45)" markerEnd="url(#tick-45)" />
-          <line x1="295" y1="80" x2="325" y2="80" stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
-          <line x1="295" y1="225" x2="325" y2="225" stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
-          <text x="330" y="155" fill="#dc2626" fontSize="9" fontWeight="bold">
-            {D}
+          <line x1={secPile1X - rPilePx - 6} y1={secCapY + secCapH} x2={secPile1X - rPilePx - 6} y2={secCapY + secCapH - 6} stroke="#dc2626" strokeWidth="0.7" />
+          <text x={secPile1X - rPilePx - 8} y={secCapY + secCapH - 1} fill="#dc2626" fontSize="6.5" fontWeight="bold" textAnchor="end">
+            50 EMBED
           </text>
 
-          {/* Clear Cover 40 / 60mm */}
-          <line x1="30" y1="213" x2="30" y2="225" stroke="#dc2626" strokeWidth="0.8" />
-          <text x="26" y="221" fill="#dc2626" fontSize="7" fontWeight="bold" textAnchor="end">
-            60
-          </text>
-
-          {/* 9. Section Rebar Callouts with Leaders */}
-          {/* Top Mat Leader */}
-          <line x1="280" y1="92" x2="310" y2="60" stroke="#dc2626" strokeWidth="0.8" />
-          <line x1="310" y1="60" x2="335" y2="60" stroke="#dc2626" strokeWidth="0.8" />
-          <text x="312" y="55" fill="#dc2626" fontSize="8" fontWeight="bold">
+          {/* Leaders with Callouts */}
+          {/* Top Mat */}
+          <line x1={secCapX + secCapW - 12} y1={secCapY + 10} x2={secCapX + secCapW + 45} y2={secCapY - 20} stroke="#dc2626" strokeWidth="0.8" />
+          <line x1={secCapX + secCapW + 45} y1={secCapY - 20} x2={secCapX + secCapW + 85} y2={secCapY - 20} stroke="#dc2626" strokeWidth="0.8" />
+          <text x={secCapX + secCapW + 88} y={secCapY - 23} fill="#dc2626" fontSize="8" fontWeight="bold">
             {topRebarText}
           </text>
 
-          {/* Bottom Mat Leader */}
-          <line x1="280" y1="213" x2="310" y2="245" stroke="#dc2626" strokeWidth="0.8" />
-          <line x1="310" y1="245" x2="335" y2="245" stroke="#dc2626" strokeWidth="0.8" />
-          <text x="312" y="240" fill="#dc2626" fontSize="8" fontWeight="bold">
+          {/* Bottom Mat */}
+          <line x1={secCapX + secCapW - 12} y1={secCapY + secCapH - 14} x2={secCapX + secCapW + 45} y2={secCapY + secCapH + 15} stroke="#dc2626" strokeWidth="0.8" />
+          <line x1={secCapX + secCapW + 45} y1={secCapY + secCapH + 15} x2={secCapX + secCapW + 85} y2={secCapY + secCapH + 15} stroke="#dc2626" strokeWidth="0.8" />
+          <text x={secCapX + secCapW + 88} y={secCapY + secCapH + 12} fill="#dc2626" fontSize="8" fontWeight="bold">
             {botRebarText}
           </text>
 
-          {/* Side Ties Leader */}
-          <line x1="40" y1="135" x2="10" y2="110" stroke="#dc2626" strokeWidth="0.8" />
-          <line x1="10" y1="110" x2="-10" y2="110" stroke="#dc2626" strokeWidth="0.8" />
-          <text x="-10" y="105" fill="#dc2626" fontSize="8" fontWeight="bold" textAnchor="end">
+          {/* Side Ties */}
+          <line x1={secCapX + 12} y1={secCapY + secCapH * 0.35} x2={secCapX - 35} y2={secCapY + 25} stroke="#dc2626" strokeWidth="0.8" />
+          <line x1={secCapX - 35} y1={secCapY + 25} x2={secCapX - 70} y2={secCapY + 25} stroke="#dc2626" strokeWidth="0.8" />
+          <text x={secCapX - 72} y={secCapY + 22} fill="#dc2626" fontSize="8" fontWeight="bold" textAnchor="end">
             {sideRebarText}
           </text>
 
-          {/* 150THK PCC Leader */}
-          <line x1="10" y1="232" x2="-10" y2="232" stroke="#dc2626" strokeWidth="0.8" />
-          <text x="-12" y="235" fill="#dc2626" fontSize="7.5" fontWeight="bold" textAnchor="end">
-            150THK PCC
+          {/* Pile Diameter */}
+          <line x1={secPile1X} y1={secCapY + secCapH + 50} x2={secCapX - 25} y2={secCapY + secCapH + 75} stroke="#dc2626" strokeWidth="0.8" />
+          <line x1={secCapX - 25} y1={secCapY + secCapH + 75} x2={secCapX - 70} y2={secCapY + secCapH + 75} stroke="#dc2626" strokeWidth="0.8" />
+          <text x={secCapX - 72} y={secCapY + secCapH + 72} fill="#dc2626" fontSize="8" fontWeight="bold" textAnchor="end">
+            {Dp} Ø BORED PILE
           </text>
 
-          {/* Pile Diameter Callout */}
-          <line x1="80" y1="270" x2="80" y2="305" stroke="#dc2626" strokeWidth="0.8" />
-          <line x1="80" y1="305" x2="115" y2="305" stroke="#dc2626" strokeWidth="0.8" />
-          <text x="120" y="308" fill="#dc2626" fontSize="8" fontWeight="bold">
-            {Dp} Ø PILE
-          </text>
-
-          {/* Section Elevation Title (Cyan) */}
-          <text x="160" y="335" fill="#0891b2" fontSize="11" fontWeight="bold" textAnchor="middle">
+          {/* Section Title */}
+          <text x={secCapX + secCapW / 2} y="375" fill="#0284c7" fontSize="11" fontWeight="bold" textAnchor="middle">
             SECTION 1-1
           </text>
-          <text x="160" y="348" fill="#0891b2" fontSize="9" fontWeight="bold" textAnchor="middle">
-            DETAIL OF PC{pileCap.supportNodeId}
-          </text>
-          <text x="160" y="360" fill="#0891b2" fontSize="8" textAnchor="middle">
-            (SCALE 1:50)
+          <text x={secCapX + secCapW / 2} y="390" fill="#0284c7" fontSize="8.5" fontWeight="bold" textAnchor="middle">
+            DETAIL OF PC{pileCap.supportNodeId} (SCALE 1:50)
           </text>
         </g>
       </svg>
