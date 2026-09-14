@@ -281,6 +281,7 @@ export const Structural3DViewer: React.FC = () => {
 
   const {
     activeModel,
+    activeProject,
     selectedMemberId,
     selectMember,
     selectedPlateId,
