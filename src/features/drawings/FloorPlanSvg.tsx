@@ -43,6 +43,7 @@ interface FloorPlanSvgProps {
   onSelectSection?: (sectionId: string) => void;
   cadTheme?: 'AUTOCAD_WHITE' | 'BLUEPRINT_DARK';
   onCadThemeChange?: (theme: 'AUTOCAD_WHITE' | 'BLUEPRINT_DARK') => void;
+  fitScreen?: boolean;
 }
 
 export interface UniquePileCapType {
@@ -91,6 +92,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
   onSelectSection,
   cadTheme = 'AUTOCAD_WHITE',
   onCadThemeChange,
+  fitScreen = false,
 }) => {
   const bounds = floorPlan.bounds;
   const modelW = Math.max(bounds.width, 10);
@@ -602,17 +604,17 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
   const naY = 65;
 
   return (
-    <div className="flex flex-col items-center bg-slate-950 p-3 rounded-lg border border-slate-800 shadow-2xl overflow-x-auto font-mono w-full">
+    <div className={`flex flex-col items-center p-3 rounded-lg border shadow-2xl overflow-x-auto font-mono w-full ${isCadWhite ? 'bg-slate-100 border-slate-300' : 'bg-slate-950 border-slate-800'}`}>
       {/* Top Sheet Header Banner */}
-      <div className="flex flex-wrap items-center justify-between w-full mb-2 px-2 text-xs text-slate-400 gap-2">
+      <div className={`flex flex-wrap items-center justify-between w-full mb-2 px-2 text-xs gap-2 ${isCadWhite ? 'text-slate-600' : 'text-slate-400'}`}>
         <div className="flex items-center gap-2">
-          <span className="font-bold text-sky-400 flex items-center gap-2">
-            <span className="px-2 py-0.5 bg-sky-950 text-sky-300 rounded border border-sky-800 text-[11px]">
+          <span className={`font-bold flex items-center gap-2 ${isCadWhite ? 'text-sky-700' : 'text-sky-400'}`}>
+            <span className={`px-2 py-0.5 rounded border text-[11px] ${isCadWhite ? 'bg-sky-100 text-sky-800 border-sky-300' : 'bg-sky-950 text-sky-300 border-sky-800'}`}>
               {floorPlan.sheetNumber}
             </span>
             <span>{floorPlan.levelName}</span>
           </span>
-          <span className="text-[10px] px-2 py-0.5 bg-slate-900 border border-slate-700 text-slate-300 rounded font-mono">
+          <span className={`text-[10px] px-2 py-0.5 rounded font-mono border ${isCadWhite ? 'bg-white border-slate-300 text-slate-700' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
             ISO A3 {sheetOrientation}
           </span>
         </div>
@@ -620,12 +622,12 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
         <div className="flex items-center gap-2 flex-wrap">
           {/* Orientation Switcher Pill */}
           {onOrientationChange && (
-            <div className="inline-flex items-center bg-slate-900 p-0.5 rounded border border-slate-700 text-[11px]">
+            <div className={`inline-flex items-center p-0.5 rounded border text-[11px] ${isCadWhite ? 'bg-white border-slate-300' : 'bg-slate-900 border-slate-700'}`}>
               <button
                 type="button"
                 onClick={() => onOrientationChange('LANDSCAPE')}
                 className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${
-                  sheetOrientation === 'LANDSCAPE' ? 'bg-sky-700 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                  sheetOrientation === 'LANDSCAPE' ? (isCadWhite ? 'bg-sky-600 text-white shadow-xs' : 'bg-sky-700 text-white shadow-xs') : (isCadWhite ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-white')
                 }`}
               >
                 🖼 Landscape (420×297)
@@ -634,7 +636,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                 type="button"
                 onClick={() => onOrientationChange('PORTRAIT')}
                 className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${
-                  sheetOrientation === 'PORTRAIT' ? 'bg-sky-700 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                  sheetOrientation === 'PORTRAIT' ? (isCadWhite ? 'bg-sky-600 text-white shadow-xs' : 'bg-sky-700 text-white shadow-xs') : (isCadWhite ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-white')
                 }`}
               >
                 📄 Portrait (297×420)
@@ -652,8 +654,8 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                   onClick={() => onToggleCrossSections(!showCrossSections)}
                   className={`px-2 py-0.5 rounded border text-[10px] font-semibold flex items-center gap-1 transition-colors ${
                     showCrossSections
-                      ? 'bg-emerald-950/80 border-emerald-700 text-emerald-300 hover:bg-emerald-900'
-                      : 'bg-rose-950/80 border-rose-700 text-rose-300 hover:bg-rose-900'
+                      ? (isCadWhite ? 'bg-emerald-100 border-emerald-300 text-emerald-800 hover:bg-emerald-200' : 'bg-emerald-950/80 border-emerald-700 text-emerald-300 hover:bg-emerald-900')
+                      : (isCadWhite ? 'bg-rose-100 border-rose-300 text-rose-800 hover:bg-rose-200' : 'bg-rose-950/80 border-rose-700 text-rose-300 hover:bg-rose-900')
                   }`}
                   title={showCrossSections ? 'Click to hide cross-sections and show plan only' : 'Click to show cross-sections'}
                 >
@@ -663,12 +665,12 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
 
               {/* Specific Cross-Section Filter Pills */}
               {showCrossSections && (
-                <div className="flex items-center gap-1 bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-[11px]">
-                  <span className="text-slate-400 font-semibold">SECTIONS:</span>
+                <div className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] ${isCadWhite ? 'bg-white border-slate-300' : 'bg-slate-900 border-slate-700'}`}>
+                  <span className={`font-semibold ${isCadWhite ? 'text-slate-600' : 'text-slate-400'}`}>SECTIONS:</span>
                   <button
                     onClick={() => handleSelectFilter('ALL')}
                     className={`px-2 py-0.5 rounded text-[10px] ${
-                      activeSectionFilter === 'ALL' ? 'bg-sky-700 text-white font-bold' : 'text-slate-400 hover:text-white'
+                      activeSectionFilter === 'ALL' ? 'bg-sky-700 text-white font-bold' : (isCadWhite ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-white')
                     }`}
                   >
                     ALL ({uniquePileCapTypes.length})
@@ -678,7 +680,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                       key={t.typeId}
                       onClick={() => handleSelectFilter(t.typeId)}
                       className={`px-2 py-0.5 rounded text-[10px] ${
-                        activeSectionFilter === t.typeId ? 'bg-indigo-700 text-white font-bold' : 'text-slate-400 hover:text-white'
+                        activeSectionFilter === t.typeId ? 'bg-indigo-700 text-white font-bold' : (isCadWhite ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-white')
                       }`}
                     >
                       {t.typeId}
@@ -689,7 +691,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
             </>
           )}
 
-          <span className="text-[10px] text-slate-500 font-sans hidden lg:inline">
+          <span className={`text-[10px] font-sans hidden lg:inline ${isCadWhite ? 'text-slate-500' : 'text-slate-500'}`}>
             Scale: 1:100 (Plan) • 1:50 (Sections) @ A3
           </span>
         </div>
@@ -699,7 +701,8 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
         width={sheetW}
         height={sheetH}
         viewBox={`0 0 ${sheetW} ${sheetH}`}
-        className="select-none text-xs w-full h-auto"
+        className={`select-none text-xs ${fitScreen ? 'max-h-[calc(100vh-250px)] w-auto max-w-full' : 'w-full h-auto'}`}
+        style={fitScreen ? { maxHeight: 'calc(100vh - 250px)', width: 'auto' } : undefined}
         onMouseMove={(e) => {
           if (draggingStairId && dragStartPos && onUpdateStaircase) {
             const dx = (e.clientX - dragStartPos.mouseX) / scale;

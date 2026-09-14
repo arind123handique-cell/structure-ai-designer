@@ -82,7 +82,7 @@ export const FloorPlanViewer: React.FC = () => {
   const [cadTheme, setCadTheme] = useState<'AUTOCAD_WHITE' | 'BLUEPRINT_DARK'>('AUTOCAD_WHITE');
   const [showCrossSections, setShowCrossSections] = useState<boolean>(true);
   const [layersMenuOpen, setLayersMenuOpen] = useState<boolean>(false);
-  const [zoomFit, setZoomFit] = useState<boolean>(true);
+  const [zoomFit, setZoomFit] = useState<boolean>(false);
   const [metricsExpanded, setMetricsExpanded] = useState<boolean>(false);
 
   // Layer Visibility States (Always keep labels/dimensions off by default)
@@ -585,11 +585,15 @@ export const FloorPlanViewer: React.FC = () => {
             <button
               type="button"
               onClick={() => setZoomFit(!zoomFit)}
-              className="flex items-center gap-1 px-2.5 py-1 text-xs font-mono font-semibold rounded bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 shadow-2xs transition-colors"
-              title={zoomFit ? 'Switch to 100% full detail CAD scale' : 'Fit complete A3 sheet to window'}
+              className={`flex items-center gap-1 px-2.5 py-1 text-xs font-mono font-semibold rounded border transition-colors ${
+                zoomFit
+                  ? 'bg-sky-100 border-sky-400 text-sky-800 shadow-xs'
+                  : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300 shadow-2xs'
+              }`}
+              title={zoomFit ? 'Currently fitting screen height. Click for 100% full CAD scale' : 'Currently 100% full CAD scale. Click to fit screen'}
             >
-              {zoomFit ? <Maximize2 className="w-3.5 h-3.5 text-sky-600" /> : <Minimize2 className="w-3.5 h-3.5 text-slate-600" />}
-              <span>{zoomFit ? 'Fit Screen' : '100% CAD'}</span>
+              {zoomFit ? <Minimize2 className="w-3.5 h-3.5 text-sky-700" /> : <Maximize2 className="w-3.5 h-3.5 text-slate-600" />}
+              <span>{zoomFit ? 'Fit: Screen' : '100% CAD'}</span>
             </button>
           </div>
         </div>
@@ -645,7 +649,7 @@ export const FloorPlanViewer: React.FC = () => {
       )}
 
       {/* Staircase Moving & Positioning Toolbar on the Drawing */}
-      {showStaircases && (
+      {!activePlan.isFoundationLevel && showStaircases && (
         <div className="bg-surface-card p-3 rounded-lg border border-amber-300/80 shadow-2xs flex flex-wrap items-center justify-between gap-3 font-mono text-xs">
           <div className="flex items-center gap-2">
             <div className="p-1.5 bg-amber-500/20 text-amber-600 rounded">
@@ -794,14 +798,15 @@ export const FloorPlanViewer: React.FC = () => {
         </div>
       )}
 
-      {/* Main 2D CAD SVG Canvas Plan — Responsive Container with Zoom/Fit */}
-      <div className={`w-full flex-1 flex justify-center items-center p-1 ${zoomFit ? 'max-h-[calc(100vh-210px)] overflow-hidden' : 'overflow-auto'}`}>
+      {/* Main 2D CAD SVG Canvas Plan — Fully Scrollable Responsive Container */}
+      <div className="w-full flex justify-center items-center p-1 pb-28">
         <div className="w-full max-w-[1680px] flex justify-center items-center">
           <FloorPlanSvg
             floorPlan={activePlan}
             project={activeProject}
             cadTheme={cadTheme}
             onCadThemeChange={setCadTheme}
+            fitScreen={zoomFit}
             sheetOrientation={sheetOrientation}
             showCrossSections={showCrossSections}
             onToggleCrossSections={setShowCrossSections}
