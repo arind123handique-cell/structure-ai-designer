@@ -51,6 +51,7 @@ import {
   Sliders,
   SlidersHorizontal,
   Camera,
+  Trash2,
   Palette,
 } from 'lucide-react';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -539,6 +540,9 @@ const [showGrid, setShowGrid] = useState(true);
   const multiSelectModeRef = useRef(multiSelectMode);
   multiSelectModeRef.current = multiSelectMode;
 
+  // 3D Right-Click Context Menu
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; memberId: number | null; nodeId: number | null } | null>(null);
+
   // 3D Reinforcement detailing toggles (real-time ON/OFF per component)
   const [rebarEnabled, setRebarEnabled] = useState(false);
   const [rebarShowColumnBars, setRebarShowColumnBars] = useState(true);
@@ -838,6 +842,37 @@ const [showGrid, setShowGrid] = useState(true);
     renderer.domElement.addEventListener('click', onClickNative);
     renderer.domElement.addEventListener('pointermove', onPointerMoveNative);
 
+    // Right-click context menu for 3D members
+    const contextMenuRef = { current: null as any };
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      if (!cameraRef.current || !dynamicGroupRef.current) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const hoverMouse = new THREE.Vector2();
+      hoverMouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      hoverMouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      const hoverRaycaster = new THREE.Raycaster();
+      hoverRaycaster.setFromCamera(hoverMouse, cameraRef.current);
+      const targets = [dynamicGroupRef.current];
+      if (arch3DLayerRef.current) targets.push(arch3DLayerRef.current.getGroup());
+      const hits = hoverRaycaster.intersectObjects(targets, true);
+      let hitMemberId: number | null = null;
+      let hitNodeId: number | null = null;
+      for (const item of hits) {
+        let node: THREE.Object3D | null = item.object;
+        while (node && node !== dynamicGroupRef.current && node !== sceneRef.current) {
+          if (node.userData?.memberId != null) { hitMemberId = Number(node.userData.memberId); break; }
+          if (node.userData?.nodeId != null) { hitNodeId = Number(node.userData.nodeId); break; }
+          node = node.parent;
+        }
+        if (hitMemberId != null || hitNodeId != null) break;
+      }
+      if (hitMemberId != null || hitNodeId != null) {
+        setContextMenu({ x: e.clientX, y: e.clientY, memberId: hitMemberId, nodeId: hitNodeId });
+      }
+    };
+    renderer.domElement.addEventListener('contextmenu', onContextMenu);
 
     controls.addEventListener('change', () => {
       needsSceneRenderRef.current = true;
@@ -1020,6 +1055,7 @@ const [showGrid, setShowGrid] = useState(true);
       renderer.domElement?.removeEventListener('pointerup', onPointerUpNative);
       renderer.domElement?.removeEventListener('click', onClickNative);
       renderer.domElement?.removeEventListener('pointermove', onPointerMoveNative);
+      renderer.domElement?.removeEventListener('contextmenu', onContextMenu);
 
       controls.dispose();
       disposePlotBoundary();
@@ -1055,6 +1091,27 @@ const [showGrid, setShowGrid] = useState(true);
       gridHelperRef.current.visible = showGrid;
     }
   }, [showGrid]);
+
+  // Keyboard shortcuts: Delete to remove selected member/node
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        handleDeleteSelected();
+      } else if (e.key === 'Escape') {
+        handleClearSelection();
+        setContextMenu(null);
+      }
+    };
+    const handleClickOutside = () => setContextMenu(null);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('click', handleClickOutside);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('click', handleClickOutside);
+    };
+  }, [selectedMemberId, selectedNodeId, selectedPlateId]);
 
   // Trigger re-render when bloom is toggled
   useEffect(() => {
@@ -2739,12 +2796,22 @@ const [showGrid, setShowGrid] = useState(true);
               {selectedColInfo && ` • ${selectedColInfo.gridLabel}`}
             </span>
           </div>
-          <button
-            onClick={() => selectMember(null)}
-            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-600 transition-colors"
-          >
-            Deselect
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleDeleteSelected}
+              className="px-2.5 py-1 bg-red-600/80 hover:bg-red-500 text-white rounded font-bold border border-red-500 transition-colors flex items-center gap-1"
+              title="Delete Selected Member (Del)"
+            >
+              <Trash2 className="w-3 h-3" />
+              Delete
+            </button>
+            <button
+              onClick={() => selectMember(null)}
+              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-600 transition-colors"
+            >
+              Deselect
+            </button>
+          </div>
         </div>
       )}
 
@@ -2919,6 +2986,73 @@ const [showGrid, setShowGrid] = useState(true);
           >
             Deselect
           </button>
+        </div>
+      )}
+
+      {/* Right-Click Context Menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[160px] font-mono text-xs text-slate-200"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onMouseLeave={() => setContextMenu(null)}
+        >
+          {contextMenu.memberId != null && (
+            <>
+              <div className="px-3 py-1 text-[10px] text-slate-400 font-bold uppercase tracking-wider border-b border-slate-800">
+                Member #{contextMenu.memberId}
+              </div>
+              <button
+                onClick={() => {
+                  selectMember(contextMenu.memberId);
+                  setContextMenu(null);
+                }}
+                className="w-full px-3 py-1.5 text-left hover:bg-slate-800 flex items-center gap-2 transition-colors"
+              >
+                <MousePointer className="w-3.5 h-3.5 text-sky-400" />
+                Select
+              </button>
+              <button
+                onClick={async () => {
+                  selectMember(contextMenu.memberId);
+                  await deleteStructuralElements([], [contextMenu.memberId!]);
+                  selectMember(null);
+                  setContextMenu(null);
+                }}
+                className="w-full px-3 py-1.5 text-left hover:bg-red-600/30 text-red-400 flex items-center gap-2 transition-colors border-t border-slate-800"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Delete Member
+              </button>
+            </>
+          )}
+          {contextMenu.nodeId != null && (
+            <>
+              <div className="px-3 py-1 text-[10px] text-slate-400 font-bold uppercase tracking-wider border-b border-slate-800">
+                Node #{contextMenu.nodeId}
+              </div>
+              <button
+                onClick={() => {
+                  selectNode(contextMenu.nodeId);
+                  setContextMenu(null);
+                }}
+                className="w-full px-3 py-1.5 text-left hover:bg-slate-800 flex items-center gap-2 transition-colors"
+              >
+                <MousePointer className="w-3.5 h-3.5 text-sky-400" />
+                Select
+              </button>
+              <button
+                onClick={async () => {
+                  await deleteStructuralElements([contextMenu.nodeId!], []);
+                  selectNode(null);
+                  setContextMenu(null);
+                }}
+                className="w-full px-3 py-1.5 text-left hover:bg-red-600/30 text-red-400 flex items-center gap-2 transition-colors border-t border-slate-800"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Delete Node
+              </button>
+            </>
+          )}
         </div>
       )}
 
