@@ -45,6 +45,7 @@ import {
   SetbackOptions,
 } from '../plot/plotTypes';
 import { FoundationSpatialSizingEngine } from '../design/pilecap/foundationSpatialSizingEngine';
+import { CommandManager, ActionCommand } from '../commands/commandManager';
 
 export type ViewTab =
   | 'dashboard'
@@ -372,14 +373,224 @@ export const DEFAULT_ARCHITECTURAL_SETTINGS: ArchitecturalSettings = {
   previousFloorOpacity: 0.35,
 };
 
-let architecturalUndoStack: any[] = [];
-let architecturalRedoStack: any[] = [];
-const MAX_UNDO_STACK = 15;
+let _storeGet: () => ProjectState;
+let _storeSet: (partial: Partial<ProjectState> | ((state: ProjectState) => Partial<ProjectState>)) => void;
+
+function recordStoreAction(
+  description: string,
+  undoFn: () => Promise<void> | void,
+  redoFn: () => Promise<void> | void
+) {
+  if (CommandManager.getInstance().getIsExecuting()) return;
+  CommandManager.getInstance().record(new ActionCommand(description, undoFn, redoFn));
+}
+
+function cloneModel(m: NormalizedStructuralModel): NormalizedStructuralModel {
+  return {
+    ...m,
+    nodes: new Map(m.nodes),
+    members: new Map(m.members),
+    plates: new Map(m.plates),
+    supports: new Map(m.supports),
+    loadCases: new Map(m.loadCases),
+    loadCombinations: new Map(m.loadCombinations),
+    memberLoads: m.memberLoads ? new Map(m.memberLoads) : new Map(),
+    memberModifiers: m.memberModifiers ? new Map(m.memberModifiers) : new Map(),
+    shellLoads: m.shellLoads ? [...m.shellLoads] : [],
+    reactions: m.reactions ? [...m.reactions] : [],
+    memberForces: m.memberForces ? [...m.memberForces] : [],
+    storyDrifts: m.storyDrifts ? [...m.storyDrifts] : [],
+    boundingBox: { ...m.boundingBox },
+    statistics: { ...m.statistics },
+  };
+}
+
+async function applyArchitecturalUndoRedo(action: any, isRedo: boolean) {
+  if (!_storeGet || !_storeSet) return;
+  const state = _storeGet();
+  const walls = { ...(state.architecturalWalls || {}) };
+  const doors = { ...(state.architecturalDoors || {}) };
+  const windows = { ...(state.architecturalWindows || {}) };
+  const openings = { ...(state.architecturalOpenings || {}) };
+  const rooms = { ...(state.architecturalRooms || {}) };
+  const dims = { ...(state.architecturalDimensions || {}) };
+  const stairs = { ...(state.architecturalStaircases || {}) };
+
+  if (!isRedo) {
+    // UNDO
+    switch (action.type) {
+      case 'ADD_WALL':
+        delete walls[action.wall.id];
+        break;
+      case 'UPDATE_WALL':
+        walls[action.previous.id] = action.previous;
+        break;
+      case 'DELETE_WALL':
+        walls[action.wall.id] = action.wall;
+        if (action.deletedDoors) action.deletedDoors.forEach((d: any) => { doors[d.id] = d; });
+        if (action.deletedWindows) action.deletedWindows.forEach((w: any) => { windows[w.id] = w; });
+        if (action.deletedOpenings) action.deletedOpenings.forEach((o: any) => { openings[o.id] = o; });
+        break;
+      case 'ADD_DOOR':
+        delete doors[action.door.id];
+        break;
+      case 'UPDATE_DOOR':
+        doors[action.previous.id] = action.previous;
+        break;
+      case 'DELETE_DOOR':
+        doors[action.door.id] = action.door;
+        break;
+      case 'ADD_WINDOW':
+        delete windows[action.window.id];
+        break;
+      case 'UPDATE_WINDOW':
+        windows[action.previous.id] = action.previous;
+        break;
+      case 'DELETE_WINDOW':
+        windows[action.window.id] = action.window;
+        break;
+      case 'ADD_OPENING':
+        delete openings[action.opening.id];
+        break;
+      case 'UPDATE_OPENING':
+        openings[action.previous.id] = action.previous;
+        break;
+      case 'DELETE_OPENING':
+        openings[action.opening.id] = action.opening;
+        break;
+      case 'ADD_ROOM':
+        delete rooms[action.room.id];
+        break;
+      case 'UPDATE_ROOM':
+        rooms[action.previous.id] = action.previous;
+        break;
+      case 'DELETE_ROOM':
+        rooms[action.room.id] = action.room;
+        break;
+      case 'ADD_DIMENSION':
+        delete dims[action.dimension.id];
+        break;
+      case 'DELETE_DIMENSION':
+        dims[action.dimension.id] = action.dimension;
+        break;
+      case 'ADD_STAIRCASE':
+        delete stairs[action.staircase.id];
+        break;
+      case 'UPDATE_STAIRCASE':
+        stairs[action.previous.id] = action.previous;
+        break;
+      case 'DELETE_STAIRCASE':
+        stairs[action.staircase.id] = action.staircase;
+        break;
+    }
+  } else {
+    // REDO
+    switch (action.type) {
+      case 'ADD_WALL':
+        walls[action.wall.id] = action.wall;
+        break;
+      case 'UPDATE_WALL':
+        walls[action.current.id] = action.current;
+        break;
+      case 'DELETE_WALL':
+        delete walls[action.wall.id];
+        if (action.deletedDoors) action.deletedDoors.forEach((d: any) => { delete doors[d.id]; });
+        if (action.deletedWindows) action.deletedWindows.forEach((w: any) => { delete windows[w.id]; });
+        if (action.deletedOpenings) action.deletedOpenings.forEach((o: any) => { delete openings[o.id]; });
+        break;
+      case 'ADD_DOOR':
+        doors[action.door.id] = action.door;
+        break;
+      case 'UPDATE_DOOR':
+        doors[action.current.id] = action.current;
+        break;
+      case 'DELETE_DOOR':
+        doors[action.door.id] = action.door;
+        break;
+      case 'ADD_WINDOW':
+        windows[action.window.id] = action.window;
+        break;
+      case 'UPDATE_WINDOW':
+        windows[action.current.id] = action.current;
+        break;
+      case 'DELETE_WINDOW':
+        delete windows[action.window.id];
+        break;
+      case 'ADD_OPENING':
+        openings[action.opening.id] = action.opening;
+        break;
+      case 'UPDATE_OPENING':
+        openings[action.current.id] = action.current;
+        break;
+      case 'DELETE_OPENING':
+        delete openings[action.opening.id];
+        break;
+      case 'ADD_ROOM':
+        rooms[action.room.id] = action.room;
+        break;
+      case 'UPDATE_ROOM':
+        rooms[action.current.id] = action.current;
+        break;
+      case 'DELETE_ROOM':
+        rooms[action.room.id] = action.room;
+        break;
+      case 'ADD_DIMENSION':
+        dims[action.dimension.id] = action.dimension;
+        break;
+      case 'DELETE_DIMENSION':
+        delete dims[action.dimension.id];
+        break;
+      case 'ADD_STAIRCASE':
+        stairs[action.staircase.id] = action.staircase;
+        break;
+      case 'UPDATE_STAIRCASE':
+        stairs[action.current.id] = action.current;
+        break;
+      case 'DELETE_STAIRCASE':
+        delete stairs[action.staircase.id];
+        break;
+    }
+  }
+
+  const currentProj = _storeGet().activeProject;
+  _storeSet({
+    architecturalWalls: walls,
+    architecturalDoors: doors,
+    architecturalWindows: windows,
+    architecturalOpenings: openings,
+    architecturalRooms: rooms,
+    architecturalDimensions: dims,
+    architecturalStaircases: stairs,
+  });
+
+  if (currentProj) {
+    const updatedProject: StoredProject = {
+      ...currentProj,
+      architecturalWalls: walls,
+      architecturalDoors: doors,
+      architecturalWindows: windows,
+      architecturalOpenings: openings,
+      architecturalRooms: rooms,
+      architecturalDimensions: dims,
+      architecturalStaircases: stairs,
+      metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
+    };
+    await ProjectStorage.saveProject(updatedProject);
+    _storeSet({ activeProject: updatedProject });
+  }
+}
 
 function pushArchUndo(action: any) {
-  architecturalUndoStack.push(action);
-  if (architecturalUndoStack.length > MAX_UNDO_STACK) architecturalUndoStack.shift();
-  architecturalRedoStack = [];
+  if (CommandManager.getInstance().getIsExecuting()) return;
+  const desc = String(action.type || 'ARCH_ACTION').replace(/_/g, ' ').toLowerCase();
+  const readableDesc = desc.charAt(0).toUpperCase() + desc.slice(1);
+  CommandManager.getInstance().record(
+    new ActionCommand(
+      readableDesc,
+      () => applyArchitecturalUndoRedo(action, false),
+      () => applyArchitecturalUndoRedo(action, true)
+    )
+  );
 }
 
 /**
@@ -425,8 +636,11 @@ function toLightweightStoredProject(p: StoredProject, isActive: boolean): Stored
   };
 }
 
-export const useProjectStore = create<ProjectState>((set, get) => ({
-  projects: [],
+export const useProjectStore = create<ProjectState>((set, get) => {
+  _storeGet = get;
+  _storeSet = set;
+  return {
+    projects: [],
   activeProject: null,
   activeModel: null,
   selectedMemberId: null,
@@ -1015,11 +1229,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const toMerge = nodeIds && nodeIds.length >= 2 ? nodeIds : get().selectedSupportNodeIds;
     if (!toMerge || toMerge.length < 2) return;
 
-    const existing = get().manualMergedPileCapGroups || [];
-    const filtered = existing.filter((grp) => !grp.some((nid) => toMerge.includes(nid)));
-    const updated = [...filtered, [...toMerge]];
-
+    const prevGroups = get().manualMergedPileCapGroups || [];
     const prevDetached = get().detachedCombinedCapNodeIds || [];
+
+    const filtered = prevGroups.filter((grp) => !grp.some((nid) => toMerge.includes(nid)));
+    const updated = [...filtered, [...toMerge]];
     const updatedDetached = prevDetached.filter((id) => !toMerge.includes(id));
 
     set({
@@ -1037,15 +1251,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
       });
     }
+
+    recordStoreAction(
+      `Merge Pile Caps [${toMerge.join(', ')}]`,
+      () => {
+        set({ manualMergedPileCapGroups: prevGroups, detachedCombinedCapNodeIds: prevDetached });
+        const p = get().activeProject;
+        if (p) {
+          ProjectStorage.saveProject({
+            ...p,
+            manualMergedPileCapGroups: prevGroups,
+            detachedCombinedCapNodeIds: prevDetached,
+            metadata: { ...p.metadata, updatedAt: new Date().toISOString() },
+          });
+        }
+      },
+      () => {
+        get().mergeSelectedPileCaps(toMerge);
+      }
+    );
   },
 
   unmergePileCapGroup: (nodeIdInGroup) => {
-    const existing = get().manualMergedPileCapGroups || [];
+    const prevGroups = get().manualMergedPileCapGroups || [];
+    const prevDetached = get().detachedCombinedCapNodeIds || [];
+
+    const existing = prevGroups;
     const groupToUnmerge = existing.find((grp) => grp.includes(nodeIdInGroup));
     const nodesToDetach = groupToUnmerge || [nodeIdInGroup];
 
     const updated = existing.filter((grp) => !grp.includes(nodeIdInGroup));
-    const prevDetached = get().detachedCombinedCapNodeIds || [];
     const newDetached = Array.from(new Set([...prevDetached, ...nodesToDetach]));
 
     set({
@@ -1063,6 +1298,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
       });
     }
+
+    recordStoreAction(
+      `Unmerge Pile Cap Group J${nodeIdInGroup}`,
+      () => {
+        set({ manualMergedPileCapGroups: prevGroups, detachedCombinedCapNodeIds: prevDetached });
+        const p = get().activeProject;
+        if (p) {
+          ProjectStorage.saveProject({
+            ...p,
+            manualMergedPileCapGroups: prevGroups,
+            detachedCombinedCapNodeIds: prevDetached,
+            metadata: { ...p.metadata, updatedAt: new Date().toISOString() },
+          });
+        }
+      },
+      () => {
+        get().unmergePileCapGroup(nodeIdInGroup);
+      }
+    );
   },
 
   splitCombinedPileCapGroup: (
@@ -1071,7 +1325,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     detachedNodeIds,
     newCombinedGroupNodeIds
   ) => {
-    const existing = get().manualMergedPileCapGroups || [];
+    const prevGroups = get().manualMergedPileCapGroups || [];
+    const prevDetached = get().detachedCombinedCapNodeIds || [];
+
+    const existing = prevGroups;
     const filtered = existing.filter((grp) => !grp.some((nid) => originalNodeIds.includes(nid)));
     const updated = [...filtered];
 
@@ -1082,7 +1339,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       updated.push([...newCombinedGroupNodeIds]);
     }
 
-    const prevDetached = get().detachedCombinedCapNodeIds || [];
     const newDetachedSet = new Set(prevDetached);
     detachedNodeIds.forEach((id) => newDetachedSet.add(id));
     keepNodeIds.forEach((id) => newDetachedSet.delete(id));
@@ -1105,15 +1361,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
       });
     }
+
+    recordStoreAction(
+      `Split Combined Pile Cap Group`,
+      () => {
+        set({ manualMergedPileCapGroups: prevGroups, detachedCombinedCapNodeIds: prevDetached });
+        const p = get().activeProject;
+        if (p) {
+          ProjectStorage.saveProject({
+            ...p,
+            manualMergedPileCapGroups: prevGroups,
+            detachedCombinedCapNodeIds: prevDetached,
+            metadata: { ...p.metadata, updatedAt: new Date().toISOString() },
+          });
+        }
+      },
+      () => {
+        get().splitCombinedPileCapGroup(originalNodeIds, keepNodeIds, detachedNodeIds, newCombinedGroupNodeIds);
+      }
+    );
   },
 
   detachNodesFromCombinedPileCap: (nodeIdsToDetach) => {
-    const existing = get().manualMergedPileCapGroups || [];
+    const prevGroups = get().manualMergedPileCapGroups || [];
+    const prevDetached = get().detachedCombinedCapNodeIds || [];
+
+    const existing = prevGroups;
     const updated = existing
       .map((grp) => grp.filter((id) => !nodeIdsToDetach.includes(id)))
       .filter((grp) => grp.length >= 2);
 
-    const prevDetached = get().detachedCombinedCapNodeIds || [];
     const newDetached = Array.from(new Set([...prevDetached, ...nodeIdsToDetach]));
 
     set({
@@ -1131,6 +1408,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
       });
     }
+
+    recordStoreAction(
+      `Detach Nodes [${nodeIdsToDetach.join(', ')}] From Combined Cap`,
+      () => {
+        set({ manualMergedPileCapGroups: prevGroups, detachedCombinedCapNodeIds: prevDetached });
+        const p = get().activeProject;
+        if (p) {
+          ProjectStorage.saveProject({
+            ...p,
+            manualMergedPileCapGroups: prevGroups,
+            detachedCombinedCapNodeIds: prevDetached,
+            metadata: { ...p.metadata, updatedAt: new Date().toISOString() },
+          });
+        }
+      },
+      () => {
+        get().detachNodesFromCombinedPileCap(nodeIdsToDetach);
+      }
+    );
   },
 
   clearDetachedCombinedCapNodes: () => {
@@ -1164,6 +1460,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const current = get().activeProject;
     if (!current) return;
 
+    const prevSettings = { ...current.metadata.designSettings };
     const updatedMetadata: ProjectMetadata = {
       ...current.metadata,
       designSettings: { ...current.metadata.designSettings, ...settings },
@@ -1178,6 +1475,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await ProjectStorage.saveProject(updatedProject);
     const all = await ProjectStorage.getAllProjects();
     set({ activeProject: updatedProject, projects: all });
+
+    recordStoreAction(
+      'Update Design Settings',
+      async () => {
+        await get().updateDesignSettings(prevSettings);
+      },
+      async () => {
+        await get().updateDesignSettings(settings);
+      }
+    );
   },
 
   updateMemberSection: async (memberId, yd, zd, name) => {
@@ -1188,6 +1495,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const member = currentModel.members.get(memberId);
     if (!member) return;
 
+    const prevSection = { ...member.section };
     const sectionName = name || `${Math.round(zd * 1000)}x${Math.round(yd * 1000)} mm`;
     const updatedMember: Member3D = {
       ...member,
@@ -1215,6 +1523,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     await ProjectStorage.saveProject(updatedProject);
     set({ activeModel: updatedModel, activeProject: updatedProject });
+
+    recordStoreAction(
+      `Update Member ${memberId} Section to ${sectionName}`,
+      async () => {
+        await get().updateMemberSection(memberId, prevSection?.yd ?? yd, prevSection?.zd ?? zd, prevSection?.name);
+      },
+      async () => {
+        await get().updateMemberSection(memberId, yd, zd, name);
+      }
+    );
   },
 
   updateMemberMaterial: async (memberId, materialName) => {
@@ -1225,6 +1543,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const member = currentModel.members.get(memberId);
     if (!member) return;
 
+    const prevMat = member.materialName;
     const updatedMember: Member3D = {
       ...member,
       materialName,
@@ -1246,6 +1565,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     await ProjectStorage.saveProject(updatedProject);
     set({ activeModel: updatedModel, activeProject: updatedProject });
+
+    recordStoreAction(
+      `Update Member ${memberId} Material to ${materialName}`,
+      async () => {
+        if (prevMat) await get().updateMemberMaterial(memberId, prevMat);
+      },
+      async () => {
+        await get().updateMemberMaterial(memberId, materialName);
+      }
+    );
   },
 
   assignMemberLocalAxis: async (memberIds, betaAngle) => {
@@ -1253,6 +1582,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const currentProj = get().activeProject;
     if (!currentModel || !currentProj) return;
 
+    const prevBetas = memberIds.map((id) => ({ id, beta: currentModel.members.get(id)?.betaAngle || 0 }));
     const newMembers = new Map(currentModel.members);
     for (const memberId of memberIds) {
       const member = newMembers.get(memberId);
@@ -1274,12 +1604,38 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     await ProjectStorage.saveProject(updatedProject);
     set({ activeModel: updatedModel, activeProject: updatedProject });
+
+    recordStoreAction(
+      `Assign Beta Angle ${betaAngle}° to ${memberIds.length} Members`,
+      async () => {
+        const curM = get().activeModel;
+        const curP = get().activeProject;
+        if (!curM || !curP) return;
+        const restored = new Map(curM.members);
+        for (const b of prevBetas) {
+          const m = restored.get(b.id);
+          if (m) restored.set(b.id, { ...m, betaAngle: b.beta });
+        }
+        const rModel = { ...curM, members: restored };
+        const rProj = { ...curP, model: ProjectStorage.serializeModel(rModel) };
+        await ProjectStorage.saveProject(rProj);
+        set({ activeModel: rModel, activeProject: rProj });
+      },
+      async () => {
+        await get().assignMemberLocalAxis(memberIds, betaAngle);
+      }
+    );
   },
 
   batchUpdateSections: async (updates) => {
     const currentModel = get().activeModel;
     const currentProj = get().activeProject;
     if (!currentModel || !currentProj) return;
+
+    const prevSections = updates.map((u) => ({
+      memberId: u.memberId,
+      section: currentModel.members.get(u.memberId)?.section,
+    }));
 
     const newMembers = new Map(currentModel.members);
 
@@ -1312,6 +1668,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     await ProjectStorage.saveProject(updatedProject);
     set({ activeModel: updatedModel, activeProject: updatedProject });
+
+    recordStoreAction(
+      `Batch Update ${updates.length} Member Sections`,
+      async () => {
+        const revertUpdates = prevSections
+          .filter((ps) => ps.section !== undefined)
+          .map((ps) => ({
+            memberId: ps.memberId,
+            yd: ps.section!.yd ?? 0.45,
+            zd: ps.section!.zd ?? 0.3,
+            name: ps.section!.name,
+          }));
+        await get().batchUpdateSections(revertUpdates);
+      },
+      async () => {
+        await get().batchUpdateSections(updates);
+      }
+    );
   },
 
   updatePlateThickness: async (plateId, thicknessMeters) => {
@@ -1322,6 +1696,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const plate = currentModel.plates.get(plateId);
     if (!plate) return;
 
+    const prevThk = plate.thickness;
     const updatedPlate = {
       ...plate,
       thickness: thicknessMeters,
@@ -1343,12 +1718,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     await ProjectStorage.saveProject(updatedProject);
     set({ activeModel: updatedModel, activeProject: updatedProject });
+
+    recordStoreAction(
+      `Update Plate ${plateId} Thickness to ${Math.round(thicknessMeters * 1000)}mm`,
+      async () => {
+        await get().updatePlateThickness(plateId, prevThk);
+      },
+      async () => {
+        await get().updatePlateThickness(plateId, thicknessMeters);
+      }
+    );
   },
 
   batchUpdatePlateThicknesses: async (updates) => {
     const currentModel = get().activeModel;
     const currentProj = get().activeProject;
     if (!currentModel || !currentProj) return;
+
+    const prevPlates = updates.map((u) => ({
+      plateId: u.plateId,
+      thickness: currentModel.plates.get(u.plateId)?.thickness ?? 0.125,
+    }));
 
     const newPlates = new Map(currentModel.plates);
 
@@ -1375,6 +1765,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     await ProjectStorage.saveProject(updatedProject);
     set({ activeModel: updatedModel, activeProject: updatedProject });
+
+    recordStoreAction(
+      `Batch Update ${updates.length} Plate Thicknesses`,
+      async () => {
+        await get().batchUpdatePlateThicknesses(
+          prevPlates.map((p) => ({ plateId: p.plateId, thicknessMeters: p.thickness }))
+        );
+      },
+      async () => {
+        await get().batchUpdatePlateThicknesses(updates);
+      }
+    );
   },
 
   setProjectPileTypes: (types) => {
@@ -1389,6 +1791,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   assignPileTypeToSupport: (supportNodeId, pileTypeId) => {
     const prev = get().supportPileAssignments;
+    const prevVal = prev[supportNodeId];
     const updated = { ...prev, [supportNodeId]: pileTypeId };
     set({ supportPileAssignments: updated });
 
@@ -1400,10 +1803,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
       });
     }
+
+    recordStoreAction(
+      `Assign Pile Type to J${supportNodeId}`,
+      () => {
+        const cur = { ...get().supportPileAssignments };
+        if (prevVal !== undefined) cur[supportNodeId] = prevVal;
+        else delete cur[supportNodeId];
+        set({ supportPileAssignments: cur });
+        const p = get().activeProject;
+        if (p) {
+          ProjectStorage.saveProject({ ...p, supportPileAssignments: cur });
+          set({ activeProject: { ...p, supportPileAssignments: cur } });
+        }
+      },
+      () => {
+        get().assignPileTypeToSupport(supportNodeId, pileTypeId);
+      }
+    );
   },
 
   setCustomPileCapOverride: (supportNodeId, override) => {
     const prev = get().customPileCapOverrides;
+    const prevVal = prev[supportNodeId];
     const updated = { ...prev, [supportNodeId]: { ...prev[supportNodeId], ...override } };
     set({ customPileCapOverrides: updated });
 
@@ -1415,10 +1837,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
       });
     }
+
+    recordStoreAction(
+      `Override Pile Cap J${supportNodeId}`,
+      () => {
+        const cur = { ...get().customPileCapOverrides };
+        if (prevVal) cur[supportNodeId] = prevVal;
+        else delete cur[supportNodeId];
+        set({ customPileCapOverrides: cur });
+        const p = get().activeProject;
+        if (p) {
+          ProjectStorage.saveProject({ ...p, customPileCapOverrides: cur });
+          set({ activeProject: { ...p, customPileCapOverrides: cur } });
+        }
+      },
+      () => {
+        get().setCustomPileCapOverride(supportNodeId, override);
+      }
+    );
   },
 
   clearCustomPileCapOverride: (supportNodeId) => {
     const prev = { ...get().customPileCapOverrides };
+    const prevVal = prev[supportNodeId];
     delete prev[supportNodeId];
     set({ customPileCapOverrides: prev });
 
@@ -1430,10 +1871,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
       });
     }
+
+    recordStoreAction(
+      `Clear Override Pile Cap J${supportNodeId}`,
+      () => {
+        if (prevVal) {
+          const cur = { ...get().customPileCapOverrides, [supportNodeId]: prevVal };
+          set({ customPileCapOverrides: cur });
+          const p = get().activeProject;
+          if (p) {
+            ProjectStorage.saveProject({ ...p, customPileCapOverrides: cur });
+            set({ activeProject: { ...p, customPileCapOverrides: cur } });
+          }
+        }
+      },
+      () => {
+        get().clearCustomPileCapOverride(supportNodeId);
+      }
+    );
   },
 
   setCustomCombinedCapOverride: (groupId, override) => {
     const prev = get().customCombinedCapOverrides;
+    const prevVal = prev[groupId];
     const updated = { ...prev, [groupId]: { ...prev[groupId], ...override } };
     set({ customCombinedCapOverrides: updated });
 
@@ -1445,10 +1905,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
       });
     }
+
+    recordStoreAction(
+      `Override Combined Cap ${groupId}`,
+      () => {
+        const cur = { ...get().customCombinedCapOverrides };
+        if (prevVal) cur[groupId] = prevVal;
+        else delete cur[groupId];
+        set({ customCombinedCapOverrides: cur });
+        const p = get().activeProject;
+        if (p) {
+          ProjectStorage.saveProject({ ...p, customCombinedCapOverrides: cur });
+          set({ activeProject: { ...p, customCombinedCapOverrides: cur } });
+        }
+      },
+      () => {
+        get().setCustomCombinedCapOverride(groupId, override);
+      }
+    );
   },
 
   clearCustomCombinedCapOverride: (groupId: string) => {
     const prev = { ...get().customCombinedCapOverrides };
+    const prevVal = prev[groupId];
     delete prev[groupId];
     set({ customCombinedCapOverrides: prev });
 
@@ -1460,6 +1939,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
       });
     }
+
+    recordStoreAction(
+      `Clear Combined Cap Override ${groupId}`,
+      () => {
+        if (prevVal) {
+          const cur = { ...get().customCombinedCapOverrides, [groupId]: prevVal };
+          set({ customCombinedCapOverrides: cur });
+          const p = get().activeProject;
+          if (p) {
+            ProjectStorage.saveProject({ ...p, customCombinedCapOverrides: cur });
+            set({ activeProject: { ...p, customCombinedCapOverrides: cur } });
+          }
+        }
+      },
+      () => {
+        get().clearCustomCombinedCapOverride(groupId);
+      }
+    );
   },
 
   rotatePileCap: (supportNodeId, direction) => {
@@ -1500,6 +1997,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     const capsToUse = designedCaps || new Map();
 
+    const prevCustomOverrides = { ...customPileCapOverrides };
+    const prevMergedGroups = [...(manualMergedPileCapGroups || [])];
+
     const result = FoundationSpatialSizingEngine.autoSizeAll(
       activeModel,
       capsToUse,
@@ -1532,6 +2032,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
     }
 
+    recordStoreAction(
+      `Auto-size all foundations (${result.mergedNodeCount} merged, ${result.rotatedCapCount} rotated)`,
+      () => {
+        set({ manualMergedPileCapGroups: prevMergedGroups, customPileCapOverrides: prevCustomOverrides });
+        const p = get().activeProject;
+        if (p) {
+          ProjectStorage.saveProject({
+            ...p,
+            manualMergedPileCapGroups: prevMergedGroups,
+            customPileCapOverrides: prevCustomOverrides,
+            metadata: { ...p.metadata, updatedAt: new Date().toISOString() },
+          });
+          set({ activeProject: { ...p, manualMergedPileCapGroups: prevMergedGroups, customPileCapOverrides: prevCustomOverrides } });
+        }
+      },
+      () => {
+        set({ manualMergedPileCapGroups: result.newCombinedGroups, customPileCapOverrides: updatedCustomOverrides });
+        const p = get().activeProject;
+        if (p) {
+          ProjectStorage.saveProject({
+            ...p,
+            manualMergedPileCapGroups: result.newCombinedGroups,
+            customPileCapOverrides: updatedCustomOverrides,
+            metadata: { ...p.metadata, updatedAt: new Date().toISOString() },
+          });
+          set({ activeProject: { ...p, manualMergedPileCapGroups: result.newCombinedGroups, customPileCapOverrides: updatedCustomOverrides } });
+        }
+      }
+    );
+
     return result;
   },
 
@@ -1561,51 +2091,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
       });
     }
+
+    recordStoreAction(
+      'Configure Universal Rebar Diameters',
+      () => {
+        get().setUniversalRebarSelection(prev);
+      },
+      () => {
+        get().setUniversalRebarSelection(selection);
+      }
+    );
   },
 
   setUniversalLongitudinalDiameters: (dias) => {
-    const prev = get().universalRebarSelection;
-    const updated = {
-      ...prev,
-      longitudinalDiameters: dias,
-      isConfigured: dias.length > 0,
-    };
-
-    set({
-      universalRebarSelection: updated,
-      allowedColumnRebarDiameters: dias,
-      allowedBeamRebarDiameters: dias,
-    });
-
-    const currentProj = get().activeProject;
-    if (currentProj) {
-      ProjectStorage.saveProject({
-        ...currentProj,
-        universalRebarSelection: updated,
-        allowedColumnRebarDiameters: dias,
-        allowedBeamRebarDiameters: dias,
-        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
-      });
-    }
+    get().setUniversalRebarSelection({ longitudinalDiameters: dias });
   },
 
   setUniversalShearTieDiameters: (dias) => {
-    const prev = get().universalRebarSelection;
-    const updated = {
-      ...prev,
-      shearTieDiameters: dias,
-    };
-
-    set({ universalRebarSelection: updated });
-
-    const currentProj = get().activeProject;
-    if (currentProj) {
-      ProjectStorage.saveProject({
-        ...currentProj,
-        universalRebarSelection: updated,
-        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
-      });
-    }
+    get().setUniversalRebarSelection({ shearTieDiameters: dias });
   },
 
   setAllowedColumnRebarDiameters: (dias) => {
@@ -1923,6 +2426,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   // Plot / Site Action
   setPlotSite: async (plot) => {
+    const prevPlot = get().plotSite;
     set({ plotSite: plot });
     const currentProj = get().activeProject;
     if (currentProj) {
@@ -1934,6 +2438,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await ProjectStorage.saveProject(updatedProject);
       set({ activeProject: updatedProject });
     }
+
+    recordStoreAction(
+      'Update Site & Plot Configuration',
+      async () => {
+        if (prevPlot) await get().setPlotSite(prevPlot);
+      },
+      async () => {
+        await get().setPlotSite(plot);
+      }
+    );
   },
 
   fitSitePlanToModel: async (setbacks) => {
@@ -1963,6 +2477,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (Math.abs(dx) < 1e-4 && Math.abs(dy) < 1e-4 && Math.abs(dz) < 1e-4) {
       return;
     }
+
+    const prevModel = cloneModel(activeModel);
+    const prevWalls = { ...(get().architecturalWalls || {}) };
+    const prevRooms = { ...(get().architecturalRooms || {}) };
+    const prevStairs = { ...(get().architecturalStaircases || {}) };
 
     // 1. Shift structural nodes
     const newNodes = new Map<number, Node3D>();
@@ -2064,6 +2583,34 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       architecturalRooms: newRooms,
       architecturalStaircases: newStairs,
     });
+
+    recordStoreAction(
+      'Align Model to Site Setbacks',
+      async () => {
+        set({
+          activeModel: prevModel,
+          architecturalWalls: prevWalls,
+          architecturalRooms: prevRooms,
+          architecturalStaircases: prevStairs,
+        });
+        const p = get().activeProject;
+        if (p) {
+          const restoredP: StoredProject = {
+            ...p,
+            model: ProjectStorage.serializeModel(prevModel),
+            architecturalWalls: prevWalls,
+            architecturalRooms: prevRooms,
+            architecturalStaircases: prevStairs,
+            metadata: { ...p.metadata, updatedAt: new Date().toISOString() },
+          };
+          await ProjectStorage.saveProject(restoredP);
+          set({ activeProject: restoredP });
+        }
+      },
+      async () => {
+        await get().moveModelToSitePlan();
+      }
+    );
   },
 
   // Architectural Actions
@@ -2858,193 +3405,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   undoArchitecturalAction: async () => {
-    if (architecturalUndoStack.length === 0) return;
-    const action = architecturalUndoStack.pop();
-    architecturalRedoStack.push(action);
-
-    const walls = { ...(get().architecturalWalls || {}) };
-    const doors = { ...(get().architecturalDoors || {}) };
-    const windows = { ...(get().architecturalWindows || {}) };
-    const openings = { ...(get().architecturalOpenings || {}) };
-    const rooms = { ...(get().architecturalRooms || {}) };
-    const dims = { ...(get().architecturalDimensions || {}) };
-
-    switch (action.type) {
-      case 'ADD_WALL':
-        delete walls[action.wall.id];
-        break;
-      case 'UPDATE_WALL':
-        walls[action.previous.id] = action.previous;
-        break;
-      case 'DELETE_WALL':
-        walls[action.wall.id] = action.wall;
-        if (action.deletedDoors) action.deletedDoors.forEach((d: any) => { doors[d.id] = d; });
-        if (action.deletedWindows) action.deletedWindows.forEach((w: any) => { windows[w.id] = w; });
-        if (action.deletedOpenings) action.deletedOpenings.forEach((o: any) => { openings[o.id] = o; });
-        break;
-      case 'ADD_DOOR':
-        delete doors[action.door.id];
-        break;
-      case 'UPDATE_DOOR':
-        doors[action.previous.id] = action.previous;
-        break;
-      case 'DELETE_DOOR':
-        doors[action.door.id] = action.door;
-        break;
-      case 'ADD_WINDOW':
-        delete windows[action.window.id];
-        break;
-      case 'UPDATE_WINDOW':
-        windows[action.previous.id] = action.previous;
-        break;
-      case 'DELETE_WINDOW':
-        windows[action.window.id] = action.window;
-        break;
-      case 'ADD_OPENING':
-        delete openings[action.opening.id];
-        break;
-      case 'UPDATE_OPENING':
-        openings[action.previous.id] = action.previous;
-        break;
-      case 'DELETE_OPENING':
-        openings[action.opening.id] = action.opening;
-        break;
-      case 'ADD_ROOM':
-        delete rooms[action.room.id];
-        break;
-      case 'UPDATE_ROOM':
-        rooms[action.previous.id] = action.previous;
-        break;
-      case 'DELETE_ROOM':
-        rooms[action.room.id] = action.room;
-        break;
-      case 'ADD_DIMENSION':
-        delete dims[action.dimension.id];
-        break;
-      case 'DELETE_DIMENSION':
-        dims[action.dimension.id] = action.dimension;
-        break;
-    }
-
-    const currentProj = get().activeProject;
-    set({
-      architecturalWalls: walls,
-      architecturalDoors: doors,
-      architecturalWindows: windows,
-      architecturalOpenings: openings,
-      architecturalRooms: rooms,
-      architecturalDimensions: dims,
-    });
-
-    if (currentProj) {
-      const updatedProject: StoredProject = {
-        ...currentProj,
-        architecturalWalls: walls,
-        architecturalDoors: doors,
-        architecturalWindows: windows,
-        architecturalOpenings: openings,
-        architecturalRooms: rooms,
-        architecturalDimensions: dims,
-        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
-      };
-      await ProjectStorage.saveProject(updatedProject);
-      set({ activeProject: updatedProject });
-    }
+    await CommandManager.getInstance().undo();
   },
 
   redoArchitecturalAction: async () => {
-    if (architecturalRedoStack.length === 0) return;
-    const action = architecturalRedoStack.pop();
-    architecturalUndoStack.push(action);
-
-    const walls = { ...(get().architecturalWalls || {}) };
-    const doors = { ...(get().architecturalDoors || {}) };
-    const windows = { ...(get().architecturalWindows || {}) };
-    const openings = { ...(get().architecturalOpenings || {}) };
-    const rooms = { ...(get().architecturalRooms || {}) };
-    const dims = { ...(get().architecturalDimensions || {}) };
-
-    switch (action.type) {
-      case 'ADD_WALL':
-        walls[action.wall.id] = action.wall;
-        break;
-      case 'UPDATE_WALL':
-        walls[action.current.id] = action.current;
-        break;
-      case 'DELETE_WALL':
-        delete walls[action.wall.id];
-        if (action.deletedDoors) action.deletedDoors.forEach((d: any) => { delete doors[d.id]; });
-        if (action.deletedWindows) action.deletedWindows.forEach((w: any) => { delete windows[w.id]; });
-        if (action.deletedOpenings) action.deletedOpenings.forEach((o: any) => { delete openings[o.id]; });
-        break;
-      case 'ADD_DOOR':
-        doors[action.door.id] = action.door;
-        break;
-      case 'UPDATE_DOOR':
-        doors[action.current.id] = action.current;
-        break;
-      case 'DELETE_DOOR':
-        delete doors[action.door.id];
-        break;
-      case 'ADD_WINDOW':
-        windows[action.window.id] = action.window;
-        break;
-      case 'UPDATE_WINDOW':
-        windows[action.current.id] = action.current;
-        break;
-      case 'DELETE_WINDOW':
-        delete windows[action.window.id];
-        break;
-      case 'ADD_OPENING':
-        openings[action.opening.id] = action.opening;
-        break;
-      case 'UPDATE_OPENING':
-        openings[action.current.id] = action.current;
-        break;
-      case 'DELETE_OPENING':
-        delete openings[action.opening.id];
-        break;
-      case 'ADD_ROOM':
-        rooms[action.room.id] = action.room;
-        break;
-      case 'UPDATE_ROOM':
-        rooms[action.current.id] = action.current;
-        break;
-      case 'DELETE_ROOM':
-        delete rooms[action.room.id];
-        break;
-      case 'ADD_DIMENSION':
-        dims[action.dimension.id] = action.dimension;
-        break;
-      case 'DELETE_DIMENSION':
-        delete dims[action.dimension.id];
-        break;
-    }
-
-    const currentProj = get().activeProject;
-    set({
-      architecturalWalls: walls,
-      architecturalDoors: doors,
-      architecturalWindows: windows,
-      architecturalOpenings: openings,
-      architecturalRooms: rooms,
-      architecturalDimensions: dims,
-    });
-
-    if (currentProj) {
-      const updatedProject: StoredProject = {
-        ...currentProj,
-        architecturalWalls: walls,
-        architecturalDoors: doors,
-        architecturalWindows: windows,
-        architecturalOpenings: openings,
-        architecturalRooms: rooms,
-        architecturalDimensions: dims,
-        metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
-      };
-      await ProjectStorage.saveProject(updatedProject);
-      set({ activeProject: updatedProject });
-    }
+    await CommandManager.getInstance().redo();
   },
 
   runFemAnalysis: async (onProgress?: (step: number, pct: number, detail: string) => void) => {
@@ -3649,6 +4014,32 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await ProjectStorage.saveProject(updatedProj);
       set({ activeProject: updatedProj });
     }
+
+    recordStoreAction(
+      `Add Joint J${newId} (${x}, ${y}, ${z})`,
+      async () => {
+        await get().deleteStructuralElements([newId], []);
+      },
+      async () => {
+        const curM = get().activeModel;
+        const curP = get().activeProject;
+        if (!curM) return;
+        const nMap = new Map(curM.nodes);
+        nMap.set(newId, { id: newId, x, y, z, isSupport });
+        const sMap = new Map(curM.supports);
+        if (isSupport) {
+          sMap.set(newId, { nodeId: newId, type: 'FIXED', releases: { fx: false, fy: false, fz: false, mx: false, my: false, mz: false } });
+        }
+        const updated = { ...curM, nodes: nMap, supports: sMap, statistics: { ...curM.statistics, totalNodes: nMap.size, totalSupports: sMap.size } };
+        set({ activeModel: updated });
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(updated) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+      }
+    );
+
     return newId;
   },
 
@@ -3714,6 +4105,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await ProjectStorage.saveProject(updatedProj);
       set({ activeProject: updatedProj });
     }
+
+    recordStoreAction(
+      `Add Member ${newId} (J${startNodeId}-J${endNodeId})`,
+      async () => {
+        await get().deleteStructuralElements([], [newId]);
+      },
+      async () => {
+        const curM = get().activeModel;
+        const curP = get().activeProject;
+        if (!curM) return;
+        const mMap = new Map(curM.members);
+        const memObj = newMembers.get(newId);
+        if (memObj) mMap.set(newId, memObj);
+        const updated = { ...curM, members: mMap, statistics: { ...curM.statistics, totalMembers: mMap.size } };
+        set({ activeModel: updated });
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(updated) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+      }
+    );
+
     return newId;
   },
 
@@ -3757,12 +4171,48 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await ProjectStorage.saveProject(updatedProj);
       set({ activeProject: updatedProj });
     }
+
+    recordStoreAction(
+      `Add Plate ${newId}`,
+      async () => {
+        const curM = get().activeModel;
+        const curP = get().activeProject;
+        if (!curM) return;
+        const pMap = new Map(curM.plates);
+        pMap.delete(newId);
+        const updated = { ...curM, plates: pMap, statistics: { ...curM.statistics, totalPlates: pMap.size } };
+        set({ activeModel: updated });
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(updated) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+      },
+      async () => {
+        const curM = get().activeModel;
+        const curP = get().activeProject;
+        if (!curM) return;
+        const pMap = new Map(curM.plates);
+        const plObj = newPlates.get(newId);
+        if (plObj) pMap.set(newId, plObj);
+        const updated = { ...curM, plates: pMap, statistics: { ...curM.statistics, totalPlates: pMap.size } };
+        set({ activeModel: updated });
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(updated) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+      }
+    );
+
     return newId;
   },
 
   deleteStructuralElements: async (nodeIds = [], memberIds = []) => {
     const { activeModel, activeProject } = get();
     if (!activeModel) return;
+
+    const prevModel = cloneModel(activeModel);
 
     const newNodes = new Map(activeModel.nodes);
     const newMembers = new Map(activeModel.members);
@@ -3825,11 +4275,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await ProjectStorage.saveProject(updatedProj);
       set({ activeProject: updatedProj });
     }
+
+    recordStoreAction(
+      `Delete ${nodeIds.length} Nodes, ${memberIds.length} Members`,
+      async () => {
+        set({ activeModel: prevModel });
+        const curP = get().activeProject;
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(prevModel) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+      },
+      async () => {
+        await get().deleteStructuralElements(nodeIds, memberIds);
+      }
+    );
   },
 
   assignMemberSection: async (memberIds: number[], section: Partial<CrossSection>) => {
     const { activeModel, activeProject } = get();
     if (!activeModel) return;
+
+    const prevSections = memberIds.map((id) => ({ id, section: activeModel.members.get(id)?.section }));
 
     const newMembers = new Map(activeModel.members);
     memberIds.forEach((id) => {
@@ -3855,11 +4323,39 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await ProjectStorage.saveProject(updatedProj);
       set({ activeProject: updatedProj });
     }
+
+    recordStoreAction(
+      `Assign Section to ${memberIds.length} Members`,
+      async () => {
+        const curM = get().activeModel;
+        const curP = get().activeProject;
+        if (!curM) return;
+        const mMap = new Map(curM.members);
+        for (const ps of prevSections) {
+          const m = mMap.get(ps.id);
+          if (m && ps.section) {
+            mMap.set(ps.id, { ...m, section: ps.section });
+          }
+        }
+        const updated = { ...curM, members: mMap };
+        set({ activeModel: updated });
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(updated) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+      },
+      async () => {
+        await get().assignMemberSection(memberIds, section);
+      }
+    );
   },
 
   assignSupportRestraint: async (nodeIds: number[], type: 'FIXED' | 'PINNED' | 'ROLLER') => {
     const { activeModel, activeProject } = get();
     if (!activeModel) return;
+
+    const prevNodes = nodeIds.map((id) => ({ id, node: activeModel.nodes.get(id), support: activeModel.supports.get(id) }));
 
     const newSupports = new Map(activeModel.supports);
     const newNodes = new Map(activeModel.nodes);
@@ -3896,11 +4392,39 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await ProjectStorage.saveProject(updatedProj);
       set({ activeProject: updatedProj });
     }
+
+    recordStoreAction(
+      `Assign ${type} Support to ${nodeIds.length} Nodes`,
+      async () => {
+        const curM = get().activeModel;
+        const curP = get().activeProject;
+        if (!curM) return;
+        const nMap = new Map(curM.nodes);
+        const sMap = new Map(curM.supports);
+        for (const pn of prevNodes) {
+          if (pn.node) nMap.set(pn.id, pn.node);
+          if (pn.support) sMap.set(pn.id, pn.support);
+          else sMap.delete(pn.id);
+        }
+        const updated = { ...curM, nodes: nMap, supports: sMap, statistics: { ...curM.statistics, totalSupports: sMap.size } };
+        set({ activeModel: updated });
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(updated) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+      },
+      async () => {
+        await get().assignSupportRestraint(nodeIds, type);
+      }
+    );
   },
 
   assignFrameLoads: async (memberIds: number[], load: MemberLoad) => {
     const { activeModel, activeProject } = get();
     if (!activeModel) return;
+
+    const prevLoads = memberIds.map((id) => ({ id, loads: activeModel.memberLoads?.get(id) || [] }));
 
     const newMemberLoads = new Map(activeModel.memberLoads || []);
     memberIds.forEach((id) => {
@@ -3920,11 +4444,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await ProjectStorage.saveProject(updatedProj);
       set({ activeProject: updatedProj });
     }
+
+    recordStoreAction(
+      `Assign Frame Load to ${memberIds.length} Members`,
+      async () => {
+        const curM = get().activeModel;
+        const curP = get().activeProject;
+        if (!curM) return;
+        const lMap = new Map(curM.memberLoads || []);
+        for (const pl of prevLoads) {
+          lMap.set(pl.id, pl.loads);
+        }
+        const updated = { ...curM, memberLoads: lMap };
+        set({ activeModel: updated });
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(updated) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+      },
+      async () => {
+        await get().assignFrameLoads(memberIds, load);
+      }
+    );
   },
 
   deleteMemberLoads: async (memberIds: number[]) => {
     const { activeModel, activeProject } = get();
     if (!activeModel) return;
+
+    const prevLoads = memberIds.map((id) => ({ id, loads: activeModel.memberLoads?.get(id) || [] }));
 
     const newMemberLoads = new Map(activeModel.memberLoads || []);
     memberIds.forEach((id) => newMemberLoads.delete(id));
@@ -3939,11 +4488,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await ProjectStorage.saveProject(updatedProj);
       set({ activeProject: updatedProj });
     }
+
+    recordStoreAction(
+      `Delete Loads from ${memberIds.length} Members`,
+      async () => {
+        const curM = get().activeModel;
+        const curP = get().activeProject;
+        if (!curM) return;
+        const lMap = new Map(curM.memberLoads || []);
+        for (const pl of prevLoads) {
+          lMap.set(pl.id, pl.loads);
+        }
+        const updated = { ...curM, memberLoads: lMap };
+        set({ activeModel: updated });
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(updated) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+      },
+      async () => {
+        await get().deleteMemberLoads(memberIds);
+      }
+    );
   },
 
   assignShellLoads: async (levelY: number, load: ShellLoad) => {
     const { activeModel, activeProject } = get();
     if (!activeModel) return;
+
+    const prevShellLoads = activeModel.shellLoads ? [...activeModel.shellLoads] : [];
 
     const existingLoads = (activeModel.shellLoads || []).filter(
       (sl) => !(Math.abs(sl.levelY - levelY) < 0.1 && sl.loadPattern === load.loadPattern)
@@ -3960,11 +4534,32 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await ProjectStorage.saveProject(updatedProj);
       set({ activeProject: updatedProj });
     }
+
+    recordStoreAction(
+      `Assign Shell Load at ${levelY}m`,
+      async () => {
+        const curM = get().activeModel;
+        const curP = get().activeProject;
+        if (!curM) return;
+        const restored = { ...curM, shellLoads: prevShellLoads };
+        set({ activeModel: restored });
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(restored) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+      },
+      async () => {
+        await get().assignShellLoads(levelY, load);
+      }
+    );
   },
 
   assignMemberModifiers: async (memberIds: number[], modifiers: Partial<MemberModifier>) => {
     const { activeModel, activeProject } = get();
     if (!activeModel) return;
+
+    const prevModifiers = memberIds.map((id) => ({ id, mod: activeModel.memberModifiers?.get(id) }));
 
     const newModifiers = new Map(activeModel.memberModifiers || []);
     memberIds.forEach((id) => {
@@ -3990,11 +4585,40 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await ProjectStorage.saveProject(updatedProj);
       set({ activeProject: updatedProj });
     }
+
+    recordStoreAction(
+      `Assign Modifiers to ${memberIds.length} Members`,
+      async () => {
+        const curM = get().activeModel;
+        const curP = get().activeProject;
+        if (!curM) return;
+        const mMap = new Map(curM.memberModifiers || []);
+        for (const pm of prevModifiers) {
+          if (pm.mod) {
+            mMap.set(pm.id, pm.mod);
+          } else {
+            mMap.delete(pm.id);
+          }
+        }
+        const restored = { ...curM, memberModifiers: mMap };
+        set({ activeModel: restored });
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(restored) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+      },
+      async () => {
+        await get().assignMemberModifiers(memberIds, modifiers);
+      }
+    );
   },
 
   replicateStory: async (sourceElevationY: number, targetElevationsY: number[]) => {
     const { activeModel, activeProject, runFemAnalysis } = get();
     if (!activeModel || targetElevationsY.length === 0) return;
+
+    const prevModel = cloneModel(activeModel);
 
     const newNodes = new Map(activeModel.nodes);
     const newMembers = new Map(activeModel.members);
@@ -4196,6 +4820,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
 
     await runFemAnalysis();
+
+    recordStoreAction(
+      `Replicate Story from ${sourceElevationY}m`,
+      async () => {
+        set({ activeModel: cloneModel(prevModel) });
+        const curP = get().activeProject;
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(prevModel) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+        await get().runFemAnalysis();
+      },
+      async () => {
+        await get().replicateStory(sourceElevationY, targetElevationsY);
+      }
+    );
   },
 
   updateGridSystem: async (gridX: number[], gridZ: number[]) => {
@@ -4224,6 +4865,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   updateStoryHeights: async (updatedElevations: { oldElev: number; newElev: number }[]) => {
     const { activeModel, activeProject, runFemAnalysis } = get();
     if (!activeModel || updatedElevations.length === 0) return;
+
+    const prevModel = cloneModel(activeModel);
 
     const newNodes = new Map(activeModel.nodes);
     const newMembers = new Map(activeModel.members);
@@ -4282,11 +4925,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
 
     await runFemAnalysis();
+
+    recordStoreAction(
+      'Update Story Heights',
+      async () => {
+        set({ activeModel: cloneModel(prevModel) });
+        const curP = get().activeProject;
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(prevModel) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+        await get().runFemAnalysis();
+      },
+      async () => {
+        await get().updateStoryHeights(updatedElevations);
+      }
+    );
   },
 
   addStoryOnTop: async (height: number, replicateFraming: boolean = true) => {
     const { activeModel, activeProject, runFemAnalysis } = get();
     if (!activeModel || height <= 0.1) return;
+
+    const prevModel = cloneModel(activeModel);
 
     const newNodes = new Map(activeModel.nodes);
     const newMembers = new Map(activeModel.members);
@@ -4413,6 +5075,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
 
     await runFemAnalysis();
+
+    recordStoreAction(
+      `Add Story On Top (+${height}m)`,
+      async () => {
+        set({ activeModel: cloneModel(prevModel) });
+        const curP = get().activeProject;
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(prevModel) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+        await get().runFemAnalysis();
+      },
+      async () => {
+        await get().addStoryOnTop(height, replicateFraming);
+      }
+    );
   },
 
   deleteStoryLevel: async (elevationY: number) => {
@@ -4431,6 +5110,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     const nodeIdsToRemove = new Set(nodesAtLevel.map((n) => n.id));
     if (nodeIdsToRemove.size === 0) return;
+
+    const prevModel = cloneModel(activeModel);
 
     const newNodes = new Map(activeModel.nodes);
     const newMembers = new Map(activeModel.members);
@@ -4492,6 +5173,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
 
     await runFemAnalysis();
+
+    recordStoreAction(
+      `Delete Story Level at ${elevationY}m`,
+      async () => {
+        set({ activeModel: cloneModel(prevModel) });
+        const curP = get().activeProject;
+        if (curP) {
+          const proj = { ...curP, model: ProjectStorage.serializeModel(prevModel) };
+          await ProjectStorage.saveProject(proj);
+          set({ activeProject: proj });
+        }
+        await get().runFemAnalysis();
+      },
+      async () => {
+        await get().deleteStoryLevel(elevationY);
+      }
+    );
   },
 
   updateLoadPatterns: async (patterns: LoadCase[]) => {
@@ -4531,4 +5229,5 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ activeProject: updatedProj });
     }
   },
-}));
+  };
+});

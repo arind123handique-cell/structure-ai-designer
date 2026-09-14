@@ -259,9 +259,19 @@ export const FloorPlanViewer: React.FC = () => {
 
   // Handle Export Current Level to PDF — passes web toggles so PDF matches exactly what is seen
   const handleExportCurrentPdf = () => {
-    if (!activePlan) return;
     setIsExportingPdf(true);
     try {
+      if (detailSheet) {
+        PdfExportService.exportDetailSheetToPdf(detailSheet, activeProject, undefined, {
+          orientation: sheetOrientation.toLowerCase() as any,
+          theme: cadTheme === 'BLUEPRINT_DARK' ? 'dark' : 'light',
+        });
+        setPdfSuccessMessage(`Exported ${detailSheet.sheetNumber} (${detailSheet.title}) as A3 ${sheetOrientation} PDF!`);
+        setTimeout(() => setPdfSuccessMessage(null), 3500);
+        return;
+      }
+
+      if (!activePlan) return;
       PdfExportService.exportSingleFloorPlanToPdf(activePlan, activeProject, undefined, {
         showGrids,
         showDimensions,
@@ -273,6 +283,7 @@ export const FloorPlanViewer: React.FC = () => {
         selectedSectionType,
         orientation: sheetOrientation.toLowerCase() as any,
         showCrossSections,
+        theme: cadTheme === 'BLUEPRINT_DARK' ? 'dark' : 'light',
       });
       setPdfSuccessMessage(`Exported ${activePlan.sheetNumber} (${activePlan.levelName}) as A3 ${sheetOrientation} PDF!`);
       setTimeout(() => setPdfSuccessMessage(null), 3500);
@@ -288,6 +299,50 @@ export const FloorPlanViewer: React.FC = () => {
     if (floorPlans.length === 0) return;
     setIsExportingPdf(true);
     try {
+      if (sheetMode === 'BEAM_SECTIONS') {
+        const targetLevels = floorPlans.filter((fp) => !fp.isFoundationLevel);
+        const levelsToExport = targetLevels.length > 0 ? targetLevels : floorPlans;
+        const sheets: DrawingSheet[] = levelsToExport.map((level) =>
+          BeamSectionSheetEngine.buildSheet({
+            level,
+            project: {
+              savedBeamDesigns: savedBeamDesigns || {},
+              savedSlabDesigns: savedSlabDesigns || {},
+              universalRebarSelection: (activeProject as any)?.universalRebarSelection,
+              allowedColumnRebarDiameters: (activeProject as any)?.allowedColumnRebarDiameters,
+            },
+            fck: fckGrade,
+            fy: fyGrade,
+          })
+        );
+        PdfExportService.exportAllDetailSheetsToPdf(sheets, activeProject, undefined, {
+          orientation: sheetOrientation.toLowerCase() as any,
+          theme: cadTheme === 'BLUEPRINT_DARK' ? 'dark' : 'light',
+        });
+        setPdfSuccessMessage(`Exported complete A3 ${sheetOrientation} multi-page Beam Reinforcement Sections PDF set for ${sheets.length} floor levels!`);
+        setTimeout(() => setPdfSuccessMessage(null), 4000);
+        return;
+      }
+
+      if (sheetMode === 'SLAB_DETAILS') {
+        const targetLevels = floorPlans.filter((fp) => !fp.isFoundationLevel);
+        const levelsToExport = targetLevels.length > 0 ? targetLevels : floorPlans;
+        const sheets: DrawingSheet[] = levelsToExport.map((level) =>
+          SlabDetailSheetEngine.buildSheet({
+            level,
+            project: { savedSlabDesigns: savedSlabDesigns || {} },
+          })
+        );
+        PdfExportService.exportAllDetailSheetsToPdf(sheets, activeProject, undefined, {
+          orientation: sheetOrientation.toLowerCase() as any,
+          theme: cadTheme === 'BLUEPRINT_DARK' ? 'dark' : 'light',
+        });
+        setPdfSuccessMessage(`Exported complete A3 ${sheetOrientation} multi-page Slab Detailing PDF set for ${sheets.length} floor levels!`);
+        setTimeout(() => setPdfSuccessMessage(null), 4000);
+        return;
+      }
+
+      // If sheetMode === 'FRAMING', keep existing PdfExportService.exportAllFloorPlansToPdf
       PdfExportService.exportAllFloorPlansToPdf(floorPlans, activeProject, undefined, {
         showGrids,
         showDimensions,
@@ -299,6 +354,7 @@ export const FloorPlanViewer: React.FC = () => {
         selectedSectionType,
         orientation: sheetOrientation.toLowerCase() as any,
         showCrossSections,
+        theme: cadTheme === 'BLUEPRINT_DARK' ? 'dark' : 'light',
       });
       setPdfSuccessMessage(`Exported complete A3 ${sheetOrientation} multi-page PDF set for all ${floorPlans.length} floor levels!`);
       setTimeout(() => setPdfSuccessMessage(null), 4000);
@@ -366,9 +422,9 @@ export const FloorPlanViewer: React.FC = () => {
           {/* Export Current Level PDF */}
           <button
             onClick={handleExportCurrentPdf}
-            disabled={isExportingPdf || !!detailSheet}
+            disabled={isExportingPdf}
             className="flex items-center gap-1.5 px-3.5 py-1.5 bg-secondary-brand hover:bg-blue-700 text-white font-mono text-xs font-semibold rounded shadow-2xs transition-all disabled:opacity-50"
-            title="Export the currently active 2D floor plan as a vector A3 PDF drawing sheet"
+            title={detailSheet ? `Export active detail drawing sheet (${detailSheet.sheetNumber}) as a vector A3 PDF` : "Export the currently active 2D floor plan as a vector A3 PDF drawing sheet"}
           >
             <Download className="w-3.5 h-3.5" />
             <span>{isExportingPdf ? 'Exporting...' : 'Export Active Level (PDF)'}</span>
@@ -377,9 +433,9 @@ export const FloorPlanViewer: React.FC = () => {
           {/* Export Complete Multi-Page PDF Set */}
           <button
             onClick={handleExportAllPdf}
-            disabled={isExportingPdf || !!detailSheet}
+            disabled={isExportingPdf}
             className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-mono text-xs font-bold rounded shadow-2xs transition-all disabled:opacity-50"
-            title="Export all floor plans from foundation to roof into a complete multi-page PDF set"
+            title={sheetMode === 'BEAM_SECTIONS' ? 'Export complete multi-page A3 PDF set of Beam Reinforcement Sections for all levels' : sheetMode === 'SLAB_DETAILS' ? 'Export complete multi-page A3 PDF set of Slab Detailing Plans for all levels' : 'Export all floor plans from foundation to roof into a complete multi-page PDF set'}
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-300" />
             <span>Complete Building Set (PDF)</span>
@@ -561,19 +617,21 @@ export const FloorPlanViewer: React.FC = () => {
             {/* 2. Foundation Cross-Sections Visibility & Selection */}
             {activePlan.isFoundationLevel && (
               <div className="flex items-center gap-1.5 flex-wrap font-mono text-xs">
-                {/* 1-Click Hide/Show Toggle */}
+                {/* Prominent Bullet Toggle Button for Cross-Sections */}
                 <button
                   type="button"
                   onClick={() => setShowCrossSections(!showCrossSections)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded border text-xs font-semibold transition-colors ${
+                  className={`flex items-center gap-2 px-3 py-1 rounded border text-xs font-bold transition-all shadow-xs ${
                     showCrossSections
-                      ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                      ? 'bg-emerald-50 border-emerald-400 text-emerald-900 hover:bg-emerald-100 ring-1 ring-emerald-300/50'
                       : 'bg-rose-50 border-rose-300 text-rose-800 hover:bg-rose-100'
                   }`}
-                  title={showCrossSections ? 'Hide cross-sections and expand foundation plan to full sheet' : 'Show foundation cross-sections'}
+                  title={showCrossSections ? 'Bullet Button: Click to hide cross-sections and expand foundation plan to full sheet' : 'Bullet Button: Click to show cross-sections'}
                 >
-                  {showCrossSections ? <Eye className="w-3.5 h-3.5 text-emerald-600" /> : <EyeOff className="w-3.5 h-3.5 text-rose-600" />}
-                  <span>{showCrossSections ? 'Cross-Sections: Visible' : 'Cross-Sections: Hidden (Plan Only)'}</span>
+                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 transition-all ${
+                    showCrossSections ? 'bg-emerald-500 shadow-xs shadow-emerald-400 animate-pulse' : 'bg-rose-500'
+                  }`} />
+                  <span>{showCrossSections ? '● Cross-Sections: Visible' : '○ Cross-Sections: Hidden (Plan Only)'}</span>
                 </button>
 
                 {/* Specific Section Pills */}
@@ -707,6 +765,18 @@ export const FloorPlanViewer: React.FC = () => {
                             className="rounded text-sky-600 focus:ring-sky-600"
                           />
                           <span>Grade / Tie Beams</span>
+                        </label>
+                        <label className="flex items-center justify-between cursor-pointer hover:bg-emerald-50 p-1.5 rounded text-emerald-800 font-bold border border-emerald-200 bg-emerald-50/50 mt-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${showCrossSections ? 'bg-emerald-500 shadow-xs animate-pulse' : 'bg-rose-400'}`} />
+                            <span>Cross-Sections Detailing</span>
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={showCrossSections}
+                            onChange={(e) => setShowCrossSections(e.target.checked)}
+                            className="rounded text-emerald-600 focus:ring-emerald-600"
+                          />
                         </label>
                       </>
                     )}

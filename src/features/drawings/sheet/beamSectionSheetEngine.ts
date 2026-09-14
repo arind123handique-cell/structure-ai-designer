@@ -1,17 +1,22 @@
 /**
- * Beam reinforcement cross-section sheet engine.
+ * Beam reinforcement longitudinal elevation sheet engine.
  *
- * Reproduces the layout and annotation of the source AutoCAD drawing
- * `beam 1st floor cross section.dxf` (see DXF_DRAWING_ANALYSIS.md):
+ * Generates authentic, full longitudinal cross-section elevations for all beams
+ * on each floor level, reproducing AutoCAD structural detailing standards (IS 456 / IS 13920 / SP:34)
+ * matching the user's reference drawing:
  *
- *   - one scaled cross-section per beam, laid out in rows and packed left to right;
- *   - rows stack downwards, B1 at the top and the highest mark at the bottom;
- *   - row pitch 25,200 model units, cell width 8,950;
- *   - sections drawn at 4x true size so they print at 1:25 on a 1:100 sheet;
- *   - zone / stirrup strips drawn at 2x true size so they print at 1:50;
- *   - annotation vocabulary: `B1:230x450`, `3-T16`, `ST  2L-T8`, `SFR 1-T10EF`,
- *     `B8 (LOC: 0 TO 1030)`, `12-2L-T8` + `@95 C/C`, `(SCALE 1:25)`,
- *     `(SCALE: H = 1:50  / V = 1:50)`.
+ *   - Scaled longitudinal elevation per beam laid out in rows packed left to right;
+ *   - Double wireframe lines for top and soffit of concrete (fill="none", crisp CAD line weights);
+ *   - End column supports extending above and below beam with zigzag breaklines and centerlines;
+ *   - Supporting beam supports with cross-section outlines;
+ *   - Centerline dash-dot lines with top grid reference (e.g. 'A 400', 'B 400') and bottom support labels (e.g. 'C1', 'C5', 'B37');
+ *   - Top continuous through rebar (e.g. `2-T 16`) anchored with 90° downward hook into end supports;
+ *   - Top extra support rebar over supports extending 0.25L - 0.3L into span with dimension callouts;
+ *   - Bottom continuous through rebar (e.g. `2-T 16`) anchored with 90° upward hook into end supports;
+ *   - Bottom extra midspan rebar curtailed at ~0.15L from supports with bottom dimension callouts;
+ *   - 3-zone shear confinement stirrups (support - midspan - support) with vertical stirrup lines and callouts below;
+ *   - Clear span dimensions and support column width dimensions;
+ *   - Beam title and scale note below: `B1:230x450` and `(SCALE: H - 1:50 / V - 1:50)`.
  */
 
 import { BeamDesignEngine } from '@/features/design/beam/beamDesignEngine';
@@ -31,6 +36,7 @@ import {
   LAYER_SCHEDULE_TEXT,
   LAYER_TEXT,
   LAYER_TEXT_SCALE,
+  LAYER_DIMENSION,
   SECTION_SCALE,
   STRIP_SCALE,
   SheetBuilder,
@@ -46,10 +52,10 @@ export const ROW_PITCH = 25200;
 /** Widest zone strip drawn under a detail, in model units. */
 export const MAX_STRIP_WIDTH = 8250;
 /** Room either side of the strip for grid bubbles, support marks and dimensions. */
-const CELL_MARGIN = 4400;
-const MIN_CELL_WIDTH = 6200;
+export const CELL_MARGIN = 4400;
+export const MIN_CELL_WIDTH = 6200;
 /** Aspect ratio (width / height) the finished sheet aims for. */
-const TARGET_ASPECT = 1.4;
+export const TARGET_ASPECT = 1.4;
 
 /** Zone strip width for a beam, drawn at 1:50 and capped to the sheet width. */
 export const stripWidthFor = (spanM: number): number =>
@@ -61,8 +67,7 @@ export const cellWidthFor = (spanM: number): number =>
 
 /**
  * Chooses how many details go across a row so the finished sheet is close to a
- * landscape A-series proportion. The source sheet packs 1-5 details per row,
- * with the row width set by the widest schedule strip in that row.
+ * landscape A-series proportion.
  */
 export const detailsPerRow = (cellWidths: number[], target = TARGET_ASPECT): number => {
   const n = cellWidths.length;
@@ -82,8 +87,6 @@ export const detailsPerRow = (cellWidths: number[], target = TARGET_ASPECT): num
   }
   return best;
 };
-/** Distance from the row datum up to the underside of each section detail. */
-const SECTION_BASE_OFFSET = 4600;
 
 export interface RebarLine {
   count: number;
@@ -100,6 +103,13 @@ export interface BeamZone {
   stirrupDia: number;
 }
 
+export interface BeamCurtailmentData {
+  topCutoffLeftMm?: number;
+  topCutoffRightMm?: number;
+  botStartOffsetMm?: number;
+  botLengthMm?: number;
+}
+
 export interface BeamSectionDesign {
   memberId: number;
   mark: string;
@@ -108,6 +118,7 @@ export interface BeamSectionDesign {
   spanM: number;
   top: { through: RebarLine; extra?: RebarLine };
   bottom: { through: RebarLine; extra?: RebarLine };
+  curtailmentDetails?: BeamCurtailmentData;
   sideFace?: RebarLine;
   stirrups: { dia: number; legs: number; spacingSupport: number; spacingMid: number };
   zones: BeamZone[];
@@ -123,10 +134,16 @@ export interface BeamSectionSheetInput {
   fy: number;
 }
 
+export interface BeamSupportDetail {
+  type: 'COLUMN' | 'BEAM' | 'CANTILEVER';
+  label: string;
+  widthMm: number;
+  depthMm: number;
+  gridLabel: string;
+}
+
 /** Round down to the nearest 25 mm, as used for practical stirrup spacings. */
 const round25 = (mm: number) => Math.max(50, Math.floor(mm / 25) * 25);
-
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 export class BeamSectionSheetEngine {
   /**
@@ -167,7 +184,7 @@ export class BeamSectionSheetEngine {
       if (resulting) designs.push(resulting);
     });
 
-    // B1 lowest mark first: the source sheet stacks B1 at the top.
+    // B1 lowest mark first: stacks B1 at the top.
     return designs.sort((a, b) => this.markOrder(a.mark) - this.markOrder(b.mark));
   }
 
@@ -200,13 +217,16 @@ export class BeamSectionSheetEngine {
     let topExtra: RebarLine | undefined;
     let botThrough: RebarLine;
     let botExtra: RebarLine | undefined;
+    let topCutoffLeftMm: number | undefined;
+    let topCutoffRightMm: number | undefined;
+    let botStartOffsetMm: number | undefined;
+    let botLengthMm: number | undefined;
     let sideFace: RebarLine | undefined;
     let stirrupDia: number;
     let stirrupCount: number;
     let spacingSupport: number;
     let spacingMid: number;
     let source: 'SAVED' | 'LIVE';
-    // Ductility + curtailment data used to place the stirrup zones.
     let zoneCtx: { ductility?: any; curtailment?: any; effectiveDepth?: number };
 
     if (savedBm) {
@@ -219,6 +239,18 @@ export class BeamSectionSheetEngine {
       botExtra = cur.extraBottomMidspan?.hasExtra
         ? this.toRebarLine(cur.extraBottomMidspan, undefined, undefined, 16)
         : undefined;
+
+      if (cur.extraTopSupport?.cutoffLength) {
+        topCutoffLeftMm = Math.round(cur.extraTopSupport.cutoffLength * 1000);
+        topCutoffRightMm = topCutoffLeftMm;
+      }
+      if (cur.extraBottomMidspan?.startOffset) {
+        botStartOffsetMm = Math.round(cur.extraBottomMidspan.startOffset * 1000);
+      }
+      if (cur.extraBottomMidspan?.length) {
+        botLengthMm = Math.round(cur.extraBottomMidspan.length * 1000);
+      }
+
       sideFace = cur.sideFaceBars?.diameter
         ? {
             count: Math.max(1, Math.round((cur.sideFaceBars.countTotal || 2) / 2)),
@@ -231,10 +263,10 @@ export class BeamSectionSheetEngine {
       stirrupCount = savedBm.shear?.legs || 2;
       const spacingProv = savedBm.shear?.spacing_prov || savedBm.stirrupSpacing || 125;
       const duct = savedBm.ductility || {};
-      spacingSupport = round25(
+      spacingSupport = Math.round(
         Math.min(spacingProv, duct.confinementHoopSpacingMax || spacingProv)
       );
-      spacingMid = round25(Math.min(spacingProv, duct.midSpanHoopSpacingMax || spacingProv));
+      spacingMid = Math.round(Math.min(spacingProv, duct.midSpanHoopSpacingMax || spacingProv));
       zoneCtx = { ductility: duct, curtailment: savedBm.curtailment, effectiveDepth: savedBm.effectiveDepth };
       source = 'SAVED';
     } else {
@@ -265,6 +297,18 @@ export class BeamSectionSheetEngine {
       botExtra = cur.extraBottomMidspan?.hasExtra
         ? this.toRebarLine(cur.extraBottomMidspan, undefined, undefined, 16)
         : undefined;
+
+      if (cur.extraTopSupport?.cutoffLength) {
+        topCutoffLeftMm = Math.round(cur.extraTopSupport.cutoffLength * 1000);
+        topCutoffRightMm = topCutoffLeftMm;
+      }
+      if (cur.extraBottomMidspan?.startOffset) {
+        botStartOffsetMm = Math.round(cur.extraBottomMidspan.startOffset * 1000);
+      }
+      if (cur.extraBottomMidspan?.length) {
+        botLengthMm = Math.round(cur.extraBottomMidspan.length * 1000);
+      }
+
       sideFace = cur.sideFaceBars?.diameter
         ? {
             count: Math.max(1, Math.round((cur.sideFaceBars.countTotal || 2) / 2)),
@@ -309,6 +353,12 @@ export class BeamSectionSheetEngine {
       spanM,
       top: { through: fix(topThrough, 12)!, extra: fix(topExtra, 16) },
       bottom: { through: fix(botThrough, 16)!, extra: fix(botExtra, 16) },
+      curtailmentDetails: {
+        topCutoffLeftMm,
+        topCutoffRightMm,
+        botStartOffsetMm,
+        botLengthMm,
+      },
       sideFace,
       stirrups: { dia: stirrupDia, legs: stirrupCount, spacingSupport, spacingMid },
       zones,
@@ -333,8 +383,7 @@ export class BeamSectionSheetEngine {
   /**
    * Builds the reinforcement zones along the span. When ductile detailing
    * requires closer hoops than the shear design, the beam gets the three-zone
-   * support / mid-span / support split seen on the source sheet; otherwise it
-   * is a single uniform zone.
+   * support / mid-span / support split; otherwise it is a single uniform zone.
    */
   private static computeZones(
     spanM: number,
@@ -351,10 +400,8 @@ export class BeamSectionSheetEngine {
     if (ctx.ductility?.confinementZoneLength) {
       supZone = Math.round(ctx.ductility.confinementZoneLength);
     } else if (spacingSupport < spacingMid) {
-      // confinement zone is 2d long; fall back to 0.18L when d is unknown
       supZone = Math.round(ctx.effectiveDepth ? 2 * ctx.effectiveDepth : L * 0.18);
     }
-    // A saved explicit cut-off length wins when it is the longer of the two.
     const cutoffMm = ctx.curtailment?.extraTopSupport?.cutoffLength
       ? Math.round(ctx.curtailment.extraTopSupport.cutoffLength * 1000)
       : 0;
@@ -403,13 +450,22 @@ export class BeamSectionSheetEngine {
 
     return builder.build({
       sheetNumber,
-      title: 'BEAM REINFORCEMENT CROSS-SECTIONS & STIRRUP ZONE SCHEDULE',
-      subtitle: `${designs.length} beam sections · ${columns} per row · IS 456 / IS 13920 detailing`,
+      title: 'BEAM REINFORCEMENT LONGITUDINAL ELEVATIONS & DETAILING',
+      subtitle: `${designs.length} beam elevations · ${columns} per row · IS 456 / IS 13920 detailing`,
       levelName: level.levelName,
-      notes: ['(SCALE 1:25)', '(SCALE: H = 1:50  / V = 1:50)', 'All dimensions in mm'],
+      notes: [
+        '(SCALE: H - 1:50 / V - 1:50)',
+        '(SCALE: H = 1:50  / V = 1:50)',
+        '(SCALE 1:25)',
+        'All dimensions in mm',
+      ],
     });
   }
 
+  /**
+   * Generates a full longitudinal cross-section elevation for the beam,
+   * matching authentic AutoCAD structural detailing standards and the reference drawing.
+   */
   private static drawDetail(
     b: SheetBuilder,
     design: BeamSectionDesign,
@@ -418,36 +474,532 @@ export class BeamSectionSheetEngine {
     rowBaseY: number,
     level: FloorPlanLevel
   ) {
+    const S = STRIP_SCALE; // 2 drawing units per mm
     const cx = cellX + cellW / 2;
-    const w = design.b * SECTION_SCALE;
-    const h = design.D * SECTION_SCALE;
-    const x0 = cx - w / 2;
-    const y0 = rowBaseY + SECTION_BASE_OFFSET;
 
-    this.drawSection(b, design, x0, y0, w, h);
+    const beam = (level.beams || []).find((bm) => bm.memberId === design.memberId) || {
+      memberId: design.memberId,
+      label: design.mark,
+      startNodeId: 1,
+      endNodeId: 2,
+      startX: 0,
+      startZ: 0,
+      endX: design.spanM,
+      endZ: 0,
+      length: design.spanM,
+      width: design.b / 1000,
+      depth: design.D / 1000,
+      sectionName: `${design.b}x${design.D}`,
+    };
 
-    // Beam size label + per-detail scale note (the source writes both).
-    // Vertical order: section, width dim, size label, scale notes.
-    b.text(LAYER_LABELS.name, cx, y0 - 1900, `${design.mark}:${design.b}x${design.D}`, TEXT_H.LABEL, {
+    const supLeft = this.resolveSupport(level, beam, 'start');
+    const supRight = this.resolveSupport(level, beam, 'end');
+
+    const totalSpanMm = Math.round(design.spanM * 1000);
+    const clearSpanMm = Math.max(1000, totalSpanMm - Math.round(supLeft.widthMm / 2 + supRight.widthMm / 2));
+    const spanUnits = clearSpanMm * S;
+    const D_units = design.D * S;
+
+    const xLeft = cx - spanUnits / 2;
+    const xRight = cx + spanUnits / 2;
+
+    const yBot = rowBaseY + 6500;
+    const yTop = yBot + D_units;
+
+    // -----------------------------------------------------------------------
+    // 1. Concrete Outline: beam top and soffit wireframe lines (yellow)
+    // -----------------------------------------------------------------------
+    b.line(LAYER_CONCRETE.name, xLeft, yTop, xRight, yTop);
+    b.line(LAYER_CONCRETE.name, xLeft, yBot, xRight, yBot);
+
+    // -----------------------------------------------------------------------
+    // 2. Left End Support (Column or Beam)
+    // -----------------------------------------------------------------------
+    const wLeftUnits = supLeft.widthMm * S;
+    const xColLeftOut = xLeft - wLeftUnits;
+    const xClLeft = xLeft - wLeftUnits / 2;
+
+    if (supLeft.type === 'COLUMN') {
+      const yColTop = yTop + 1400;
+      const yColBot = yBot - 1400;
+
+      // Outer vertical column edge
+      b.line(LAYER_CONCRETE.name, xColLeftOut, yColBot, xColLeftOut, yColTop);
+      // Inner column edge segments
+      b.line(LAYER_CONCRETE.name, xLeft, yTop, xLeft, yColTop);
+      b.line(LAYER_CONCRETE.name, xLeft, yColBot, xLeft, yBot);
+      b.line(LAYER_CONCRETE.name, xLeft, yBot, xLeft, yTop);
+
+      // Breaklines
+      this.drawBreakline(b, xColLeftOut, xLeft, yColTop);
+      this.drawBreakline(b, xColLeftOut, xLeft, yColBot);
+
+      // Dash-dot centerline
+      this.drawCenterLine(b, xClLeft, yColBot - 500, yColTop + 850);
+      b.arrowHead(LAYER_GRID.name, xClLeft, yColTop + 800, Math.PI / 2, 85);
+      b.text(LAYER_GRID.name, xClLeft, yColTop + 1100, supLeft.gridLabel, TEXT_H.GRID, {
+        anchor: 'middle',
+        bold: true,
+      });
+      b.dimHorizontal(xColLeftOut, xLeft, yColTop + 450, supLeft.widthMm, {
+        textHeight: TEXT_H.CALLOUT,
+      });
+      b.text(LAYER_LABELS_SUPPORT.name, xClLeft, yColBot - 450, supLeft.label, TEXT_H.GRID, {
+        anchor: 'middle',
+        bold: true,
+      });
+    } else if (supLeft.type === 'BEAM') {
+      // Supporting beam rectangle
+      b.rect(LAYER_CONCRETE.name, xColLeftOut, yBot, wLeftUnits, D_units);
+      this.drawCenterLine(b, xClLeft, yBot - 800, yTop + 1100);
+      b.arrowHead(LAYER_GRID.name, xClLeft, yTop + 1050, Math.PI / 2, 85);
+      b.text(LAYER_GRID.name, xClLeft, yTop + 1350, supLeft.gridLabel, TEXT_H.GRID, {
+        anchor: 'middle',
+        bold: true,
+      });
+      b.dimHorizontal(xColLeftOut, xLeft, yTop + 650, supLeft.widthMm, {
+        textHeight: TEXT_H.CALLOUT,
+      });
+      b.text(LAYER_LABELS_SUPPORT.name, xClLeft, yBot - 500, supLeft.label, TEXT_H.GRID, {
+        anchor: 'middle',
+        bold: true,
+      });
+    } else {
+      b.line(LAYER_CONCRETE.name, xLeft, yBot, xLeft, yTop);
+    }
+
+    // -----------------------------------------------------------------------
+    // 3. Right End Support (Column or Beam)
+    // -----------------------------------------------------------------------
+    const wRightUnits = supRight.widthMm * S;
+    const xColRightOut = xRight + wRightUnits;
+    const xClRight = xRight + wRightUnits / 2;
+
+    if (supRight.type === 'COLUMN') {
+      const yColTop = yTop + 1400;
+      const yColBot = yBot - 1400;
+
+      // Outer vertical column edge
+      b.line(LAYER_CONCRETE.name, xColRightOut, yColBot, xColRightOut, yColTop);
+      // Inner column edge segments
+      b.line(LAYER_CONCRETE.name, xRight, yTop, xRight, yColTop);
+      b.line(LAYER_CONCRETE.name, xRight, yColBot, xRight, yBot);
+      b.line(LAYER_CONCRETE.name, xRight, yBot, xRight, yTop);
+
+      // Breaklines
+      this.drawBreakline(b, xRight, xColRightOut, yColTop);
+      this.drawBreakline(b, xRight, xColRightOut, yColBot);
+
+      // Dash-dot centerline
+      this.drawCenterLine(b, xClRight, yColBot - 500, yColTop + 850);
+      b.arrowHead(LAYER_GRID.name, xClRight, yColTop + 800, Math.PI / 2, 85);
+      b.text(LAYER_GRID.name, xClRight, yColTop + 1100, supRight.gridLabel, TEXT_H.GRID, {
+        anchor: 'middle',
+        bold: true,
+      });
+      b.dimHorizontal(xRight, xColRightOut, yColTop + 450, supRight.widthMm, {
+        textHeight: TEXT_H.CALLOUT,
+      });
+      b.text(LAYER_LABELS_SUPPORT.name, xClRight, yColBot - 450, supRight.label, TEXT_H.GRID, {
+        anchor: 'middle',
+        bold: true,
+      });
+    } else if (supRight.type === 'BEAM') {
+      b.rect(LAYER_CONCRETE.name, xRight, yBot, wRightUnits, D_units);
+      this.drawCenterLine(b, xClRight, yBot - 800, yTop + 1100);
+      b.arrowHead(LAYER_GRID.name, xClRight, yTop + 1050, Math.PI / 2, 85);
+      b.text(LAYER_GRID.name, xClRight, yTop + 1350, supRight.gridLabel, TEXT_H.GRID, {
+        anchor: 'middle',
+        bold: true,
+      });
+      b.dimHorizontal(xRight, xColRightOut, yTop + 650, supRight.widthMm, {
+        textHeight: TEXT_H.CALLOUT,
+      });
+      b.text(LAYER_LABELS_SUPPORT.name, xClRight, yBot - 500, supRight.label, TEXT_H.GRID, {
+        anchor: 'middle',
+        bold: true,
+      });
+    } else {
+      b.line(LAYER_CONCRETE.name, xRight, yBot, xRight, yTop);
+    }
+
+    // -----------------------------------------------------------------------
+    // 4. Longitudinal Reinforcement (LAYER_REBAR, cyan)
+    // -----------------------------------------------------------------------
+    const covUnits = BEAM_COVER * S; // 60 units
+    const yTopBar = yTop - covUnits - 25;
+    const yBotBar = yBot + covUnits + 25;
+
+    const xAnchLeft = supLeft.type === 'CANTILEVER' ? xLeft + covUnits : xColLeftOut + covUnits;
+    const xAnchRight = supRight.type === 'CANTILEVER' ? xRight - covUnits : xColRightOut - covUnits;
+
+    // A. Top continuous through bar with 90° downward hooks
+    b.poly(
+      LAYER_REBAR.name,
+      [
+        [xAnchLeft, yTopBar - 280],
+        [xAnchLeft, yTopBar],
+        [xAnchRight, yTopBar],
+        [xAnchRight, yTopBar - 280],
+      ],
+      false
+    );
+
+    const topThruCallout = `${design.top.through.count}-T ${design.top.through.dia}`;
+    const topCalloutX = xLeft + spanUnits * 0.22;
+    const topCalloutY = yTopBar + 220;
+    b.leader(LAYER_REBAR.name, topCalloutX, topCalloutY - 40, topCalloutX, yTopBar, {
+      h: TEXT_H.CALLOUT,
+    });
+    b.text(LAYER_REBAR.name, topCalloutX, topCalloutY, topThruCallout, TEXT_H.CALLOUT, {
       anchor: 'middle',
-      underline: true,
       bold: true,
     });
-    b.text(LAYER_TEXT_SCALE.name, cx, y0 - 2600, '(SCALE 1:25)', TEXT_H.CALLOUT, { anchor: 'middle' });
+
+    // B. Top extra support rebar (hogging reinforcement over supports)
+    if (design.top.extra && design.top.extra.count > 0) {
+      const extraCallout = `${design.top.extra.count}-T ${design.top.extra.dia}`;
+      const cutLeftMm = design.curtailmentDetails?.topCutoffLeftMm || Math.round(clearSpanMm * 0.28);
+      const xCutLeft = xLeft + cutLeftMm * S;
+      const yTopExtra = yTopBar - 45;
+
+      // Left support extra bar with downward hook
+      b.poly(
+        LAYER_REBAR.name,
+        [
+          [xAnchLeft, yTopExtra - 200],
+          [xAnchLeft, yTopExtra],
+          [xCutLeft, yTopExtra],
+        ],
+        false
+      );
+      b.line(LAYER_REBAR.name, xCutLeft, yTopExtra - 15, xCutLeft, yTopExtra + 15);
+
+      const extraLeftCalloutX = (xLeft + xCutLeft) / 2;
+      b.leader(LAYER_REBAR.name, extraLeftCalloutX, yTopBar + 380, extraLeftCalloutX, yTopExtra, {
+        h: TEXT_H.CALLOUT,
+      });
+      b.text(LAYER_REBAR.name, extraLeftCalloutX, yTopBar + 420, extraCallout, TEXT_H.CALLOUT, {
+        anchor: 'middle',
+        bold: true,
+      });
+      b.dimHorizontal(xLeft, xCutLeft, yTop + 750, cutLeftMm, { textHeight: TEXT_H.CALLOUT });
+
+      // Right support extra bar with downward hook
+      const cutRightMm = design.curtailmentDetails?.topCutoffRightMm || Math.round(clearSpanMm * 0.28);
+      const xCutRight = xRight - cutRightMm * S;
+
+      b.poly(
+        LAYER_REBAR.name,
+        [
+          [xCutRight, yTopExtra],
+          [xAnchRight, yTopExtra],
+          [xAnchRight, yTopExtra - 200],
+        ],
+        false
+      );
+      b.line(LAYER_REBAR.name, xCutRight, yTopExtra - 15, xCutRight, yTopExtra + 15);
+
+      const extraRightCalloutX = (xCutRight + xRight) / 2;
+      b.leader(LAYER_REBAR.name, extraRightCalloutX, yTopBar + 380, extraRightCalloutX, yTopExtra, {
+        h: TEXT_H.CALLOUT,
+      });
+      b.text(LAYER_REBAR.name, extraRightCalloutX, yTopBar + 420, extraCallout, TEXT_H.CALLOUT, {
+        anchor: 'middle',
+        bold: true,
+      });
+      b.dimHorizontal(xCutRight, xRight, yTop + 750, cutRightMm, { textHeight: TEXT_H.CALLOUT });
+    }
+
+    // C. Bottom continuous through bar with 90° upward hooks
+    b.poly(
+      LAYER_REBAR.name,
+      [
+        [xAnchLeft, yBotBar + 280],
+        [xAnchLeft, yBotBar],
+        [xAnchRight, yBotBar],
+        [xAnchRight, yBotBar + 280],
+      ],
+      false
+    );
+
+    const botThruCallout = `${design.bottom.through.count}-T ${design.bottom.through.dia}`;
+    const botCalloutX = xLeft + spanUnits * 0.22;
+    const botCalloutY = yBotBar - 220;
+    b.leader(LAYER_REBAR.name, botCalloutX, botCalloutY + 40, botCalloutX, yBotBar, {
+      h: TEXT_H.CALLOUT,
+    });
+    b.text(LAYER_REBAR.name, botCalloutX, botCalloutY, botThruCallout, TEXT_H.CALLOUT, {
+      anchor: 'middle',
+      bold: true,
+    });
+
+    // D. Bottom extra midspan rebar
+    if (design.bottom.extra && design.bottom.extra.count > 0) {
+      const startOffMm = design.curtailmentDetails?.botStartOffsetMm || Math.round(clearSpanMm * 0.15);
+      const midLenMm = design.curtailmentDetails?.botLengthMm || Math.max(500, clearSpanMm - 2 * startOffMm);
+      const xMidStart = xLeft + startOffMm * S;
+      const xMidEnd = xMidStart + midLenMm * S;
+      const yBotExtra = yBotBar + 45;
+
+      b.line(LAYER_REBAR.name, xMidStart, yBotExtra, xMidEnd, yBotExtra);
+      b.line(LAYER_REBAR.name, xMidStart, yBotExtra - 15, xMidStart, yBotExtra + 15);
+      b.line(LAYER_REBAR.name, xMidEnd, yBotExtra - 15, xMidEnd, yBotExtra + 15);
+
+      const botExtraCallout = `${design.bottom.extra.count}-T ${design.bottom.extra.dia}`;
+      const midCalloutX = (xMidStart + xMidEnd) / 2;
+      b.leader(LAYER_REBAR.name, midCalloutX, yBotExtra + 160, midCalloutX, yBotExtra, {
+        h: TEXT_H.CALLOUT,
+      });
+      b.text(LAYER_REBAR.name, midCalloutX, yBotExtra + 200, botExtraCallout, TEXT_H.CALLOUT, {
+        anchor: 'middle',
+        bold: true,
+      });
+      b.dimHorizontal(xMidStart, xMidEnd, yBot - 880, midLenMm, { textHeight: TEXT_H.CALLOUT });
+    }
+
+    // -----------------------------------------------------------------------
+    // 5. Stirrups & Confinement Zones across Beam Elevation (LAYER_LINK)
+    // -----------------------------------------------------------------------
+    const zones = design.zones && design.zones.length > 0
+      ? design.zones
+      : [
+          {
+            startMm: 0,
+            endMm: clearSpanMm,
+            label: `${design.mark} (LOC: 0 TO ${clearSpanMm})`,
+            spacing: design.stirrups.spacingSupport,
+            stirrupCount: Math.ceil(clearSpanMm / design.stirrups.spacingSupport) + 1,
+            stirrupDia: design.stirrups.dia,
+          },
+        ];
+
+    zones.forEach((zone) => {
+      const zStartX = xLeft + (zone.startMm / totalSpanMm) * spanUnits;
+      const zEndX = xLeft + (zone.endMm / totalSpanMm) * spanUnits;
+
+      // Vertical zone boundaries
+      b.line(LAYER_LINK.name, zStartX, yBotBar, zStartX, yTopBar);
+      b.line(LAYER_LINK.name, zEndX, yBotBar, zEndX, yTopBar);
+
+      // Representative stirrup lines across beam elevation
+      const step = Math.max(zone.spacing * S, 180);
+      for (let sx = zStartX + step; sx < zEndX - step * 0.4; sx += step) {
+        b.line(LAYER_LINK.name, sx, yBotBar, sx, yTopBar);
+      }
+    });
+
+    // -----------------------------------------------------------------------
+    // 6. Stirrup Zone Callouts & Dimensions Below
+    // -----------------------------------------------------------------------
+    if (zones.length >= 3) {
+      // Left Confinement Zone
+      const z0Len = Math.round(zones[0].endMm - zones[0].startMm);
+      const z0Cx = xLeft + (z0Len * S) / 2;
+      b.dimHorizontal(xLeft, xLeft + z0Len * S, yBot - 500, z0Len, { textHeight: TEXT_H.CALLOUT });
+      b.text(
+        LAYER_SCHEDULE_TEXT.name,
+        z0Cx,
+        yBot - 750,
+        `${zones[0].stirrupCount}-${design.stirrups.legs}L-T${zones[0].stirrupDia}`,
+        TEXT_H.CALLOUT,
+        { anchor: 'middle', bold: true }
+      );
+      b.text(LAYER_SCHEDULE_TEXT.name, z0Cx, yBot - 980, `@${zones[0].spacing} C/C`, TEXT_H.CALLOUT, {
+        anchor: 'middle',
+      });
+      b.text(LAYER_SCHEDULE_TEXT.name, z0Cx, yBot - 1200, `${z0Len}`, TEXT_H.CALLOUT, { anchor: 'middle' });
+
+      // Midspan Zone
+      const z1Cx = cx;
+      b.text(
+        LAYER_SCHEDULE_TEXT.name,
+        z1Cx,
+        yBot - 750,
+        `${zones[1].stirrupCount}-${design.stirrups.legs}L-T${zones[1].stirrupDia}`,
+        TEXT_H.CALLOUT,
+        { anchor: 'middle', bold: true }
+      );
+      b.text(LAYER_SCHEDULE_TEXT.name, z1Cx, yBot - 980, `@${zones[1].spacing} C/C`, TEXT_H.CALLOUT, {
+        anchor: 'middle',
+      });
+
+      // Right Confinement Zone
+      const z2Len = Math.round(zones[2].endMm - zones[2].startMm);
+      const z2Cx = xRight - (z2Len * S) / 2;
+      b.dimHorizontal(xRight - z2Len * S, xRight, yBot - 500, z2Len, { textHeight: TEXT_H.CALLOUT });
+      b.text(
+        LAYER_SCHEDULE_TEXT.name,
+        z2Cx,
+        yBot - 750,
+        `${zones[2].stirrupCount}-${design.stirrups.legs}L-T${zones[2].stirrupDia}`,
+        TEXT_H.CALLOUT,
+        { anchor: 'middle', bold: true }
+      );
+      b.text(LAYER_SCHEDULE_TEXT.name, z2Cx, yBot - 980, `@${zones[2].spacing} C/C`, TEXT_H.CALLOUT, {
+        anchor: 'middle',
+      });
+      b.text(LAYER_SCHEDULE_TEXT.name, z2Cx, yBot - 1200, `${z2Len}`, TEXT_H.CALLOUT, { anchor: 'middle' });
+    } else {
+      // Uniform zone
+      b.text(
+        LAYER_SCHEDULE_TEXT.name,
+        cx,
+        yBot - 750,
+        `${zones[0].stirrupCount}-${design.stirrups.legs}L-T${zones[0].stirrupDia}`,
+        TEXT_H.CALLOUT,
+        { anchor: 'middle', bold: true }
+      );
+      b.text(LAYER_SCHEDULE_TEXT.name, cx, yBot - 980, `@${zones[0].spacing} C/C`, TEXT_H.CALLOUT, {
+        anchor: 'middle',
+      });
+    }
+
+    // Schedule location reference and subtle separator line
+    b.text(LAYER_SCHEDULE_TEXT.name, cx, yBot - 1420, zones[0].label, TEXT_H.CALLOUT * 0.85, {
+      anchor: 'middle',
+    });
+    b.line(LAYER_SCHEDULE_BORDER.name, cx - 1100, yBot - 1580, cx + 1100, yBot - 1580);
+
+    // General text layer callout for stirrup specification
     b.text(
-      LAYER_TEXT_SCALE.name,
+      LAYER_TEXT.name,
       cx,
-      y0 - 3200,
-      '(SCALE: H = 1:50  / V = 1:50)',
+      yTop + 200,
+      `ST  ${design.stirrups.legs}L-T${design.stirrups.dia}`,
       TEXT_H.CALLOUT,
       { anchor: 'middle' }
     );
 
-    this.drawZoneStrip(b, design, cellX, cellW, y0 + h + 4300, level);
+    // -----------------------------------------------------------------------
+    // 7. Top Dimensions: Clear span & column width
+    // -----------------------------------------------------------------------
+    b.dimHorizontal(xLeft, xRight, yTop + 1400, clearSpanMm, { textHeight: TEXT_H.CALLOUT });
+
+    // -----------------------------------------------------------------------
+    // 8. Beam Title & Scale Note Below (in cyan / Labels layer)
+    // -----------------------------------------------------------------------
+    b.text(LAYER_LABELS.name, cx, yBot - 1850, `${design.mark}:${design.b}x${design.D}`, TEXT_H.LABEL, {
+      anchor: 'middle',
+      bold: true,
+      underline: true,
+    });
+    b.text(LAYER_TEXT_SCALE.name, cx, yBot - 2350, '(SCALE: H - 1:50 / V - 1:50)', TEXT_H.CALLOUT, {
+      anchor: 'middle',
+    });
+    b.text(LAYER_TEXT.name, cx, yBot - 2800, '(SCALE 1:25)', TEXT_H.CALLOUT, {
+      anchor: 'middle',
+    });
+
+    // 9. Scaled cross-section detail (4x, 1:25) placed below the elevation title
+    const secW = design.b * SECTION_SCALE;
+    const secH = design.D * SECTION_SCALE;
+    const secX0 = cx - secW / 2;
+    const secY0 = yBot - 3300 - secH;
+    this.drawSection(b, design, secX0, secY0, secW, secH);
   }
 
-  /** The scaled cross-section with bars, link, callouts and dimensions. */
-  private static drawSection(
+  /** Helper to resolve column or beam support details at start/end of beam. */
+  public static resolveSupport(
+    level: FloorPlanLevel,
+    beam: FloorBeamInfo,
+    which: 'start' | 'end'
+  ): BeamSupportDetail {
+    const nodeId = which === 'start' ? beam.startNodeId : beam.endNodeId;
+    const pt = which === 'start' ? { x: beam.startX, z: beam.startZ } : { x: beam.endX, z: beam.endZ };
+
+    // 1. Column at node or within 250mm
+    const col = (level.columns || []).find(
+      (c) => c.nodeId === nodeId || Math.hypot(c.x - pt.x, c.z - pt.z) < 0.25
+    );
+    if (col) {
+      const colW = Math.round((col.width || 0.4) * 1000) || 400;
+      const colD = Math.round((col.depth || col.width || 0.4) * 1000) || 400;
+      const grid = this.findGridLabel(level, beam.memberId, which) || (which === 'start' ? 'A' : 'B');
+      return {
+        type: 'COLUMN',
+        label: col.label || `C${col.columnSlNo || 1}`,
+        widthMm: colW,
+        depthMm: colD,
+        gridLabel: grid,
+      };
+    }
+
+    // 2. Intersecting / supporting beam at node
+    const otherBm = (level.beams || []).find(
+      (b) =>
+        b.memberId !== beam.memberId &&
+        (b.startNodeId === nodeId ||
+          b.endNodeId === nodeId ||
+          Math.hypot(b.startX - pt.x, b.startZ - pt.z) < 0.25 ||
+          Math.hypot(b.endX - pt.x, b.endZ - pt.z) < 0.25)
+    );
+    if (otherBm) {
+      const bmW = Math.round((otherBm.width || 0.25) * 1000) || 250;
+      const bmD = Math.round((otherBm.depth || 0.45) * 1000) || 450;
+      const grid = this.findGridLabel(level, beam.memberId, which) || (which === 'start' ? 'A' : 'B');
+      return {
+        type: 'BEAM',
+        label: otherBm.label || `B${otherBm.memberId}`,
+        widthMm: bmW,
+        depthMm: bmD,
+        gridLabel: grid,
+      };
+    }
+
+    // 3. Fallback support so longitudinal elevation always has valid supports
+    const grid = this.findGridLabel(level, beam.memberId, which) || (which === 'start' ? 'A' : 'B');
+    return {
+      type: 'COLUMN',
+      label: which === 'start' ? 'C1' : 'C2',
+      widthMm: 400,
+      depthMm: 400,
+      gridLabel: grid,
+    };
+  }
+
+  /** Draws AutoCAD-style centerline with long dashes and dots. */
+  private static drawCenterLine(b: SheetBuilder, x: number, y1: number, y2: number) {
+    const minY = Math.min(y1, y2);
+    const maxY = Math.max(y1, y2);
+    const dash = 260;
+    const gap = 80;
+    const dot = 40;
+    let y = minY;
+    while (y < maxY) {
+      const nextY = Math.min(y + dash, maxY);
+      b.line(LAYER_GRID.name, x, y, x, nextY);
+      y = nextY + gap;
+      if (y + dot <= maxY) {
+        b.line(LAYER_GRID.name, x, y, x, y + dot);
+        y += dot + gap;
+      } else {
+        break;
+      }
+    }
+  }
+
+  /** Draws engineering zigzag breaklines across columns. */
+  private static drawBreakline(b: SheetBuilder, x1: number, x2: number, y: number) {
+    const minX = Math.min(x1, x2);
+    const maxX = Math.max(x1, x2);
+    const w = maxX - minX;
+    b.poly(
+      LAYER_CONCRETE.name,
+      [
+        [minX, y],
+        [minX + w * 0.35, y],
+        [minX + w * 0.42, y + 60],
+        [minX + w * 0.58, y - 60],
+        [minX + w * 0.65, y],
+        [maxX, y],
+      ],
+      false
+    );
+  }
+
+  /** Scaled cross-section helper (preserved for optional cross-section details). */
+  public static drawSection(
     b: SheetBuilder,
     design: BeamSectionDesign,
     x0: number,
@@ -487,10 +1039,9 @@ export class BeamSectionSheetEngine {
     spread(topBars, topY, topDia);
     spread(botBars, botY, botDia);
 
-    // Side face reinforcement (skin steel) on both faces
+    // Side face reinforcement
     if (design.sideFace) {
       const r = (design.sideFace.dia * S) / 2;
-      const midY = y0 + h / 2;
       const sx = insetFor(design.sideFace.dia);
       for (let i = 0; i < design.sideFace.count; i++) {
         const t = design.sideFace.count === 1 ? 0.5 : i / (design.sideFace.count - 1);
@@ -500,7 +1051,7 @@ export class BeamSectionSheetEngine {
       }
     }
 
-    // Bar callouts (exact source vocabulary)
+    // Bar callouts
     const topCallout = design.top.extra
       ? `${design.top.through.callout} + ${design.top.extra.callout}`
       : design.top.through.callout;
@@ -513,7 +1064,6 @@ export class BeamSectionSheetEngine {
     b.leader(LAYER_TEXT.name, x0 + w + 450, topY + 220, x0 + w * 0.55, topY, { h: TEXT_H.CALLOUT });
     b.leader(LAYER_TEXT.name, x0 + w + 450, botY + 220, x0 + w * 0.55, botY, { h: TEXT_H.CALLOUT });
 
-    // Stirrup callout — note the two spaces after ST in the source drawings
     b.text(
       LAYER_TEXT.name,
       x0 + w / 2,
@@ -523,117 +1073,8 @@ export class BeamSectionSheetEngine {
       { anchor: 'middle' }
     );
 
-    if (design.sideFace) {
-      b.text(LAYER_TEXT.name, x0 + w / 2, y0 + h / 2 - 700, design.sideFace.callout, TEXT_H.CALLOUT, {
-        anchor: 'middle',
-      });
-    }
-
-    // Section dimensions: width below the outline, depth on the left so the
-    // right-hand side stays clear for the bar callouts and their leaders.
     b.dimHorizontal(x0, x0 + w, y0 - 700, design.b, { textHeight: TEXT_H.CALLOUT });
     b.dimVertical(y0, y0 + h, x0 - 700, design.D, { textHeight: TEXT_H.CALLOUT, side: 'left' });
-  }
-
-  /** The zone / stirrup strip table, drawn at 1:50 like the source sheet. */
-  private static drawZoneStrip(
-    b: SheetBuilder,
-    design: BeamSectionDesign,
-    cellX: number,
-    cellW: number,
-    stripBottomY: number,
-    level: FloorPlanLevel
-  ) {
-    const stripW = stripWidthFor(design.spanM);
-    const stripX = cellX + (cellW - stripW) / 2;
-    const total = design.zones.reduce((s, z) => s + (z.endMm - z.startMm), 0) || 1;
-
-    const labelBandH = 900;
-    const cellBandH = 1500;
-    const dimBandH = 1100;
-
-    const tableTop = stripBottomY + dimBandH + cellBandH + labelBandH;
-
-    // Outer border for the whole strip table
-    b.rect(LAYER_SCHEDULE_BORDER.name, stripX, stripBottomY, stripW, labelBandH + cellBandH + dimBandH);
-
-    let cursor = stripX;
-    design.zones.forEach((zone) => {
-      const zoneW = (stripW * (zone.endMm - zone.startMm)) / total;
-      const zoneCx = cursor + zoneW / 2;
-
-      // Zone cut-off positions strip
-      b.text(LAYER_SCHEDULE_TEXT.name, zoneCx, tableTop - 330, zone.label, TEXT_H.CALLOUT, {
-        anchor: 'middle',
-      });
-
-      // Stirrup callout cell: `<n>-2L-T<dia>` over `@<spacing> C/C`
-      b.line(LAYER_SCHEDULE_LINE.name, cursor, stripBottomY + dimBandH, cursor, tableTop);
-      b.text(
-        LAYER_SCHEDULE_TEXT.name,
-        zoneCx,
-        stripBottomY + dimBandH + cellBandH * 0.55,
-        `${zone.stirrupCount}-${design.stirrups.legs}L-T${zone.stirrupDia}`,
-        TEXT_H.CALLOUT,
-        { anchor: 'middle', bold: true }
-      );
-      b.text(
-        LAYER_SCHEDULE_TEXT.name,
-        zoneCx,
-        stripBottomY + dimBandH + cellBandH * 0.16,
-        `@${zone.spacing} C/C`,
-        TEXT_H.CALLOUT,
-        { anchor: 'middle' }
-      );
-
-      // Bar length dimension for the zone
-      b.dimHorizontal(cursor, cursor + zoneW, stripBottomY + 320, Math.round(zone.endMm - zone.startMm), {
-        textHeight: TEXT_H.CALLOUT,
-      });
-
-      cursor += zoneW;
-    });
-    b.line(LAYER_SCHEDULE_LINE.name, cursor, stripBottomY + dimBandH, cursor, tableTop);
-    b.line(
-      LAYER_SCHEDULE_LINE.name,
-      stripX,
-      stripBottomY + dimBandH,
-      stripX + stripW,
-      stripBottomY + dimBandH
-    );
-
-    // Support marks at each end (the source sheet's Labels_Support layer)
-    const startsAt = this.findSupport(level, design.memberId, 'start');
-    const endsAt = this.findSupport(level, design.memberId, 'end');
-    if (startsAt) {
-      b.text(LAYER_LABELS_SUPPORT.name, stripX - 300, stripBottomY + 3000, startsAt, TEXT_H.GRID, {
-        anchor: 'end',
-      });
-    }
-    if (endsAt) {
-      b.text(LAYER_LABELS_SUPPORT.name, stripX + stripW + 300, stripBottomY + 3000, endsAt, TEXT_H.GRID, {
-        anchor: 'start',
-      });
-    }
-
-    // Grid references with bubbles at the strip ends
-    const gridStart = this.findGridLabel(level, design.memberId, 'start');
-    const gridEnd = this.findGridLabel(level, design.memberId, 'end');
-    const bubbleR = TEXT_H.GRID_BUBBLE * 0.75;
-    if (gridStart) {
-      const gx = stripX - 1400;
-      const gy = stripBottomY;
-      b.circle(LAYER_GRID.name, gx, gy, bubbleR);
-      b.text(LAYER_GRID.name, gx, gy + TEXT_H.GRID * 0.35, gridStart, TEXT_H.GRID, { anchor: 'middle' });
-    }
-    if (gridEnd) {
-      const gx = stripX + stripW + 1400;
-      const gy = stripBottomY;
-      b.circle(LAYER_GRID.name, gx, gy, bubbleR);
-      b.text(LAYER_GRID.name, gx, gy + TEXT_H.GRID * 0.35, gridEnd, TEXT_H.GRID, {
-        anchor: 'middle',
-      });
-    }
   }
 
   private static findSupport(level: FloorPlanLevel, memberId: number, which: 'start' | 'end'): string | null {

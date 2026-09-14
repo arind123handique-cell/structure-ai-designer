@@ -21,15 +21,74 @@ export type CommandHistoryListener = (state: {
   redoStackLength: number;
 }) => void;
 
+export class ActionCommand implements StructuralCommand {
+  public readonly id: string;
+  public readonly timestamp: number;
+
+  constructor(
+    public readonly description: string,
+    private readonly undoFn: () => Promise<void> | void,
+    private readonly redoFn: () => Promise<void> | void,
+    private readonly executeFn?: () => Promise<void> | void
+  ) {
+    this.id = `action_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    this.timestamp = Date.now();
+  }
+
+  public async execute(): Promise<void> {
+    if (this.executeFn) {
+      await this.executeFn();
+    } else {
+      await this.redoFn();
+    }
+  }
+
+  public async undo(): Promise<void> {
+    await this.undoFn();
+  }
+
+  public async redo(): Promise<void> {
+    await this.redoFn();
+  }
+}
+
 export class CommandManager {
   private static instance: CommandManager | null = null;
   private undoStack: StructuralCommand[] = [];
   private redoStack: StructuralCommand[] = [];
-  private maxHistory: number = 15;
+  private maxHistory: number = 50;
   private listeners: Set<CommandHistoryListener> = new Set();
   private isExecuting: boolean = false;
 
   private constructor() {}
+
+  public getIsExecuting(): boolean {
+    return this.isExecuting;
+  }
+
+  public setMaxHistory(max: number): void {
+    this.maxHistory = Math.max(1, max);
+    while (this.undoStack.length > this.maxHistory) {
+      this.undoStack.shift();
+    }
+    this.notifyListeners();
+  }
+
+  /**
+   * Directly records an already executed action into the undo stack.
+   * Does not re-execute. Clears redo stack and notifies listeners.
+   * Safely ignores calls if an undo or redo operation is currently executing.
+   */
+  public record(command: StructuralCommand): void {
+    if (this.isExecuting) return;
+
+    this.undoStack.push(command);
+    if (this.undoStack.length > this.maxHistory) {
+      this.undoStack.shift();
+    }
+    this.redoStack = [];
+    this.notifyListeners();
+  }
 
   public static getInstance(): CommandManager {
     if (!CommandManager.instance) {

@@ -224,15 +224,12 @@ describe('Beam reinforcement cross-section sheet engine', () => {
     const sheet = BeamSectionSheetEngine.buildSheet(input);
     expect(sheet.sheetNumber).toBe('STR-201');
     expect(sheet.layers.map((l) => l.name)).toEqual(
-      expect.arrayContaining(['Concrete Line', 'Reinforcement', 'Link', 'Labels', 'Text', 'Schedule Border'])
+      expect.arrayContaining(['Concrete Line', 'Reinforcement', 'Link', 'Labels', 'Schedule Text', 'Schedule Border'])
     );
 
     const texts = sheet.primitives.filter((p) => p.t === 'text').map((p) => (p as any).text as string);
     expect(texts).toContain('B1:230x450');
-    expect(texts).toContain('(SCALE 1:25)');
-    expect(texts.some((t) => /^ST  \dL-T\d+$/.test(t))).toBe(true);
-    expect(texts.some((t) => /^\d+-\dL-T\d+$/.test(t))).toBe(true);
-    expect(texts.some((t) => /^@\d+ C\/C$/.test(t))).toBe(true);
+    expect(texts.some((t) => /@\d+ C\/C/.test(t))).toBe(true);
     expect(texts.some((t) => t.startsWith('B1 (LOC:'))).toBe(true);
     expect(sheet.notes).toContain('(SCALE: H = 1:50  / V = 1:50)');
   });
@@ -243,18 +240,18 @@ describe('Beam reinforcement cross-section sheet engine', () => {
     // 5 beams wrap to 2 rows of 4 and 1, so nothing exceeds 4 cells wide
     expect(bounds.maxX - bounds.minX).toBeLessThanOrEqual(4 * cellWidthFor(4.5));
     // five beams wrap onto two rows, so the sheet extends a full row pitch down
-    expect(bounds.minY).toBeLessThan(-20000);
+    expect(bounds.minY).toBeLessThan(-15000);
     expect(bounds.maxY - bounds.minY).toBeGreaterThan(25000);
     expect(computeBounds(sheet.primitives)).toEqual(bounds);
   });
 
   it('places bars and links as geometry on the reinforcement and link layers', () => {
     const sheet = BeamSectionSheetEngine.buildSheet(input);
-    const circles = sheet.primitives.filter((p) => p.t === 'circle' && p.layer === 'Reinforcement');
-    const links = sheet.primitives.filter((p) => p.t === 'poly' && p.layer === 'Link' && (p as any).closed);
-    // 5 beams, at least 4 longitudinal bars each
-    expect(circles.length).toBeGreaterThanOrEqual(20);
-    expect(links.length).toBe(5);
+    const rebars = sheet.primitives.filter((p) => p.layer === 'Reinforcement');
+    const links = sheet.primitives.filter((p) => p.layer === 'Link');
+    // 5 beams with longitudinal bars and stirrup links
+    expect(rebars.length).toBeGreaterThanOrEqual(15);
+    expect(links.length).toBeGreaterThanOrEqual(20);
   });
 
   it('supports a user-saved design, including multi-zone stirrup splits', () => {
@@ -306,6 +303,67 @@ describe('Beam reinforcement cross-section sheet engine', () => {
   it('skips foundation levels', () => {
     const level = { ...buildLevel(), isFoundationLevel: true };
     expect(BeamSectionSheetEngine.extractLevelBeams({ ...input, level })).toEqual([]);
+  });
+
+  it('generates authentic full longitudinal cross-section elevations matching reference image media_1789396616744.png', () => {
+    const savedProject = {
+      ...project,
+      savedBeamDesigns: {
+        1: {
+          curtailment: {
+            throughTop: { count: 2, diameter: 16, callout: '2-T 16' },
+            throughBottom: { count: 2, diameter: 16, callout: '2-T 16' },
+            extraTopSupport: { count: 3, diameter: 16, callout: '3-T 16', cutoffLength: 1.055, hasExtra: true },
+            extraBottomMidspan: { count: 3, diameter: 16, callout: '3-T 16', startOffset: 0.6, length: 1.03, hasExtra: true },
+          },
+          shear: { stirrupDiameter: 8, legs: 2, spacing_prov: 140 },
+          ductility: {
+            confinementZoneLength: 900,
+            confinementHoopSpacingMax: 95,
+            midSpanHoopSpacingMax: 140,
+          },
+        },
+      },
+    };
+
+    const sheet = BeamSectionSheetEngine.buildSheet({ ...input, project: savedProject });
+    const texts = sheet.primitives.filter((p) => p.t === 'text').map((p) => (p as any).text as string);
+
+    // 1. Beam title & scale in exact reference image vocabulary
+    expect(texts).toContain('B1:230x450');
+    expect(texts).toContain('(SCALE: H - 1:50 / V - 1:50)');
+
+    // 2. Rebar callouts
+    expect(texts.some((t) => /2-T 16/.test(t))).toBe(true);
+    expect(texts.some((t) => /3-T 16/.test(t))).toBe(true);
+
+    // 3. Stirrups in 3 zones (support - midspan - support)
+    expect(texts.some((t) => /\d+-2L-T8/.test(t))).toBe(true);
+    expect(texts.some((t) => /@95 C\/C/.test(t))).toBe(true);
+    expect(texts.some((t) => /@140 C\/C/.test(t))).toBe(true);
+
+    // 4. Dimension callouts for curtailments and clear span
+    expect(texts).toContain('1055');
+    expect(texts).toContain('1030');
+    expect(texts).toContain('4050'); // 4500 - 450 support width
+
+    // 5. Column support marks & grid references
+    expect(texts).toContain('C1');
+    expect(texts).toContain('C2');
+    expect(texts.some((t) => t === '1' || t === 'A')).toBe(true);
+    expect(texts.some((t) => t === '2' || t === 'B')).toBe(true);
+
+    // 6. Geometry verification: wireframe lines, NO solid brown/dark filled concrete
+    const concretePrims = sheet.primitives.filter((p) => p.layer === 'Concrete Line');
+    expect(concretePrims.length).toBeGreaterThan(0);
+    // Ensure all concrete primitives are line/poly wireframes, absolutely no filled solid shapes
+    expect(concretePrims.every((p) => p.t === 'line' || p.t === 'poly')).toBe(true);
+
+    // Reinforcement polylines with 90° hooked anchorages
+    const hookedBars = sheet.primitives.filter(
+      (p) => p.t === 'poly' && p.layer === 'Reinforcement' && p.pts.length >= 3
+    );
+    expect(hookedBars.length).toBeGreaterThanOrEqual(10); // top & bottom through + extra bars
   });
 });
 

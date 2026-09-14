@@ -3,6 +3,13 @@ import { FloorPlanLevel, FloorColumnInfo } from './floorPlanEngine';
 import { StoredProject } from '@/features/projects/types';
 import { PileCapDesignOutput } from '@/features/design/pilecap/pileCapDesignEngine';
 import {
+  DrawingSheet,
+  SheetPrimitive,
+  SheetLayer,
+  layerStroke,
+  computeBounds,
+} from './sheet/drawingSheet';
+import {
   determineCapOrientation,
   get3PileDimensionsMm,
   get5PilePolygonMm,
@@ -70,7 +77,30 @@ export interface PdfExportOptions {
   selectedSectionType?: string;
   orientation?: 'landscape' | 'portrait';
   showCrossSections?: boolean;
+  theme?: 'light' | 'dark';
 }
+
+const stripFormatting = (text: string): string =>
+  (text || '')
+    .replace(/\\A1;?/g, '')
+    .replace(/\\P/g, ' ')
+    .replace(/%%u/gi, '')
+    .replace(/%%U/gi, '');
+
+const isUnderlined = (text: string): boolean => /%%u/i.test(text || '');
+
+function parseHexColor(hex: string): [number, number, number] {
+  if (!hex) return [17, 17, 17];
+  const clean = hex.replace('#', '');
+  if (clean.length === 6) {
+    const r = parseInt(clean.substring(0, 2), 16);
+    const g = parseInt(clean.substring(2, 4), 16);
+    const b = parseInt(clean.substring(4, 6), 16);
+    return [Number.isNaN(r) ? 17 : r, Number.isNaN(g) ? 17 : g, Number.isNaN(b) ? 17 : b];
+  }
+  return [17, 17, 17];
+}
+
 
 export interface UniquePileCapType {
   typeId: string;
@@ -352,6 +382,63 @@ export class PdfExportService {
     const safeName = fileName || `${project?.metadata?.name || 'Structural'}_Complete_Floor_Framing_Plans_STR_100_105.pdf`;
     doc.save(safeName);
   }
+
+  /**
+   * Exports a single CAD detail sheet (e.g. BEAM_SECTIONS or SLAB_DETAILS) to an A3 PDF (Landscape or Portrait).
+   * Renders every CAD primitive 1:1 with DrawingSheetSvg web rendering.
+   */
+  public static exportDetailSheetToPdf(
+    sheet: DrawingSheet,
+    project: StoredProject | null,
+    fileName?: string,
+    options: PdfExportOptions = {}
+  ): void {
+    const orientation = options.orientation || 'landscape';
+    const doc = new jsPDF({
+      orientation,
+      unit: 'mm',
+      format: 'a3', // 420mm x 297mm (Landscape) or 297mm x 420mm (Portrait)
+    });
+
+    this.renderDetailSheetPage(doc, sheet, project, 1, 1, options);
+
+    const safeProj = (project?.metadata?.name || 'Structural').replace(/[^a-zA-Z0-9]/g, '_');
+    const safeLevel = (sheet.levelName || sheet.title || 'Detail').replace(/[^a-zA-Z0-9]/g, '_');
+    const safeName = fileName || `${safeProj}_${sheet.sheetNumber}_${safeLevel}.pdf`;
+    doc.save(safeName);
+  }
+
+  /**
+   * Exports all detail sheets (e.g. all floors of BEAM_SECTIONS or SLAB_DETAILS) into a multi-page A3 PDF set.
+   */
+  public static exportAllDetailSheetsToPdf(
+    sheets: DrawingSheet[],
+    project: StoredProject | null,
+    fileName?: string,
+    options: PdfExportOptions = {}
+  ): void {
+    if (!sheets || sheets.length === 0) return;
+
+    const orientation = options.orientation || 'landscape';
+    const doc = new jsPDF({
+      orientation,
+      unit: 'mm',
+      format: 'a3',
+    });
+
+    sheets.forEach((sh, index) => {
+      if (index > 0) {
+        doc.addPage('a3', orientation);
+      }
+      this.renderDetailSheetPage(doc, sh, project, index + 1, sheets.length, options);
+    });
+
+    const safeProj = (project?.metadata?.name || 'Structural').replace(/[^a-zA-Z0-9]/g, '_');
+    const prefix = sheets[0]?.sheetNumber.startsWith('STR-2') ? 'Beam_Reinforcement_Sections' : 'Slab_Detailing';
+    const safeName = fileName || `${safeProj}_Complete_${prefix}_Sheets.pdf`;
+    doc.save(safeName);
+  }
+
 
   /**
    * Renders one complete professional CAD drawing sheet page.
@@ -1466,4 +1553,332 @@ export class PdfExportService {
       }
     }
   }
+
+  /**
+   * Renders one complete professional CAD drawing sheet page for detail sheets
+   * (Beam reinforcement cross-sections & stirrup zones or Slab detailing).
+   * 1:1 parity with DrawingSheetSvg web rendering.
+   */
+  private static renderDetailSheetPage(
+    doc: jsPDF,
+    sheet: DrawingSheet,
+    project: StoredProject | null,
+    pageNumber: number,
+    totalPages: number,
+    options: PdfExportOptions = {}
+  ): void {
+    const orientation = options.orientation || 'landscape';
+    const isPortrait = orientation === 'portrait';
+    const pageWidth = isPortrait ? 297 : 420;
+    const pageHeight = isPortrait ? 420 : 297;
+    const theme = options.theme || 'light';
+
+    // 0. Optional Dark Background for blueprint theme
+    if (theme === 'dark') {
+      doc.setFillColor(11, 18, 32);
+      doc.rect(0, 0, pageWidth, pageHeight, 'F');
+    }
+
+    // 1. Drawing Borders (Outer border: 10mm margins, Inner border: 13mm margins)
+    doc.setDrawColor(theme === 'dark' ? 71 : 30, theme === 'dark' ? 85 : 41, theme === 'dark' ? 105 : 59);
+    doc.setLineWidth(1.2);
+    doc.rect(10, 10, pageWidth - 20, pageHeight - 20);
+    doc.setLineWidth(0.4);
+    doc.rect(13, 13, pageWidth - 26, pageHeight - 26);
+
+    // 2. Title Block Geometry
+    const tbW = isPortrait ? pageWidth - 26 : 145;
+    const tbH = 46;
+    const tbX = isPortrait ? 13 : pageWidth - 13 - tbW;
+    const tbY = pageHeight - 13 - tbH;
+
+    // 3. Notes & Legend Box (Landscape mode: placed to the left of the title block)
+    if (!isPortrait) {
+      const nbX = 16;
+      const nbY = tbY;
+      const nbW = tbX - nbX - 4;
+      const nbH = tbH;
+      doc.setFillColor(theme === 'dark' ? 15 : 248, theme === 'dark' ? 23 : 250, theme === 'dark' ? 42 : 252);
+      doc.rect(nbX, nbY, nbW, nbH, 'F');
+      doc.setDrawColor(theme === 'dark' ? 51 : 203, theme === 'dark' ? 65 : 213, theme === 'dark' ? 85 : 225);
+      doc.setLineWidth(0.35);
+      doc.rect(nbX, nbY, nbW, nbH, 'S');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(theme === 'dark' ? 226 : 30, theme === 'dark' ? 232 : 41, theme === 'dark' ? 240 : 59);
+      doc.text('GENERAL STRUCTURAL & DETAILING SPECIFICATIONS (IS 456 & IS 13920):', nbX + 4, nbY + 6.5);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.5);
+      doc.setTextColor(theme === 'dark' ? 148 : 71, theme === 'dark' ? 163 : 85, theme === 'dark' ? 184 : 105);
+      doc.text('1. All dimensions are in millimeters (mm) and levels in meters (m) unless specified.', nbX + 4, nbY + 12.5);
+      const concreteGrade = project?.metadata?.designSettings?.concreteGrade || 'M25';
+      const steelGrade = project?.metadata?.designSettings?.steelGrade || 'Fe500D';
+      doc.text(`2. Concrete: ${concreteGrade} / Steel: ${steelGrade} TMT (IS 1786). Clear covers: Slabs=20mm, Beams=30mm, Cols=40mm.`, nbX + 4, nbY + 18);
+      doc.text('3. Confinement hoops & stirrup details strictly comply with ductile detailing code IS 13920:2016.', nbX + 4, nbY + 23.5);
+      const scaleNotes = sheet.notes && sheet.notes.length > 0 ? sheet.notes.join('  ·  ') : 'Scales as noted on details';
+      doc.text(`4. Scales: ${scaleNotes}`, nbX + 4, nbY + 29);
+      if (sheet.subtitle) {
+        doc.text(`5. Schedule info: ${sheet.subtitle}`, nbX + 4, nbY + 34.5);
+      } else {
+        doc.text('5. All lap lengths to be staggered and strictly as per IS 456 provisions.', nbX + 4, nbY + 34.5);
+      }
+      doc.text('6. Construction shall conform strictly to National Building Code (NBC 2016).', nbX + 4, nbY + 40);
+    }
+
+    // 4. Title Block
+    doc.setFillColor(theme === 'dark' ? 15 : 248, theme === 'dark' ? 23 : 250, theme === 'dark' ? 42 : 252);
+    doc.rect(tbX, tbY, tbW, tbH, 'F');
+    doc.setDrawColor(theme === 'dark' ? 71 : 51, theme === 'dark' ? 85 : 65, theme === 'dark' ? 105 : 85);
+    doc.setLineWidth(0.6);
+    doc.rect(tbX, tbY, tbW, tbH, 'S');
+
+    doc.line(tbX, tbY + 11, tbX + tbW, tbY + 11);
+    doc.line(tbX, tbY + 26, tbX + tbW, tbY + 26);
+    const midColX = isPortrait ? tbX + 135 : tbX + 75;
+    doc.line(midColX, tbY + 26, midColX, tbY + tbH);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(theme === 'dark' ? 241 : 15, theme === 'dark' ? 245 : 23, theme === 'dark' ? 249 : 42);
+    doc.text('STRUCTURE AI DESIGNER - DETAILING SUITE', tbX + 4, tbY + 7.5);
+
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(theme === 'dark' ? 148 : 71, theme === 'dark' ? 163 : 85, theme === 'dark' ? 184 : 105);
+    const projectName = project?.metadata?.name || 'G+4 RCC Residential Building';
+    doc.text(`PROJECT: ${projectName.length > 32 ? projectName.substring(0, 30) + '...' : projectName}`, tbX + 4, tbY + 16);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(2, 132, 199);
+    const titleWithLevel = sheet.levelName ? `${sheet.title} (${sheet.levelName})` : sheet.title;
+    doc.text(titleWithLevel.length > 36 ? titleWithLevel.substring(0, 34) + '...' : titleWithLevel, tbX + 4, tbY + 22);
+
+    doc.setFontSize(6.8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(theme === 'dark' ? 203 : 51, theme === 'dark' ? 213 : 65, theme === 'dark' ? 225 : 85);
+    const engineer = project?.metadata?.engineer || 'Er. E. Rogers (Lead Struct. Eng)';
+    const location = project?.metadata?.location || 'Standard Project Site';
+    doc.text(`ENGINEER: ${engineer.length > 22 ? engineer.substring(0, 20) + '...' : engineer}`, tbX + 4, tbY + 31.5);
+    doc.text(`LOCATION: ${location.length > 22 ? location.substring(0, 20) + '...' : location}`, tbX + 4, tbY + 36.5);
+    doc.text(`DATE: ${new Date().toLocaleDateString()}`, tbX + 4, tbY + 41.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text(`DWG NO: ${sheet.sheetNumber}`, midColX + 4, tbY + 31.5);
+    const primaryScale = sheet.notes?.[0] || '1:100 @ A3';
+    doc.text(`SCALE: ${primaryScale}`, midColX + 4, tbY + 36.5);
+    doc.setTextColor(5, 150, 105);
+    doc.text(`SHEET: ${pageNumber} OF ${totalPages} (APPROVED)`, midColX + 4, tbY + 41.5);
+
+    // 5. Sheet Identity Caption (top-left inside margin)
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(theme === 'dark' ? 207 : 15, theme === 'dark' ? 227 : 23, theme === 'dark' ? 255 : 42);
+    const headerTitle = `${sheet.sheetNumber} — ${sheet.title}${sheet.levelName ? ` (${sheet.levelName})` : ''}`;
+    doc.text(headerTitle, 16, 17.5);
+
+    // 6. North Arrow (top-right)
+    const naX = pageWidth - 24;
+    const naY = 22;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(theme === 'dark' ? 207 : 15, theme === 'dark' ? 227 : 23, theme === 'dark' ? 255 : 42);
+    doc.text('N', naX, naY - 5, { align: 'center' });
+    doc.setDrawColor(theme === 'dark' ? 207 : 15, theme === 'dark' ? 227 : 23, theme === 'dark' ? 255 : 42);
+    doc.setFillColor(theme === 'dark' ? 207 : 15, theme === 'dark' ? 227 : 23, theme === 'dark' ? 255 : 42);
+    doc.setLineWidth(0.6);
+    if (typeof doc.triangle === 'function') {
+      doc.triangle(naX, naY - 3, naX - 3, naY + 7, naX + 3, naY + 7, 'FD');
+    }
+
+    // 7. Printable Area Calculation
+    const drawX0 = 16;
+    const drawY0 = 21;
+    const drawAreaW = pageWidth - 32;
+    const drawAreaH = tbY - drawY0 - 4;
+
+    // Bounds handling
+    const bounds = sheet.bounds && Number.isFinite(sheet.bounds.minX)
+      ? sheet.bounds
+      : computeBounds(sheet.primitives || []);
+
+    const spanX = Math.max(bounds.maxX - bounds.minX, 1);
+    const spanY = Math.max(bounds.maxY - bounds.minY, 1);
+
+    if (!sheet.primitives || sheet.primitives.length === 0) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139);
+      const msg = sheet.notes?.[0] || 'No detailing elements detected at this level';
+      doc.text(msg, drawX0 + drawAreaW / 2, drawY0 + drawAreaH / 2, { align: 'center' });
+      return;
+    }
+
+    // 2% padding so border lines don't collide with the drawing area boundary
+    const padRatio = 0.02;
+    const paddedSpanX = spanX * (1 + padRatio * 2);
+    const paddedSpanY = spanY * (1 + padRatio * 2);
+
+    const scale = Math.min(drawAreaW / paddedSpanX, drawAreaH / paddedSpanY);
+    const renderW = spanX * scale;
+    const renderH = spanY * scale;
+
+    const offsetX = drawX0 + (drawAreaW - renderW) / 2;
+    const offsetY = drawY0 + (drawAreaH - renderH) / 2;
+
+    const toPdfX = (x: number) => offsetX + (x - bounds.minX) * scale;
+    const toPdfY = (y: number) => offsetY + (bounds.maxY - y) * scale;
+
+    // Layer styles & color caching
+    const layerMap = new Map<string, SheetLayer>((sheet.layers || []).map((l) => [l.name, l]));
+    const getColorForLayer = (layerName: string): [number, number, number] => {
+      const layer = layerMap.get(layerName) || { name: layerName, aci: 7 };
+      const hex = layerStroke(layer, theme);
+      return parseHexColor(hex);
+    };
+
+    const getLineWidthForLayer = (layerName: string, explicitWidth?: number): number => {
+      if (explicitWidth && explicitWidth > 0) {
+        return Math.max(0.15, explicitWidth * scale);
+      }
+      switch (layerName) {
+        case 'Reinforcement':
+        case 'Section Mark':
+          return 0.45;
+        case 'Concrete Line':
+        case 'Schedule Border':
+        case 'Beam':
+        case 'Column':
+          return 0.35;
+        case 'Link':
+          return 0.25;
+        case 'Grid':
+        case 'Dimension':
+        case 'Schedule Line':
+        case 'Cut Line':
+          return 0.18;
+        default:
+          return 0.2;
+      }
+    };
+
+    // 8. Render Primitives 1:1
+    sheet.primitives.forEach((p) => {
+      switch (p.t) {
+        case 'line': {
+          const [r, g, b] = getColorForLayer(p.layer);
+          const lw = getLineWidthForLayer(p.layer, p.width);
+          doc.setLineWidth(lw);
+          doc.setDrawColor(r, g, b);
+          doc.line(toPdfX(p.x1), toPdfY(p.y1), toPdfX(p.x2), toPdfY(p.y2));
+          break;
+        }
+
+        case 'poly': {
+          if (!p.pts || p.pts.length < 2) break;
+          const [r, g, b] = getColorForLayer(p.layer);
+          const lw = getLineWidthForLayer(p.layer, p.width);
+          doc.setLineWidth(lw);
+          doc.setDrawColor(r, g, b);
+          for (let j = 0; j < p.pts.length - 1; j++) {
+            doc.line(
+              toPdfX(p.pts[j][0]),
+              toPdfY(p.pts[j][1]),
+              toPdfX(p.pts[j + 1][0]),
+              toPdfY(p.pts[j + 1][1])
+            );
+          }
+          if (p.closed && p.pts.length > 2) {
+            doc.line(
+              toPdfX(p.pts[p.pts.length - 1][0]),
+              toPdfY(p.pts[p.pts.length - 1][1]),
+              toPdfX(p.pts[0][0]),
+              toPdfY(p.pts[0][1])
+            );
+          }
+          break;
+        }
+
+        case 'circle': {
+          const [r, g, b] = getColorForLayer(p.layer);
+          const cx = toPdfX(p.cx);
+          const cy = toPdfY(p.cy);
+          const rad = Math.max(0.25, p.r * scale);
+          const lw = getLineWidthForLayer(p.layer);
+          doc.setLineWidth(lw);
+          doc.setDrawColor(r, g, b);
+          if (p.filled) {
+            doc.setFillColor(r, g, b);
+            doc.circle(cx, cy, rad, 'FD');
+          } else {
+            doc.circle(cx, cy, rad, 'S');
+          }
+          break;
+        }
+
+        case 'solid': {
+          if (!p.pts || p.pts.length < 3) break;
+          const [r, g, b] = getColorForLayer(p.layer);
+          doc.setFillColor(r, g, b);
+          doc.setDrawColor(r, g, b);
+          doc.setLineWidth(0.15);
+          const pdfPts = p.pts.map(([x, y]) => [toPdfX(x), toPdfY(y)]);
+          if (pdfPts.length === 3 && typeof doc.triangle === 'function') {
+            doc.triangle(
+              pdfPts[0][0], pdfPts[0][1],
+              pdfPts[1][0], pdfPts[1][1],
+              pdfPts[2][0], pdfPts[2][1],
+              'FD'
+            );
+          } else {
+            const deltas: [number, number][] = [];
+            for (let j = 1; j < pdfPts.length; j++) {
+              deltas.push([pdfPts[j][0] - pdfPts[j - 1][0], pdfPts[j][1] - pdfPts[j - 1][1]]);
+            }
+            doc.lines(deltas, pdfPts[0][0], pdfPts[0][1], [1, 1], 'FD', true);
+          }
+          break;
+        }
+
+        case 'text': {
+          const clean = stripFormatting(p.text);
+          if (!clean || clean.trim().length === 0) break;
+          const [r, g, b] = getColorForLayer(p.layer);
+          const underline = p.underline || isUnderlined(p.text);
+          const textH_mm = p.h * scale;
+          const fontSizePt = Math.min(24, Math.max(3.2, textH_mm * (72 / 25.4)));
+
+          doc.setFont('helvetica', p.bold ? 'bold' : 'normal');
+          doc.setFontSize(fontSizePt);
+          doc.setTextColor(r, g, b);
+
+          const pdfX = toPdfX(p.x);
+          const pdfY = toPdfY(p.y);
+          const align = p.anchor === 'middle' ? 'center' : p.anchor === 'end' ? 'right' : 'left';
+
+          doc.text(clean, pdfX, pdfY, { align });
+
+          if (underline) {
+            const tw = typeof doc.getTextWidth === 'function'
+              ? doc.getTextWidth(clean)
+              : clean.length * (fontSizePt / 2.8346) * 0.6;
+            const left = p.anchor === 'middle' ? pdfX - tw / 2 : p.anchor === 'end' ? pdfX - tw : pdfX;
+            const ulY = pdfY + Math.max(0.25, textH_mm * 0.22);
+            doc.setDrawColor(r, g, b);
+            doc.setLineWidth(Math.max(0.15, fontSizePt * 0.025));
+            doc.line(left, ulY, left + tw, ulY);
+          }
+          break;
+        }
+
+        default:
+          break;
+      }
+    });
+  }
 }
+
+export const exportDetailSheetToPdf = PdfExportService.exportDetailSheetToPdf.bind(PdfExportService);
+export const exportAllDetailSheetsToPdf = PdfExportService.exportAllDetailSheetsToPdf.bind(PdfExportService);
+

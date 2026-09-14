@@ -869,19 +869,22 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
           {/* Foundation Cross-Sections Visibility & Filter Controls */}
           {isFoundation && (
             <>
-              {/* Show/Hide Cross-Sections Toggle */}
+              {/* Prominent Bullet Toggle Button for Cross-Sections */}
               {onToggleCrossSections && (
                 <button
                   type="button"
                   onClick={() => onToggleCrossSections(!showCrossSections)}
-                  className={`px-2 py-0.5 rounded border text-[10px] font-semibold flex items-center gap-1 transition-colors ${
+                  className={`px-3 py-1 rounded border text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs ${
                     showCrossSections
-                      ? (isCadWhite ? 'bg-emerald-100 border-emerald-300 text-emerald-800 hover:bg-emerald-200' : 'bg-emerald-950/80 border-emerald-700 text-emerald-300 hover:bg-emerald-900')
+                      ? (isCadWhite ? 'bg-emerald-100 border-emerald-400 text-emerald-900 hover:bg-emerald-200' : 'bg-emerald-950/80 border-emerald-500 text-emerald-200 hover:bg-emerald-900')
                       : (isCadWhite ? 'bg-rose-100 border-rose-300 text-rose-800 hover:bg-rose-200' : 'bg-rose-950/80 border-rose-700 text-rose-300 hover:bg-rose-900')
                   }`}
-                  title={showCrossSections ? 'Click to hide cross-sections and show plan only' : 'Click to show cross-sections'}
+                  title={showCrossSections ? 'Bullet Button: Click to hide cross-sections and show plan only' : 'Bullet Button: Click to show cross-sections'}
                 >
-                  <span>{showCrossSections ? '👁 Sections: Visible' : '🚫 Sections: Hidden (Plan Only)'}</span>
+                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 transition-all ${
+                    showCrossSections ? 'bg-emerald-500 shadow-xs shadow-emerald-400 animate-pulse' : 'bg-rose-500'
+                  }`} />
+                  <span>{showCrossSections ? '● Cross-Sections: Visible' : '○ Cross-Sections: Hidden (Plan Only)'}</span>
                 </button>
               )}
 
@@ -2679,10 +2682,10 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
             </text>
 
             {/* Quick Section Selector Pills inside the CAD Canvas */}
-            <g transform={`translate(${Math.max(220, csW - 320)}, 4)`}>
+            <g transform={`translate(${Math.max(220, csW - 130 - (uniquePileCapTypes.length + 1) * 56)}, 4)`}>
               {['ALL', ...uniquePileCapTypes.map((t) => t.typeId)].map((key, kIdx) => {
                 const isAct = activeSectionFilter === key;
-                const btnX = kIdx * 58;
+                const btnX = kIdx * 54;
                 const label = key === 'ALL' ? 'All (Grid)' : key;
                 return (
                   <g
@@ -2693,7 +2696,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                     <rect
                       x={btnX}
                       y="0"
-                      width="54"
+                      width="50"
                       height="20"
                       fill={isAct ? '#2563eb' : '#0f172a'}
                       stroke={isAct ? '#60a5fa' : '#334155'}
@@ -2701,7 +2704,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                       rx="3"
                     />
                     <text
-                      x={btnX + 27}
+                      x={btnX + 25}
                       y="13"
                       fill={isAct ? '#ffffff' : '#94a3b8'}
                       fontSize="7.5"
@@ -2714,6 +2717,39 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                 );
               })}
             </g>
+
+            {/* Direct Bullet Button inside the Cross-Sections Header to Hide */}
+            {onToggleCrossSections && (
+              <g
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleCrossSections(false);
+                }}
+                className="cursor-pointer hover:opacity-85 transition-opacity"
+              >
+                <rect
+                  x={csW - 118}
+                  y="3"
+                  width="110"
+                  height="22"
+                  fill="#ef4444"
+                  stroke="#fca5a5"
+                  strokeWidth="1"
+                  rx="4"
+                />
+                <circle cx={csW - 107} cy="14" r="3.5" fill="#ffffff" />
+                <text
+                  x={csW - 97}
+                  y="14.5"
+                  fill="#ffffff"
+                  fontSize="8"
+                  fontWeight="bold"
+                  alignmentBaseline="middle"
+                >
+                  ✕ HIDE SECTIONS
+                </text>
+              </g>
+            )}
 
             {/* Grid of All Pile Cap Types */}
             {visibleTypes.map((item, idx) => {
@@ -3167,6 +3203,40 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                 </g>
               );
             })}
+          </g>
+        )}
+
+        {/* Floating Bullet Button to Show Cross-Sections if Hidden */}
+        {!hasCrossSections && isFoundation && onToggleCrossSections && (
+          <g
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleCrossSections(true);
+            }}
+            className="cursor-pointer hover:opacity-90 transition-opacity"
+            transform={`translate(${sheetW - 235}, 24)`}
+          >
+            <rect
+              x="0"
+              y="0"
+              width="195"
+              height="28"
+              fill="#065f46"
+              stroke="#34d399"
+              strokeWidth="1.5"
+              rx="4"
+            />
+            <circle cx="16" cy="14" r="4.5" fill="#10b981" stroke="#ffffff" strokeWidth="1.5" />
+            <text
+              x="28"
+              y="15"
+              fill="#ffffff"
+              fontSize="8.5"
+              fontWeight="bold"
+              alignmentBaseline="middle"
+            >
+              ● SHOW CROSS-SECTIONS
+            </text>
           </g>
         )}
 
