@@ -6,6 +6,7 @@ import { DrawingSheetSvg } from './sheet/DrawingSheetSvg';
 import { BeamSectionSheetEngine } from './sheet/beamSectionSheetEngine';
 import { SlabDetailSheetEngine } from './sheet/slabDetailSheetEngine';
 import type { DrawingSheet } from './sheet/drawingSheet';
+import { TEXT_H } from './sheet/drawingSheet';
 import { PdfExportService } from './pdfExportService';
 import { exportToCsv } from '@/utils/exportUtils';
 import { StaircasePlacementEngine } from '@/features/architectural/engines/staircasePlacementEngine';
@@ -132,6 +133,10 @@ export const FloorPlanViewer: React.FC = () => {
   const [pdfSuccessMessage, setPdfSuccessMessage] = useState<string | null>(null);
   const [selectedPileCapNodeId, setSelectedPileCapNodeId] = useState<number | null>(null);
 
+  // Dimension text size control (in drawing units)
+  const [dimensionTextSize, setDimensionTextSize] = useState<number>(350);
+  const [dimensionTextSizeInput, setDimensionTextSizeInput] = useState<string>('350');
+
   const selectedCapCol = useMemo(() => {
     if (!selectedPileCapNodeId || !activePlan) return null;
     return activePlan.columns.find((c) => c.nodeId === selectedPileCapNodeId) || null;
@@ -194,6 +199,10 @@ export const FloorPlanViewer: React.FC = () => {
     setIsGeneratingSheet(true);
     setTimeout(() => {
       try {
+        // Update TEXT_H.DIM with custom dimension size
+        (TEXT_H as any).DIM = dimensionTextSize;
+        (TEXT_H as any).CALLOUT = Math.round(dimensionTextSize * 0.7);
+
         let sheets: DrawingSheet[] = [];
         if (sheetMode === 'BEAM_SECTIONS') {
           sheets = BeamSectionSheetEngine.buildSheets({
@@ -233,6 +242,18 @@ export const FloorPlanViewer: React.FC = () => {
         setIsGeneratingSheet(false);
       }
     }, 40);
+  };
+
+  // Apply dimension text size and regenerate sheets
+  const handleApplyDimensionSize = () => {
+    const val = parseInt(dimensionTextSizeInput, 10);
+    if (!isNaN(val) && val >= 100 && val <= 600) {
+      setDimensionTextSize(val);
+      // Force regenerate sheets with new size
+      if (sheetMode !== 'FRAMING') {
+        handleGenerateSheet(true);
+      }
+    }
   };
 
   // Add / Place Staircase on active level
@@ -779,6 +800,29 @@ export const FloorPlanViewer: React.FC = () => {
                 title="High-contrast Blueprint Dark workspace"
               >
                 <span>🌙 Blueprint Dark</span>
+              </button>
+            </div>
+
+            {/* Dimension Text Size Control */}
+            <div className="inline-flex items-center gap-1.5 bg-slate-100 p-0.5 rounded border border-slate-300 text-xs font-mono">
+              <span className="px-1.5 text-[10px] text-slate-600 font-semibold">DIM:</span>
+              <input
+                type="number"
+                min={100}
+                max={600}
+                step={10}
+                value={dimensionTextSizeInput}
+                onChange={(e) => setDimensionTextSizeInput(e.target.value)}
+                className="w-14 px-1.5 py-0.5 text-xs font-mono text-center border border-slate-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                title="Dimension text size (100-600)"
+              />
+              <button
+                type="button"
+                onClick={handleApplyDimensionSize}
+                className="px-2 py-0.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded shadow-xs transition-colors"
+                title="Apply dimension size and regenerate drawing"
+              >
+                Apply
               </button>
             </div>
 
