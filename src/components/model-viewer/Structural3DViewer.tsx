@@ -709,9 +709,6 @@ const [showGrid, setShowGrid] = useState(true);
       precision: 'mediump',
     });
 
-    // Add grid helper
-    const gridHelper = showGrid ? new THREE.GridHelper(100, 50, isLight ? 0x2563EB : 0x00f0ff, isLight ? 0xCBD5E1 : 0x1e293b) : null;
-    if (showGrid) scene.add(gridHelper);
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     rendererRef.current = renderer;
@@ -2631,6 +2628,8 @@ const [showGrid, setShowGrid] = useState(true);
           showArchStaircases={showArchStaircases}
           onToggleArchStaircases={() => setShowArchStaircases(!showArchStaircases)}
           archStaircasesCount={architecturalStaircases ? Object.keys(architecturalStaircases).length : 0}
+          showGrid={showGrid}
+          onToggleGrid={() => setShowGrid(!showGrid)}
         />
 
       {/* Floating Action Banner: Merge Selected Pile Caps (When >= 2 supports selected) */}
