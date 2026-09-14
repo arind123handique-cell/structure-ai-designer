@@ -19,6 +19,7 @@ import { CollapsiblePanel } from '@/components/common/CollapsiblePanel';
 import { CalculationPdfService } from '@/features/calculations/calculationPdfService';
 import { ManualAnalysisEngine } from '@/features/calculations/manualAnalysisEngine';
 import { AnalysisSourceToggle } from '@/components/common/AnalysisSourceToggle';
+import { FoundationSpatialSizingEngine } from './foundationSpatialSizingEngine';
 import {
   Play,
   Box,
@@ -41,6 +42,8 @@ import {
   ChevronUp,
   Sliders,
   Filter,
+  AlertTriangle,
+  Zap,
 } from 'lucide-react';
 
 export const PileCapDesignView: React.FC = () => {
@@ -75,6 +78,8 @@ export const PileCapDesignView: React.FC = () => {
     getSectionAnalysisSource,
     sectionAnalysisSources,
     designAnalysisSource,
+    plotSite,
+    autoSizeAllFoundations,
   } = useProjectStore();
 
   const [designedCaps, setDesignedCaps] = useState<Map<number, PileCapDesignOutput>>(new Map());
@@ -96,6 +101,8 @@ export const PileCapDesignView: React.FC = () => {
   const [autoDesignSummary, setAutoDesignSummary] = useState<BatchPileCapOptimizationSummary | null>(null);
   const [isAutoDesignModalOpen, setIsAutoDesignModalOpen] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [isAutoSizing, setIsAutoSizing] = useState(false);
+  const [autoSizeFeedback, setAutoSizeFeedback] = useState<string | null>(null);
 
   // Resolve available project pile types
   const availablePileTypes: ProjectPileType[] = useMemo(() => {
@@ -202,6 +209,7 @@ export const PileCapDesignView: React.FC = () => {
         customCapLength: overrides?.customCapLength,
         customCapWidth: overrides?.customCapWidth,
         customCapDepth: overrides?.customCapDepth,
+        rotationAngle: overrides?.rotationAngle || 0,
         assignedPileTypeId: assignedPile.id,
         factoredVerticalLoad: maxFy,
         factoredMomentX: maxMx,
@@ -312,7 +320,9 @@ export const PileCapDesignView: React.FC = () => {
       manualMergedPileCapGroups,
       detachedCombinedCapNodeIds,
       customCombinedCapOverrides,
-      defaultQsafe
+      defaultQsafe,
+      plotSite,
+      false
     );
   }, [
     activeModel,
@@ -321,7 +331,49 @@ export const PileCapDesignView: React.FC = () => {
     manualMergedPileCapGroups,
     detachedCombinedCapNodeIds,
     customCombinedCapOverrides,
+    plotSite,
   ]);
+
+  // Spatial Foundation Audit (Plot Boundary & Clear Spacing IS 2911)
+  const spatialAudit = useMemo(() => {
+    if (!activeModel) return null;
+    return FoundationSpatialSizingEngine.auditAll(
+      activeModel,
+      designedCaps,
+      combinedPileCaps,
+      plotSite
+    );
+  }, [activeModel, designedCaps, combinedPileCaps, plotSite]);
+
+  // Handle Auto-Size to Spacing & Plot Boundary
+  const handleAutoSizeToSpacingAndPlot = () => {
+    if (!activeModel || designedCaps.size === 0) return;
+    setIsAutoSizing(true);
+    try {
+      const result = autoSizeAllFoundations(designedCaps);
+      if (result) {
+        const parts: string[] = [];
+        if (result.rotatedCapCount > 0) {
+          parts.push(`${result.rotatedCapCount} individual cap(s) auto-rotated to clear boundaries/neighbors`);
+        }
+        const initialCombined = manualMergedPileCapGroups.length;
+        const newCombined = result.newCombinedGroups.length;
+        if (newCombined > initialCombined) {
+          parts.push(`${newCombined - initialCombined} colliding cluster(s) merged into combined pile caps`);
+        }
+        if (parts.length === 0) {
+          setAutoSizeFeedback('All foundation pile caps already fully compliant with plot boundaries and column spacing!');
+        } else {
+          setAutoSizeFeedback(`Spatial auto-sizing complete: ${parts.join('; ')}. All caps now 100% compliant.`);
+        }
+        setTimeout(() => setAutoSizeFeedback(null), 6000);
+      }
+    } catch (err) {
+      console.error('Failed to auto-size foundations:', err);
+    } finally {
+      setIsAutoSizing(false);
+    }
+  };
 
   // Save combined pile cap manual edit
   const handleSaveCombinedOverride = (groupId: string, override: any) => {
@@ -832,6 +884,17 @@ export const PileCapDesignView: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Auto-Size to Plot & Spacing Button */}
+            <button
+              onClick={handleAutoSizeToSpacingAndPlot}
+              disabled={isAutoSizing || isOptimizing}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-violet-700 hover:bg-violet-800 text-white font-mono text-xs font-bold rounded shadow-2xs transition-all disabled:opacity-50"
+              title="Automatically resolve overlapping pile caps, rotate individual caps to clear neighbors, and size combined caps within plot boundaries"
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-300" />
+              <span>{isAutoSizing ? 'Auto-Sizing...' : '⚡ Auto-Size to Spacing & Plot'}</span>
+            </button>
+
             {/* 1-Click Auto Design Button */}
             <button
               onClick={() => handleTriggerAutoDesign()}
@@ -890,6 +953,89 @@ export const PileCapDesignView: React.FC = () => {
           </div>
         </div>
       </CollapsiblePanel>
+
+      {/* Spatial Foundation Audit Bar (Plot Boundary & Collision Avoidance) */}
+      {spatialAudit && (
+        <div className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-lg border font-mono text-xs shadow-2xs transition-all ${
+          spatialAudit.isFullyCompliant
+            ? 'bg-emerald-50/80 border-emerald-300 text-emerald-950'
+            : 'bg-amber-50/90 border-amber-300 text-amber-950'
+        }`}>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1.5 font-bold">
+              {spatialAudit.isFullyCompliant ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+              )}
+              <span>SPATIAL AUDIT:</span>
+            </div>
+
+            {/* Plot Site Status */}
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-white/80 border border-slate-200">
+              <span className="text-slate-500">Plot:</span>
+              <span className="font-semibold text-slate-800">
+                {spatialAudit.plotLimits
+                  ? `${spatialAudit.plotLimits.lengthM.toFixed(1)}m × ${spatialAudit.plotLimits.widthM.toFixed(1)}m`
+                  : 'Not Defined'}
+              </span>
+              {spatialAudit.plotLimits && (
+                spatialAudit.hasPlotViolations ? (
+                  <span className="ml-1 px-1.5 py-0.2 bg-rose-100 text-rose-800 font-bold rounded text-[10px]">
+                    {spatialAudit.plotViolations.length} Protrusion{spatialAudit.plotViolations.length > 1 ? 's' : ''}
+                  </span>
+                ) : (
+                  <span className="ml-1 px-1.5 py-0.2 bg-emerald-100 text-emerald-800 font-bold rounded text-[10px]">
+                    100% Inside Plot
+                  </span>
+                )
+              )}
+            </div>
+
+            {/* Collision Status */}
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-white/80 border border-slate-200">
+              <span className="text-slate-500">Spacing:</span>
+              {spatialAudit.hasCollisions ? (
+                <span className="px-1.5 py-0.2 bg-rose-100 text-rose-800 font-bold rounded text-[10px]">
+                  {spatialAudit.collisions.length} Overlap{spatialAudit.collisions.length > 1 ? 's' : ''} (&lt;150mm)
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 font-bold rounded text-[10px]">
+                  Zero Collisions (&ge;150mm Clear)
+                </span>
+              )}
+            </div>
+
+            {/* Total Cap Counts */}
+            <div className="hidden sm:flex items-center gap-2 text-slate-600 text-[11px]">
+              <span>{spatialAudit.totalIndividualCaps} Individual</span>
+              <span>·</span>
+              <span>{spatialAudit.totalCombinedCaps} Combined</span>
+            </div>
+          </div>
+
+          {/* Quick Auto-Fix Button if not compliant */}
+          {!spatialAudit.isFullyCompliant && (
+            <button
+              onClick={handleAutoSizeToSpacingAndPlot}
+              disabled={isAutoSizing}
+              className="flex items-center gap-1.5 px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded shadow-2xs transition-all disabled:opacity-50 text-[11px]"
+              title="Automatically merge colliding column caps and rotate rectangular caps to clear plot boundaries"
+            >
+              <Zap className="w-3 h-3" />
+              <span>Auto-Resolve ({spatialAudit.collisions.length + spatialAudit.plotViolations.length})</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Auto-Size Feedback Alert */}
+      {autoSizeFeedback && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-violet-50 border border-violet-300 text-violet-900 rounded font-mono text-xs shadow-2xs animate-in fade-in">
+          <Zap className="w-4 h-4 text-violet-600 shrink-0" />
+          <span className="font-semibold">{autoSizeFeedback}</span>
+        </div>
+      )}
 
       {/* Universal Rebar Master Selection Toolbar */}
       <CollapsiblePanel

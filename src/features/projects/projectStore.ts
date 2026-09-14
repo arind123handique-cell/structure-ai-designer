@@ -44,6 +44,7 @@ import {
   isModelInsidePlotSite,
   SetbackOptions,
 } from '../plot/plotTypes';
+import { FoundationSpatialSizingEngine } from '../design/pilecap/foundationSpatialSizingEngine';
 
 export type ViewTab =
   | 'dashboard'
@@ -185,6 +186,14 @@ export interface ProjectState {
   clearCustomCombinedCapOverride: (groupId: string) => void;
   rotateCombinedPileCap: (groupId: string, direction: 'CW' | 'CCW') => void;
   setCombinedCapRotation: (groupId: string, angleDeg: number) => void;
+  autoSizeAllFoundations: (designedCaps?: Map<number, any>) => {
+    recommendedRotations: Record<number, number>;
+    newCombinedGroups: number[][];
+    mergedNodeCount: number;
+    rotatedCapCount: number;
+    auditBefore: any;
+    auditAfter: any;
+  } | null;
   // Saved Component Designs & Overrides
   savedColumnDesigns: Record<number, any>;
   savedBeamDesigns: Record<number, any>;
@@ -1475,6 +1484,55 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setCombinedCapRotation: (groupId, angleDeg) => {
     const normalized = ((angleDeg % 360) + 360) % 360;
     get().setCustomCombinedCapOverride(groupId, { rotationAngle: normalized });
+  },
+
+  autoSizeAllFoundations: (designedCaps) => {
+    const {
+      activeModel,
+      activeProject,
+      plotSite,
+      manualMergedPileCapGroups,
+      detachedCombinedCapNodeIds,
+      customPileCapOverrides,
+    } = get();
+
+    if (!activeModel || !activeModel.supports || activeModel.supports.size === 0) return null;
+
+    const capsToUse = designedCaps || new Map();
+
+    const result = FoundationSpatialSizingEngine.autoSizeAll(
+      activeModel,
+      capsToUse,
+      manualMergedPileCapGroups || [],
+      detachedCombinedCapNodeIds || [],
+      plotSite
+    );
+
+    // Apply rotation overrides
+    const updatedCustomOverrides = { ...customPileCapOverrides };
+    for (const [nodeIdStr, rot] of Object.entries(result.recommendedRotations)) {
+      const nid = Number(nodeIdStr);
+      updatedCustomOverrides[nid] = {
+        ...(updatedCustomOverrides[nid] || {}),
+        rotationAngle: rot,
+      };
+    }
+
+    set({
+      manualMergedPileCapGroups: result.newCombinedGroups,
+      customPileCapOverrides: updatedCustomOverrides,
+    });
+
+    if (activeProject) {
+      ProjectStorage.saveProject({
+        ...activeProject,
+        manualMergedPileCapGroups: result.newCombinedGroups,
+        customPileCapOverrides: updatedCustomOverrides,
+        metadata: { ...activeProject.metadata, updatedAt: new Date().toISOString() },
+      });
+    }
+
+    return result;
   },
 
   setUniversalRebarModalOpen: (open) => set({ isUniversalRebarModalOpen: open }),

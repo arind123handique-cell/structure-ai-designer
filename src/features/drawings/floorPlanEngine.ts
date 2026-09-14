@@ -4,6 +4,7 @@ import { GradeBeamDesignEngine, GradeBeamDesignOutput } from '@/features/design/
 import { PileCapDesignEngine, PileCapDesignOutput } from '@/features/design/pilecap/pileCapDesignEngine';
 import { PileDesignEngine, ProjectPileType } from '@/features/design/pile/pileDesignEngine';
 import { CombinedPileCapEngine, CombinedPileCapGroup } from '@/features/design/pilecap/combinedPileCapEngine';
+import { PlotSite } from '@/features/plot/plotTypes';
 
 export interface GridLineInfo {
   id: string; // e.g. "1", "2", "3" or "A", "B", "C"
@@ -121,7 +122,8 @@ export class FloorPlanEngine {
     customCombinedCapOverrides?: Record<string, any>,
     savedPileCapDesigns?: Record<number, any>,
     savedCombinedCapDesigns?: any[],
-    designSettings?: { concreteGrade?: string; steelGrade?: string }
+    designSettings?: { concreteGrade?: string; steelGrade?: string },
+    plotSite?: PlotSite | null
   ): FloorPlanLevel[] {
     if (!model || !model.nodes || !model.members) return [];
 
@@ -392,7 +394,9 @@ export class FloorPlanEngine {
         manualMergedPileCapGroups || [],
         detachedCombinedCapNodeIds || [],
         customCombinedCapOverrides,
-        defaultQsafe
+        defaultQsafe,
+        plotSite,
+        false
       );
     }
 

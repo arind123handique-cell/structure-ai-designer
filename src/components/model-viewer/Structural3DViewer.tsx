@@ -603,9 +603,12 @@ export const Structural3DViewer: React.FC = () => {
       defaultPile.diameter || 350,
       manualMergedPileCapGroups,
       detachedCombinedCapNodeIds,
-      customCombinedCapOverrides
+      customCombinedCapOverrides,
+      defaultPile.safeWorkingLoad || 280,
+      plotSite,
+      false
     );
-  }, [activeModel, projectPileTypes, supportPileAssignments, customPileCapOverrides, customCombinedCapOverrides, manualMergedPileCapGroups, detachedCombinedCapNodeIds]);
+  }, [activeModel, projectPileTypes, supportPileAssignments, customPileCapOverrides, customCombinedCapOverrides, manualMergedPileCapGroups, detachedCombinedCapNodeIds, plotSite]);
 
   const absorbedNodeMap = useMemo(() => {
     const map = new Map<number, CombinedPileCapGroup>();

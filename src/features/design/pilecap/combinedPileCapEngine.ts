@@ -1,6 +1,8 @@
 import { NormalizedStructuralModel } from '@/features/model/types';
 import { ColumnNumberingService } from '@/features/model/columnNumbering';
+import { PlotSite } from '@/features/plot/plotTypes';
 import { PileCapDesignOutput } from './pileCapDesignEngine';
+import { FoundationSpatialSizingEngine } from './foundationSpatialSizingEngine';
 import { IS456Flexure } from '@/features/codes/is456/flexure';
 import { DetailedCalculationReport } from '@/features/calculations/types';
 import { rotatePoints2D } from './pileCapGeometryUtils';
@@ -76,7 +78,9 @@ export class CombinedPileCapEngine {
       customTopRebar?: string;
       rotationAngle?: number;
     }>,
-    defaultSafeWorkingCapacity = 280
+    defaultSafeWorkingCapacity = 280,
+    plotSite?: PlotSite | null,
+    autoMergeCollisions = false
   ): CombinedPileCapGroup[] {
     if (!model.supports || model.supports.size === 0) return [];
     const columnMapping = ColumnNumberingService.getColumnSupportMapping(model);
@@ -152,20 +156,68 @@ export class CombinedPileCapEngine {
             manualIdx++,
             true,
             override,
-            defaultSafeWorkingCapacity
+            defaultSafeWorkingCapacity,
+            plotSite
           );
           results.push(grp);
         }
       }
     }
 
-    // Mark user-detached nodes as excluded from manual merging
+    // Mark user-detached nodes as excluded from merging
     if (detachedNodeIds && detachedNodeIds.length > 0) {
       detachedNodeIds.forEach((id) => absorbed.add(id));
     }
 
-    // Auto-detection of shear wall clusters and closely-spaced columns removed.
-    // Only user-initiated manual merge groups are supported.
+    // 2. Automated Collision Detection & Sizing (when autoMergeCollisions is enabled)
+    if (autoMergeCollisions) {
+      // 2a. Detect shear wall clusters from WALL plates or close geometric wall nodes
+      const remainingForSW = supportNodes.filter((n) => !absorbed.has(n.nodeId));
+      const swGroups = CombinedPileCapEngine.detectShearWallClusters(
+        model,
+        remainingForSW,
+        pileDiameter,
+        customCombinedOverrides,
+        defaultSafeWorkingCapacity,
+        plotSite
+      );
+      for (const sw of swGroups) {
+        sw.nodeIds.forEach((id) => absorbed.add(id));
+        results.push(sw);
+      }
+
+      // 2b. Detect physically colliding / overlapping column caps via BFS Connected Components
+      if (designedIndividualCaps && designedIndividualCaps.size > 0) {
+        const remainingSupportNodes = supportNodes.filter((n) => !absorbed.has(n.nodeId));
+        const clusters = FoundationSpatialSizingEngine.findCollisionClusters(
+          model,
+          remainingSupportNodes,
+          designedIndividualCaps,
+          detachedNodeIds,
+          0.15
+        );
+
+        let autoIdx = results.length + 1;
+        for (const clusterNodeIds of clusters) {
+          const matchedNodes = remainingSupportNodes.filter((n) => clusterNodeIds.includes(n.nodeId));
+          if (matchedNodes.length >= 2) {
+            matchedNodes.forEach((n) => absorbed.add(n.nodeId));
+            const gid = `AUTO-${autoIdx}`;
+            const override = customCombinedOverrides?.[gid];
+            const grp = CombinedPileCapEngine.designMergedCap(
+              matchedNodes,
+              pileDiameter,
+              autoIdx++,
+              false,
+              override,
+              defaultSafeWorkingCapacity,
+              plotSite
+            );
+            results.push(grp);
+          }
+        }
+      }
+    }
 
     return results;
   }
@@ -175,7 +227,8 @@ export class CombinedPileCapEngine {
     nodes: SupportNodeInfo[],
     Dp: number,
     customCombinedOverrides?: Record<string, any>,
-    defaultQsafe = 280
+    defaultQsafe = 280,
+    plotSite?: PlotSite | null
   ): CombinedPileCapGroup[] {
     const results: CombinedPileCapGroup[] = [];
     const visited = new Set<number>();
@@ -194,7 +247,7 @@ export class CombinedPileCapEngine {
       cn.forEach((n) => visited.add(n.nodeId));
       const gid = `SW-${idx}`;
       const override = customCombinedOverrides?.[gid];
-      results.push(CombinedPileCapEngine.designShearWallCap(cn, Dp, idx++, override, defaultQsafe));
+      results.push(CombinedPileCapEngine.designShearWallCap(cn, Dp, idx++, override, defaultQsafe, plotSite));
     }
     return results;
   }
@@ -262,7 +315,9 @@ export class CombinedPileCapEngine {
     dimZ: number,
     Dp: number,
     eo: number,
-    allowExpansion = true
+    allowExpansion = true,
+    maxDimX?: number,
+    maxDimZ?: number
   ): {
     nX: number;
     nZ: number;
@@ -321,6 +376,14 @@ export class CombinedPileCapEngine {
         if (nz > 1 && candSz < sMin) penalty += (sMin - candSz) * 1000 + 10000;
       }
 
+      // Check plot boundary compliance: penalize configurations that exceed available boundary space
+      if (maxDimX && candDimX > maxDimX) {
+        penalty += (candDimX - maxDimX) * 5000 + 50000;
+      }
+      if (maxDimZ && candDimZ > maxDimZ) {
+        penalty += (candDimZ - maxDimZ) * 5000 + 50000;
+      }
+
       // Penalty for aspect ratio mismatch
       const aspectDiff = Math.abs(Math.log(gridAspect) - Math.log(dimAspect));
 
@@ -358,6 +421,14 @@ export class CombinedPileCapEngine {
 
       finalDimX = Math.max(dimX, targetReqDimX);
       finalDimZ = Math.max(dimZ, targetReqDimZ);
+
+      // Clamp dimensions to maximum allowed plot dimensions if bounded
+      if (maxDimX && finalDimX > maxDimX) {
+        finalDimX = Math.max(Dp + 2 * edgeDist, maxDimX);
+      }
+      if (maxDimZ && finalDimZ > maxDimZ) {
+        finalDimZ = Math.max(Dp + 2 * edgeDist, maxDimZ);
+      }
 
       const availX = Math.max(10, finalDimX - 2 * edgeDist);
       const availZ = Math.max(10, finalDimZ - 2 * edgeDist);
@@ -416,7 +487,8 @@ export class CombinedPileCapEngine {
     Dp: number,
     idx: number,
     override?: any,
-    defaultQsafe = 280
+    defaultQsafe = 280,
+    plotSite?: PlotSite | null
   ): CombinedPileCapGroup {
     const s = 3 * Dp;
     const eo = Dp;
@@ -477,10 +549,34 @@ export class CombinedPileCapEngine {
 
     const capDepth = override?.customCapDepth || Math.max(900, Math.round(1.5 * Dp));
 
-    // Dynamic optimal grid placement strictly bounded within cap dimensions
+    // Dynamic optimal grid placement strictly bounded within cap dimensions and plot boundaries
     const hasCustomDim = Boolean(override?.customCapLength || override?.customCapWidth);
     const allowExpansion = !hasCustomDim;
-    const grid = CombinedPileCapEngine.computeOptimalGrid(pileCount, capLength, capWidth, Dp, eo, allowExpansion);
+
+    let maxDimX: number | undefined;
+    let maxDimZ: number | undefined;
+    if (plotSite && plotSite.plotLength > 0 && plotSite.plotWidth > 0) {
+      const pLimits = FoundationSpatialSizingEngine.getPlotLimits(plotSite);
+      if (pLimits) {
+        const cx = cn.reduce((s, n) => s + n.x, 0) / cn.length;
+        const cz = cn.reduce((s, n) => s + n.z, 0) / cn.length;
+        const availHalfX = Math.min(cx - pLimits.minX, pLimits.maxX - cx);
+        const availHalfZ = Math.min(cz - pLimits.minZ, pLimits.maxZ - cz);
+        if (availHalfX > 0) maxDimX = Math.floor(availHalfX * 2000);
+        if (availHalfZ > 0) maxDimZ = Math.floor(availHalfZ * 2000);
+      }
+    }
+
+    const grid = CombinedPileCapEngine.computeOptimalGrid(
+      pileCount,
+      capLength,
+      capWidth,
+      Dp,
+      eo,
+      allowExpansion,
+      maxDimX,
+      maxDimZ
+    );
     let pileOffsets = grid.pileOffsets;
     if (allowExpansion) {
       capLength = grid.capLength;
@@ -658,7 +754,8 @@ export class CombinedPileCapEngine {
     idx: number,
     isManual = false,
     override?: any,
-    defaultQsafe = 280
+    defaultQsafe = 280,
+    plotSite?: PlotSite | null
   ): CombinedPileCapGroup {
     const s = 3 * Dp;
     const eo = Dp;
@@ -716,10 +813,34 @@ export class CombinedPileCapEngine {
 
     const capDepth = override?.customCapDepth || Math.max(900, Math.round(1.5 * Dp));
 
-    // Dynamic optimal grid placement strictly bounded within cap dimensions
+    // Dynamic optimal grid placement strictly bounded within cap dimensions and plot boundaries
     const hasCustomDim = Boolean(override?.customCapLength || override?.customCapWidth);
     const allowExpansion = !hasCustomDim;
-    const grid = CombinedPileCapEngine.computeOptimalGrid(pileCount, capLength, capWidth, Dp, eo, allowExpansion);
+
+    let maxDimX: number | undefined;
+    let maxDimZ: number | undefined;
+    if (plotSite && plotSite.plotLength > 0 && plotSite.plotWidth > 0) {
+      const pLimits = FoundationSpatialSizingEngine.getPlotLimits(plotSite);
+      if (pLimits) {
+        const cx = nodes.reduce((s, n) => s + n.x, 0) / nodes.length;
+        const cz = nodes.reduce((s, n) => s + n.z, 0) / nodes.length;
+        const availHalfX = Math.min(cx - pLimits.minX, pLimits.maxX - cx);
+        const availHalfZ = Math.min(cz - pLimits.minZ, pLimits.maxZ - cz);
+        if (availHalfX > 0) maxDimX = Math.floor(availHalfX * 2000);
+        if (availHalfZ > 0) maxDimZ = Math.floor(availHalfZ * 2000);
+      }
+    }
+
+    const grid = CombinedPileCapEngine.computeOptimalGrid(
+      pileCount,
+      capLength,
+      capWidth,
+      Dp,
+      eo,
+      allowExpansion,
+      maxDimX,
+      maxDimZ
+    );
     let pileOffsets = grid.pileOffsets;
     if (allowExpansion) {
       capLength = grid.capLength;
