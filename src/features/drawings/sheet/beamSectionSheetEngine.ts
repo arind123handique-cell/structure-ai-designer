@@ -235,7 +235,7 @@ export class BeamSectionSheetEngine {
     const spanM = beam.length || 4.5;
     if (!b || !D) return null;
 
-    const mark = beam.label || `B${beam.memberId}`;
+    const mark = `B${ctx.markIndex + 1}`;
     const savedBm = ctx.savedBeamDesigns[beam.memberId];
 
     let topThrough: RebarLine;
@@ -1702,8 +1702,8 @@ export class BeamSectionSheetEngine {
         ];
 
     zones.forEach((zone) => {
-      const zStartX = xLeft + (zone.startMm / totalSpanMm) * spanUnits;
-      const zEndX = xLeft + (zone.endMm / totalSpanMm) * spanUnits;
+      const zStartX = xLeft + (zone.startMm / clearSpanMm) * spanUnits;
+      const zEndX = xLeft + (zone.endMm / clearSpanMm) * spanUnits;
 
       // Vertical zone boundaries
       b.line(LAYER_LINK.name, zStartX, yBotBar, zStartX, yTopBar);
