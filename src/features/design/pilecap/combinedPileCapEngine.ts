@@ -251,6 +251,64 @@ export class CombinedPileCapEngine {
     return clusters;
   }
 
+  public static computeOptimalGrid(
+    pileCount: number,
+    dimX: number,
+    dimZ: number,
+    Dp: number,
+    eo: number
+  ): { nX: number; nZ: number; pileOffsets: { x: number; z: number }[] } {
+    const sMin = 2.4 * Dp;
+    let bestNx = 2;
+    let bestNz = Math.ceil(pileCount / 2);
+    let bestScore = Infinity;
+
+    for (let nx = 1; nx <= 8; nx++) {
+      const nz = Math.ceil(pileCount / nx);
+      if (nx * nz > pileCount + 3) continue;
+
+      const availX = Math.max(100, dimX - 2 * eo);
+      const availZ = Math.max(100, dimZ - 2 * eo);
+      const sx = nx > 1 ? availX / (nx - 1) : 0;
+      const sz = nz > 1 ? availZ / (nz - 1) : 0;
+
+      let penalty = 0;
+      if (nx > 1 && sx < sMin) penalty += (sMin - sx) * 15;
+      if (nz > 1 && sz < sMin) penalty += (sMin - sz) * 15;
+
+      const gridAspect = nx / nz;
+      const dimAspect = dimX / dimZ;
+      const aspectDiff = Math.abs(gridAspect - dimAspect);
+
+      const score = penalty + aspectDiff * 2 + (nx * nz - pileCount) * 5;
+      if (score < bestScore) {
+        bestScore = score;
+        bestNx = nx;
+        bestNz = nz;
+      }
+    }
+
+    const availX = Math.max(100, dimX - 2 * eo);
+    const availZ = Math.max(100, dimZ - 2 * eo);
+    const sX = bestNx > 1 ? Math.min(3.5 * Dp, availX / (bestNx - 1)) : 0;
+    const sZ = bestNz > 1 ? Math.min(3.5 * Dp, availZ / (bestNz - 1)) : 0;
+
+    const startX = bestNx === 1 ? 0 : -((bestNx - 1) * sX) / 2;
+    const startZ = bestNz === 1 ? 0 : -((bestNz - 1) * sZ) / 2;
+
+    const pileOffsets: { x: number; z: number }[] = [];
+    for (let r = 0; r < bestNz; r++) {
+      for (let c = 0; c < bestNx; c++) {
+        if (pileOffsets.length >= pileCount) break;
+        const px = Math.round(startX + c * sX);
+        const pz = Math.round(startZ + r * sZ);
+        pileOffsets.push({ x: px, z: pz });
+      }
+    }
+
+    return { nX: bestNx, nZ: bestNz, pileOffsets };
+  }
+
   public static designShearWallCap(
     cn: SupportNodeInfo[],
     Dp: number,
@@ -271,70 +329,57 @@ export class CombinedPileCapEngine {
     const maxX = Math.max(...cn.map((n) => n.x));
     const minZ = Math.min(...cn.map((n) => n.z));
     const maxZ = Math.max(...cn.map((n) => n.z));
-    const wallLongMm = Math.round(Math.max(maxX - minX, maxZ - minZ) * 1000);
-    const wallShortMm = Math.round(Math.min(maxX - minX, maxZ - minZ) * 1000);
-    const longIsX = (maxX - minX) >= (maxZ - minZ);
+    const spanXMm = Math.round((maxX - minX) * 1000);
+    const spanZMm = Math.round((maxZ - minZ) * 1000);
+    const longIsX = spanXMm >= spanZMm;
+    const spanLongMm = Math.max(spanXMm, spanZMm);
+    const spanShortMm = Math.min(spanXMm, spanZMm);
 
-    let nCols = Math.max(2, Math.round(wallLongMm / s) + 1);
-    let nRows = wallShortMm > s * 0.5 ? 2 : 1;
+    let nLong = Math.max(2, Math.round(spanLongMm / s) + 1);
+    let nShort = spanShortMm > s * 0.5 ? 2 : 1;
 
     // Ensure total piles in grid satisfies single pile load capacity
-    while (nRows * nCols < minPilesReq) {
-      if (nRows === 1) {
-        nRows = 2;
-      } else if (nCols < nRows * 2.5) {
-        nCols += 1;
+    while (nShort * nLong < minPilesReq) {
+      if (nShort === 1) {
+        nShort = 2;
+      } else if (nLong < nShort * 2.5) {
+        nLong += 1;
       } else {
-        nRows += 1;
+        nShort += 1;
       }
     }
 
-    let pileCount = nRows * nCols;
+    let pileCount = nShort * nLong;
     if (override?.customPileCount && override.customPileCount > 0) {
       pileCount = override.customPileCount;
-      if (pileCount <= 4) {
-        nRows = 2;
-        nCols = 2;
-      } else if (pileCount <= 6) {
-        nRows = 2;
-        nCols = 3;
-      } else if (pileCount <= 8) {
-        nRows = 2;
-        nCols = 4;
-      } else if (pileCount <= 12) {
-        nRows = 2;
-        nCols = 6;
-      } else if (pileCount <= 14) {
-        nRows = 2;
-        nCols = 7;
-      } else if (pileCount <= 16) {
-        nRows = 2;
-        nCols = 8;
-      } else if (pileCount <= 18) {
-        nRows = 2;
-        nCols = 9;
-      } else {
-        nRows = 3;
-        nCols = Math.ceil(pileCount / 3);
-      }
     }
 
-    const calcCapLong = (nCols - 1) * s + 2 * eo;
-    const calcCapShort = nRows > 1 ? (nRows - 1) * s + 2 * eo : Dp + 2 * eo;
+    const calcCapLong = Math.max(spanLongMm + 2 * eo, (nLong - 1) * s + 2 * eo);
+    const calcCapShort = Math.max(spanShortMm + 2 * eo, nShort > 1 ? (nShort - 1) * s + 2 * eo : Dp + 2 * eo);
 
-    const capLength = override?.customCapLength || (longIsX ? calcCapLong : calcCapShort);
-    const capWidth = override?.customCapWidth || (longIsX ? calcCapShort : calcCapLong);
+    let capLength: number; // dimension along X
+    let capWidth: number;  // dimension along Z
+
+    if (override?.customCapLength || override?.customCapWidth) {
+      const userDim1 = override?.customCapLength || 0;
+      const userDim2 = override?.customCapWidth || 0;
+      const userLong = Math.max(userDim1, userDim2) || calcCapLong;
+      const userShort = (Math.min(userDim1, userDim2) > 0 ? Math.min(userDim1, userDim2) : (userDim1 || userDim2)) || calcCapShort;
+
+      capLength = longIsX ? userLong : userShort;
+      capWidth = longIsX ? userShort : userLong;
+    } else {
+      capLength = longIsX ? calcCapLong : calcCapShort;
+      capWidth = longIsX ? calcCapShort : calcCapLong;
+    }
+
     const capDepth = override?.customCapDepth || Math.max(900, Math.round(1.5 * Dp));
 
-    const pileOffsets: { x: number; z: number }[] = [];
-    for (let r = 0; r < nRows; r++) {
-      for (let c = 0; c < nCols; c++) {
-        if (pileOffsets.length >= pileCount) break;
-        const lo = -((nCols - 1) * s) / 2 + c * s;
-        const so = nRows === 1 ? 0 : -((nRows - 1) * s) / 2 + r * s;
-        pileOffsets.push({ x: Math.round(longIsX ? lo : so), z: Math.round(longIsX ? so : lo) });
-      }
-    }
+    // Dynamic optimal grid placement strictly bounded within cap dimensions
+    const grid = CombinedPileCapEngine.computeOptimalGrid(pileCount, capLength, capWidth, Dp, eo);
+    const pileOffsets = grid.pileOffsets;
+    const nCols = longIsX ? grid.nX : grid.nZ;
+    const nRows = longIsX ? grid.nZ : grid.nX;
 
     const cover = 60;
     const d = capDepth - cover - 16;
@@ -507,6 +552,7 @@ export class CombinedPileCapEngine {
     const spanZMm = Math.round((maxZ - minZ) * 1000);
     const isXDir = spanXMm >= spanZMm;
     const spanLongMm = Math.max(spanXMm, spanZMm);
+    const spanShortMm = Math.min(spanXMm, spanZMm);
 
     let nLong = Math.max(2, Math.round(spanLongMm / s) + 2);
     let nShort = Math.max(2, Math.round(Math.min(spanXMm, spanZMm) / s) + 1);
@@ -522,48 +568,34 @@ export class CombinedPileCapEngine {
     let pileCount = nLong * nShort;
     if (override?.customPileCount && override.customPileCount > 0) {
       pileCount = override.customPileCount;
-      if (pileCount <= 4) {
-        nShort = 2;
-        nLong = 2;
-      } else if (pileCount <= 6) {
-        nShort = 2;
-        nLong = 3;
-      } else if (pileCount <= 8) {
-        nShort = 2;
-        nLong = 4;
-      } else if (pileCount <= 12) {
-        nShort = 2;
-        nLong = 6;
-      } else if (pileCount <= 14) {
-        nShort = 2;
-        nLong = 7;
-      } else if (pileCount <= 16) {
-        nShort = 2;
-        nLong = 8;
-      } else if (pileCount <= 18) {
-        nShort = 2;
-        nLong = 9;
-      } else {
-        nShort = 3;
-        nLong = Math.ceil(pileCount / 3);
-      }
     }
 
-    const calcCapLong = (nLong - 1) * s + 2 * eo;
-    const calcCapShort = (nShort - 1) * s + 2 * eo;
-    const capLength = override?.customCapLength || (isXDir ? calcCapLong : calcCapShort);
-    const capWidth = override?.customCapWidth || (isXDir ? calcCapShort : calcCapLong);
+    const calcCapLong = Math.max(spanLongMm + 2 * eo, (nLong - 1) * s + 2 * eo);
+    const calcCapShort = Math.max(spanShortMm + 2 * eo, (nShort - 1) * s + 2 * eo);
+
+    let capLength: number; // dimension along X
+    let capWidth: number;  // dimension along Z
+
+    if (override?.customCapLength || override?.customCapWidth) {
+      const userDim1 = override?.customCapLength || 0;
+      const userDim2 = override?.customCapWidth || 0;
+      const userLong = Math.max(userDim1, userDim2) || calcCapLong;
+      const userShort = (Math.min(userDim1, userDim2) > 0 ? Math.min(userDim1, userDim2) : (userDim1 || userDim2)) || calcCapShort;
+
+      capLength = isXDir ? userLong : userShort;
+      capWidth = isXDir ? userShort : userLong;
+    } else {
+      capLength = isXDir ? calcCapLong : calcCapShort;
+      capWidth = isXDir ? calcCapShort : calcCapLong;
+    }
+
     const capDepth = override?.customCapDepth || Math.max(900, Math.round(1.5 * Dp));
 
-    const pileOffsets: { x: number; z: number }[] = [];
-    for (let r = 0; r < nShort; r++) {
-      for (let c = 0; c < nLong; c++) {
-        if (pileOffsets.length >= pileCount) break;
-        const lo = -((nLong - 1) * s) / 2 + c * s;
-        const so = -((nShort - 1) * s) / 2 + r * s;
-        pileOffsets.push({ x: Math.round(isXDir ? lo : so), z: Math.round(isXDir ? so : lo) });
-      }
-    }
+    // Dynamic optimal grid placement strictly bounded within cap dimensions
+    const grid = CombinedPileCapEngine.computeOptimalGrid(pileCount, capLength, capWidth, Dp, eo);
+    const pileOffsets = grid.pileOffsets;
+    const nLongGrid = isXDir ? grid.nX : grid.nZ;
+    const nShortGrid = isXDir ? grid.nZ : grid.nX;
 
     const cover = 60;
     const d = capDepth - cover - 16;
@@ -645,8 +677,8 @@ export class CombinedPileCapEngine {
       pileSpacing: s,
       edgeDistance: eo,
       pileCount,
-      pileRows: nShort,
-      pileCols: nLong,
+      pileRows: nShortGrid,
+      pileCols: nLongGrid,
       pileOffsets,
       capLength,
       capWidth,

@@ -248,11 +248,11 @@ export const Structural3DViewer: React.FC = () => {
     // Pile Caps edges & combined caps
     edgePileCap: Object.assign(new THREE.LineBasicMaterial({ color: 0x94a3b8, linewidth: 1 }), { userData: { isShared: true } }),
     edgeSelectedPileCap: Object.assign(new THREE.LineBasicMaterial({ color: 0xfef08a, linewidth: 1 }), { userData: { isShared: true } }),
-    combinedCap: Object.assign(new THREE.MeshStandardMaterial({ color: 0x065f46, roughness: 0.35, metalness: 0.2 }), { userData: { isShared: true } }),
-    shearWallCombinedCap: Object.assign(new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.35, metalness: 0.2 }), { userData: { isShared: true } }),
-    selectedCombinedCap: Object.assign(new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.35, metalness: 0.2 }), { userData: { isShared: true } }),
-    edgeCombinedCap: Object.assign(new THREE.LineBasicMaterial({ color: 0x34d399, linewidth: 1.5 }), { userData: { isShared: true } }),
-    edgeShearWallCombinedCap: Object.assign(new THREE.LineBasicMaterial({ color: 0xf87171, linewidth: 1.5 }), { userData: { isShared: true } }),
+    combinedCap: Object.assign(new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.35, metalness: 0.15 }), { userData: { isShared: true } }),
+    shearWallCombinedCap: Object.assign(new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.35, metalness: 0.15 }), { userData: { isShared: true } }),
+    selectedCombinedCap: Object.assign(new THREE.MeshStandardMaterial({ color: 0xd97706, emissive: 0xb45309, emissiveIntensity: 0.4, roughness: 0.25 }), { userData: { isShared: true } }),
+    edgeCombinedCap: Object.assign(new THREE.LineBasicMaterial({ color: 0x10b981, linewidth: 1.5 }), { userData: { isShared: true } }),
+    edgeShearWallCombinedCap: Object.assign(new THREE.LineBasicMaterial({ color: 0xf43f5e, linewidth: 1.5 }), { userData: { isShared: true } }),
     edgeSelectedCombinedCap: Object.assign(new THREE.LineBasicMaterial({ color: 0xfde047, linewidth: 1.5 }), { userData: { isShared: true } }),
   });
 
@@ -288,6 +288,7 @@ export const Structural3DViewer: React.FC = () => {
     projectPileTypes,
     supportPileAssignments,
     customPileCapOverrides,
+    customCombinedCapOverrides,
     manualMergedPileCapGroups,
     detachedCombinedCapNodeIds,
     selectedSupportNodeIds,
@@ -599,17 +600,27 @@ export const Structural3DViewer: React.FC = () => {
       indMap,
       defaultPile.diameter || 350,
       manualMergedPileCapGroups,
-      detachedCombinedCapNodeIds
+      detachedCombinedCapNodeIds,
+      customCombinedCapOverrides
     );
-  }, [activeModel, projectPileTypes, supportPileAssignments, customPileCapOverrides, manualMergedPileCapGroups, detachedCombinedCapNodeIds]);
+  }, [activeModel, projectPileTypes, supportPileAssignments, customPileCapOverrides, customCombinedCapOverrides, manualMergedPileCapGroups, detachedCombinedCapNodeIds]);
 
   const absorbedNodeMap = useMemo(() => {
     const map = new Map<number, CombinedPileCapGroup>();
     combinedPileCaps.forEach((grp) => {
       grp.absorbedIndividualCaps.forEach((id) => map.set(id, grp));
+      grp.nodeIds.forEach((id) => map.set(id, grp));
+    });
+    manualMergedPileCapGroups.forEach((group) => {
+      group.forEach((id) => {
+        if (!map.has(id)) {
+          const found = combinedPileCaps.find((g) => g.nodeIds.includes(id));
+          if (found) map.set(id, found);
+        }
+      });
     });
     return map;
-  }, [combinedPileCaps]);
+  }, [combinedPileCaps, manualMergedPileCapGroups]);
 
   // Helper to frame camera on model
   const frameCameraToModel = (model: typeof activeModel) => {
@@ -1724,7 +1735,7 @@ export const Structural3DViewer: React.FC = () => {
 
           grp.pileOffsets.forEach((off, pIdx) => {
             const px = off.x / 1000;
-            const pz = -off.z / 1000;
+            const pz = off.z / 1000;
 
             const shaftMesh = new THREE.Mesh(sharedGeoms.unitCylinder, pileMat);
             shaftMesh.scale.set(pileRadius, pileLength, pileRadius);
@@ -1863,6 +1874,7 @@ export const Structural3DViewer: React.FC = () => {
     projectPileTypes,
     supportPileAssignments,
     customPileCapOverrides,
+    customCombinedCapOverrides,
     manualMergedPileCapGroups,
     savedSlabDesigns,
     savedColumnDesigns,

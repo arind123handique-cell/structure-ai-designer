@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { CombinedPileCapGroup } from './combinedPileCapEngine';
-import { X, Layers, CheckCircle2, AlertTriangle, RotateCcw, ShieldCheck } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { CombinedPileCapEngine, CombinedPileCapGroup } from './combinedPileCapEngine';
+import { X, Layers, CheckCircle2, AlertTriangle, RotateCcw, ShieldCheck, Grid } from 'lucide-react';
 
 interface CombinedPileCapEditModalProps {
   cap: CombinedPileCapGroup | null;
@@ -33,11 +33,19 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
   const defaultQsafe = cap.safePileCapacity || 280;
   const totalPu = cap.totalFactoredLoad;
   const totalPwork = Math.round(1.10 * (totalPu / 1.5));
+  const Dp = cap.pileDiameter || 350;
+  const eo = cap.edgeDistance || Dp;
+
+  const spanXMm = Math.round(Math.abs(cap.maxX - cap.minX) * 1000);
+  const spanZMm = Math.round(Math.abs(cap.maxZ - cap.minZ) * 1000);
+  const isXLong = spanXMm >= spanZMm;
+  const minRequiredX = spanXMm + 2 * eo;
+  const minRequiredZ = spanZMm + 2 * eo;
 
   const [safeCapacity, setSafeCapacity] = useState<number>(defaultQsafe);
   const [pileCount, setPileCount] = useState<number>(cap.pileCount || Math.ceil(totalPwork / defaultQsafe));
-  const [capLength, setCapLength] = useState<number>(cap.capLength || 3850);
-  const [capWidth, setCapWidth] = useState<number>(cap.capWidth || 1750);
+  const [capLength, setCapLength] = useState<number>(cap.capLength || Math.max(minRequiredX, 2200));
+  const [capWidth, setCapWidth] = useState<number>(cap.capWidth || Math.max(minRequiredZ, 2200));
   const [capDepth, setCapDepth] = useState<number>(cap.capDepth || 900);
   const [botRebar, setBotRebar] = useState<string>(cap.botRebarCallout || 'T16 @ 100 mm c/c (Long Way Bot)');
   const [topRebar, setTopRebar] = useState<string>(cap.topRebarCallout || 'T12 @ 150 mm c/c (Both Ways Top)');
@@ -47,6 +55,10 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
   const loadPerPileWork = Math.round(totalPwork / (pileCount || 1));
   const loadPerPileFactored = Math.round(totalPu / (pileCount || 1));
   const isSafeCapacity = loadPerPileWork <= safeCapacity;
+
+  const gridPreview = useMemo(() => {
+    return CombinedPileCapEngine.computeOptimalGrid(pileCount, capLength, capWidth, Dp, eo);
+  }, [pileCount, capLength, capWidth, Dp, eo]);
 
   const handleSave = () => {
     onSave(cap.groupId, {
@@ -137,19 +149,30 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
 
             {/* Total Pile Count */}
             <div>
-              <label className="block text-slate-600 mb-1 font-semibold">Number of Piles in Combined Cap:</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-slate-600 font-semibold">Number of Piles in Combined Cap:</label>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-bold border border-indigo-200 flex items-center gap-1">
+                  <Grid className="w-3 h-3" />
+                  <span>Grid: {gridPreview.nX} (X) × {gridPreview.nZ} (Z) = {gridPreview.pileOffsets.length} P</span>
+                </span>
+              </div>
               <input
                 type="number"
                 value={pileCount}
                 onChange={(e) => setPileCount(Math.max(2, Number(e.target.value)))}
                 className="w-full px-3 py-1.5 bg-white border border-ui-border rounded focus:outline-none focus:ring-1 focus:ring-secondary-brand"
               />
-              <span className="text-[10px] text-slate-500">Recommended: at least {minPilesReq} piles</span>
+              <span className="text-[10px] text-slate-500">Recommended: at least {minPilesReq} piles for safe capacity</span>
             </div>
 
-            {/* Cap Length */}
+            {/* Cap Dimension along X */}
             <div>
-              <label className="block text-slate-600 mb-1 font-semibold">Cap Length L (mm):</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-slate-600 font-semibold">
+                  {isXLong ? 'Cap Length (Long Core Axis / X) (mm):' : 'Cap Width (Transverse / X-axis) (mm):'}
+                </label>
+                <span className="text-[10px] text-slate-400">Min to cover columns: {minRequiredX} mm</span>
+              </div>
               <input
                 type="number"
                 step={50}
@@ -157,11 +180,21 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
                 onChange={(e) => setCapLength(Math.max(500, Number(e.target.value)))}
                 className="w-full px-3 py-1.5 bg-white border border-ui-border rounded focus:outline-none focus:ring-1 focus:ring-secondary-brand"
               />
+              {capLength < minRequiredX && (
+                <span className="text-[10px] text-rose-600 font-semibold block mt-0.5">
+                  ⚠️ Less than minimum {minRequiredX} mm to cover column boundary!
+                </span>
+              )}
             </div>
 
-            {/* Cap Width */}
+            {/* Cap Dimension along Z */}
             <div>
-              <label className="block text-slate-600 mb-1 font-semibold">Cap Width B (mm):</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-slate-600 font-semibold">
+                  {isXLong ? 'Cap Width (Transverse / Z-axis) (mm):' : 'Cap Length (Long Core Axis / Z) (mm):'}
+                </label>
+                <span className="text-[10px] text-slate-400">Min to cover columns: {minRequiredZ} mm</span>
+              </div>
               <input
                 type="number"
                 step={50}
@@ -169,6 +202,11 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
                 onChange={(e) => setCapWidth(Math.max(500, Number(e.target.value)))}
                 className="w-full px-3 py-1.5 bg-white border border-ui-border rounded focus:outline-none focus:ring-1 focus:ring-secondary-brand"
               />
+              {capWidth < minRequiredZ && (
+                <span className="text-[10px] text-rose-600 font-semibold block mt-0.5">
+                  ⚠️ Less than minimum {minRequiredZ} mm to cover column boundary!
+                </span>
+              )}
             </div>
 
             {/* Cap Depth */}

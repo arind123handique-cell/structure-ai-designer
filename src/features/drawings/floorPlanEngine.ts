@@ -130,7 +130,8 @@ export class FloorPlanEngine {
     }_${model.customGrids?.z?.length || 0}_${projectPileTypes?.length || 0}_${
       Object.keys(supportPileAssignments || {}).length
     }_${Object.keys(customPileCapOverrides || {}).length}_${manualMergedPileCapGroups?.length || 0}_${
-      designSettings?.concreteGrade || ''
+      JSON.stringify(customCombinedCapOverrides || {})
+    }_${designSettings?.concreteGrade || ''
     }_${designSettings?.steelGrade || ''}`;
 
     const cached = FloorPlanEngine.floorPlanCache.get(model);

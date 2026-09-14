@@ -43,6 +43,7 @@ export const FloorPlanViewer: React.FC = () => {
     projectPileTypes,
     supportPileAssignments,
     customPileCapOverrides,
+    customCombinedCapOverrides,
     manualMergedPileCapGroups,
     detachedCombinedCapNodeIds,
     architecturalStaircases,
@@ -64,9 +65,10 @@ export const FloorPlanViewer: React.FC = () => {
       supportPileAssignments,
       customPileCapOverrides,
       manualMergedPileCapGroups,
-      detachedCombinedCapNodeIds
+      detachedCombinedCapNodeIds,
+      customCombinedCapOverrides
     );
-  }, [activeModel, projectPileTypes, supportPileAssignments, customPileCapOverrides, manualMergedPileCapGroups, detachedCombinedCapNodeIds]);
+  }, [activeModel, projectPileTypes, supportPileAssignments, customPileCapOverrides, customCombinedCapOverrides, manualMergedPileCapGroups, detachedCombinedCapNodeIds]);
 
   const [selectedLevelIndex, setSelectedLevelIndex] = useState<number>(0);
 

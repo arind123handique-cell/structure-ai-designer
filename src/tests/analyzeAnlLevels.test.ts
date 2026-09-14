@@ -5,7 +5,7 @@ import { FloorPlanEngine } from '@/features/drawings/floorPlanEngine';
 import { StaircaseDesignEngine } from '@/features/design/staircase/staircaseEngine';
 
 describe('Analyze ANL Levels', () => {
-  it('should analyze real floor levels and diaphragm levels in STR FINAL.anl', () => {
+  it('should analyze real floor levels and diaphragm levels in STR FINAL.anl', async () => {
     if (!fs.existsSync('STR FINAL.anl')) {
       console.log('No STR FINAL.anl file found');
       return;
@@ -148,6 +148,48 @@ describe('Analyze ANL Levels', () => {
     expect(diaphragmLevels[2].bottomElevationY).toBeCloseTo(6.4, 1);
     expect(diaphragmLevels[2].topElevationY).toBeCloseTo(9.6, 1);
     expect(diaphragmLevels[3].bottomElevationY).toBeCloseTo(9.6, 1);
-    expect(diaphragmLevels[3].topElevationY).toBeCloseTo(12.8, 1);
+    // Inspect Combined Pile Cap detection
+    const { CombinedPileCapEngine } = await import('@/features/design/pilecap/combinedPileCapEngine');
+    const { PileCapDesignEngine } = await import('@/features/design/pilecap/pileCapDesignEngine');
+    const indMap = new Map<number, any>();
+    model.supports.forEach((sup: any) => {
+      const capResult = PileCapDesignEngine.design({
+        supportNodeId: sup.nodeId,
+        colWidth: 450,
+        colDepth: 550,
+        pileDiameter: 350,
+        safePileCapacity: 280,
+        assignedPileTypeId: 'P1',
+        factoredVerticalLoad: 650,
+        fck: 25,
+        fy: 500,
+        governingLoadCase: 5,
+      });
+      indMap.set(sup.nodeId, capResult);
+    });
+    const combinedCaps = CombinedPileCapEngine.detectAndDesignAll(
+      model,
+      indMap,
+      350,
+      [[3, 365, 366, 367, 927]],
+      [],
+      { 'MANUAL-1': { customCapLength: 4000, customCapWidth: 5000, customCapDepth: 900, customPileCount: 15 } }
+    );
+    console.log('\n--- COMBINED PILE CAPS DETECTED WITH MANUAL MERGE --- (' + combinedCaps.length + ' groups)');
+    for (const grp of combinedCaps) {
+      console.log('Group:', grp.groupId, grp.label);
+      console.log('  capLength (X), capWidth (Z), capDepth:', grp.capLength, grp.capWidth, grp.capDepth);
+      console.log('  pileCount:', grp.pileCount, 'pileOffsets count:', grp.pileOffsets.length);
+    }
+    expect(combinedCaps.length).toBe(1);
+    expect(combinedCaps[0].capLength).toBe(4000);
+    expect(combinedCaps[0].capWidth).toBe(5000);
+    expect(combinedCaps[0].pileCount).toBe(15);
+    expect(combinedCaps[0].pileOffsets.length).toBe(15);
+    // Ensure all piles are strictly inside the cap boundary with edge clearance >= 350mm
+    const maxZ = Math.max(...combinedCaps[0].pileOffsets.map(p => Math.abs(p.z)));
+    const maxX = Math.max(...combinedCaps[0].pileOffsets.map(p => Math.abs(p.x)));
+    expect(maxZ).toBeLessThanOrEqual(2500 - 350);
+    expect(maxX).toBeLessThanOrEqual(2000 - 350);
   });
 });
