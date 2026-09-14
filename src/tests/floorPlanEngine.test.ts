@@ -192,4 +192,104 @@ describe('2D Floor Framing & Foundation Plan Engine', () => {
     expect(f1.metrics.totalConcreteM3).toBeGreaterThan(0);
     expect(f1.metrics.totalSteelKg).toBeGreaterThan(0);
   });
+
+  it('should absorb all 4 columns (Node 2, 3, 6, 927) on the shear wall combined pile cap matching 3D model', () => {
+    const model = createSampleModel();
+    // Add shear wall and extra nodes/columns: Node 2, 3, 6, 927 and core plate nodes 364, 365, 366, 367
+    const extraNodes = [
+      { id: 6, x: 5.4, z: -4.3 },
+      { id: 927, x: 8.1, z: -4.3 },
+      { id: 364, x: 8.1, z: -3.8 },
+      { id: 365, x: 8.1, z: -2.3 },
+      { id: 366, x: 9.6, z: -3.8 },
+      { id: 367, x: 9.6, z: -2.3 },
+    ];
+    extraNodes.forEach((n) => {
+      model.nodes.set(n.id, { id: n.id, x: n.x, y: 0, z: n.z, isSupport: true });
+      model.supports!.set(n.id, {
+        nodeId: n.id,
+        type: 'FIXED',
+        releases: { fx: false, fy: false, fz: false, mx: false, my: false, mz: false },
+      });
+    });
+
+    // Add column members for 6 and 927
+    [6, 927].forEach((nid) => {
+      const topId = nid + 1000;
+      model.nodes.set(topId, { id: topId, x: model.nodes.get(nid)!.x, y: 3.5, z: model.nodes.get(nid)!.z });
+      model.members.set(nid + 500, {
+        id: nid + 500,
+        startNodeId: nid,
+        endNodeId: topId,
+        length: 3.5,
+        classification: 'COLUMN',
+        isAutoClassified: false,
+        section: { type: 'RECTANGULAR', yd: 0.55, zd: 0.45 },
+        materialName: 'CONCRETE',
+        designStatus: 'PASS',
+      });
+    });
+
+    // Provide a combined pile cap covering the shear wall
+    const dummyCombinedCap = [{
+      groupId: 'SW-1',
+      reason: 'SHEAR_WALL' as const,
+      label: 'PC-SW-1',
+      nodeIds: [364, 365, 366, 367],
+      absorbedIndividualCaps: [364, 365, 366, 367],
+      columnLabels: ['SW'],
+      minX: 5.4,
+      maxX: 9.6,
+      minZ: -4.3,
+      maxZ: 0.0,
+      wallLengthM: 4.2,
+      wallWidthM: 4.3,
+      totalFactoredLoad: 3000,
+      totalWorkingLoad: 2000,
+      safePileCapacity: 280,
+      pileDiameter: 350,
+      pileSpacing: 1050,
+      capLength: 5500,
+      capWidth: 7000,
+      capDepth: 900,
+      pileCount: 20,
+      pileOffsets: [],
+      reinforcement: {} as any,
+      status: 'PASS' as const,
+    }];
+
+    const plans = FloorPlanEngine.extractAllFloorPlans(
+      model,
+      undefined,
+      undefined,
+      undefined,
+      [[2, 3, 6, 927]], // manualMergedPileCapGroups
+      undefined,
+      undefined,
+      undefined,
+      dummyCombinedCap // savedCombinedCapDesigns
+    );
+
+    const foundation = plans[0];
+    expect(foundation.combinedPileCaps?.length).toBe(1);
+    const grp = foundation.combinedPileCaps![0];
+
+    // Verify that all 4 columns are absorbed
+    expect(grp.absorbedIndividualCaps).toContain(2);
+    expect(grp.absorbedIndividualCaps).toContain(3);
+    expect(grp.absorbedIndividualCaps).toContain(6);
+    expect(grp.absorbedIndividualCaps).toContain(927);
+
+    // Verify that absorbedCombinedCapNodeIds contains all 4 columns
+    expect(foundation.absorbedCombinedCapNodeIds?.has(2)).toBe(true);
+    expect(foundation.absorbedCombinedCapNodeIds?.has(3)).toBe(true);
+    expect(foundation.absorbedCombinedCapNodeIds?.has(6)).toBe(true);
+    expect(foundation.absorbedCombinedCapNodeIds?.has(927)).toBe(true);
+
+    // Verify column labels
+    expect(grp.columnLabels).toContain('C21');
+    expect(grp.columnLabels).toContain('C22');
+    expect(grp.columnLabels).toContain('C14');
+    expect(grp.columnLabels).toContain('C15');
+  });
 });

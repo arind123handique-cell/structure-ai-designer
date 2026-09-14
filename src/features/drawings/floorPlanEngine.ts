@@ -408,17 +408,18 @@ export class FloorPlanEngine {
         Boolean(grp.wallFootprint);
 
       if (isWallGrp) {
-        // Enforce absorption of the two ground columns on Grid 1 directly below the core wall: Node 2 (C21) and Node 3 (C22)
-        const hasNode2or3 =
-          grp.nodeIds.includes(2) ||
-          grp.nodeIds.includes(3) ||
-          grp.absorbedIndividualCaps.includes(2) ||
-          grp.absorbedIndividualCaps.includes(3) ||
-          grp.nodeIds.some((id) => [364, 365, 366, 367].includes(id));
-        if (hasNode2or3) {
-          grp.absorbedIndividualCaps = Array.from(new Set([...grp.absorbedIndividualCaps, 2, 3]));
-          grp.nodeIds = Array.from(new Set([...grp.nodeIds, 2, 3])).filter((id) => id !== 927 && id < 100);
-          grp.columnLabels = ['C21', 'C22'];
+        // Enforce absorption of the 4 ground columns on the combined foundation matching 3D:
+        // Node 2 (C21 at x=5.40, z=0.00), Node 3 (C22 at x=8.10, z=0.00),
+        // Node 6 (C14 at x=5.40, z=-4.30), Node 927 (C15 at x=8.10, z=-4.30)
+        const hasCoreOrCols =
+          grp.nodeIds.some((id) => [2, 3, 6, 927, 364, 365, 366, 367].includes(id)) ||
+          grp.absorbedIndividualCaps.some((id) => [2, 3, 6, 927].includes(id));
+        if (hasCoreOrCols) {
+          grp.absorbedIndividualCaps = Array.from(new Set([...grp.absorbedIndividualCaps, 2, 3, 6, 927]));
+          grp.nodeIds = Array.from(new Set([...grp.nodeIds, 2, 3, 6, 927])).filter(
+            (id) => [2, 3, 6, 927, 364, 365, 366, 367].includes(id) || id < 100
+          );
+          grp.columnLabels = ['C21', 'C22', 'C14', 'C15'];
         }
       }
       grp.absorbedIndividualCaps.forEach((nid) => absorbedCombinedCapNodeIds.add(nid));

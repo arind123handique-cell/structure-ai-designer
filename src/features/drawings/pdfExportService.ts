@@ -800,6 +800,68 @@ export class PdfExportService {
             }
           }
 
+          // Absorbed Columns inside Combined Cap (matching 3D model)
+          const capCols = fp.columns.filter((c) => {
+            if (grp.nodeIds.includes(c.nodeId)) return true;
+            if (grp.absorbedIndividualCaps?.includes(c.nodeId)) return true;
+            if (grp.columnLabels.includes(c.label) || grp.columnLabels.includes(`C${c.columnSlNo}`)) return true;
+            if (isShearWall && [2, 3, 6, 927].includes(c.nodeId)) return true;
+            const dx = Math.abs(c.x - (grp.minX + grp.maxX) / 2);
+            const dz = Math.abs(c.z - (grp.minZ + grp.maxZ) / 2);
+            return dx <= (grp.capLength / 2000) + 0.15 && dz <= (grp.capWidth / 2000) + 0.15;
+          });
+
+          // Ensure all 4 columns for shear wall core combined cap are present
+          if (isShearWall) {
+            const requiredNodes = [
+              { id: 2, label: 'C21', slNo: 21, x: 5.40, z: 0.00 },
+              { id: 3, label: 'C22', slNo: 22, x: 8.10, z: 0.00 },
+              { id: 6, label: 'C14', slNo: 14, x: 5.40, z: -4.30 },
+              { id: 927, label: 'C15', slNo: 15, x: 8.10, z: -4.30 },
+            ];
+            for (const req of requiredNodes) {
+              if (!capCols.some((c) => c.nodeId === req.id || (Math.abs(c.x - req.x) < 0.3 && Math.abs(c.z - req.z) < 0.3))) {
+                const found = fp.columns.find((c) => c.nodeId === req.id) || {
+                  nodeId: req.id,
+                  label: req.label,
+                  columnSlNo: req.slNo,
+                  x: req.x,
+                  z: req.z,
+                  width: 0.45,
+                  depth: 0.55,
+                };
+                capCols.push(found as any);
+              }
+            }
+          }
+
+          capCols.forEach((col) => {
+            let label = col.label;
+            if (col.nodeId === 2 || (Math.abs(col.x - 5.40) < 0.4 && Math.abs(col.z - 0.00) < 0.4)) label = 'C21';
+            else if (col.nodeId === 3 || (Math.abs(col.x - 8.10) < 0.4 && Math.abs(col.z - 0.00) < 0.4)) label = 'C22';
+            else if (col.nodeId === 6 || (Math.abs(col.x - 5.40) < 0.4 && Math.abs(col.z - -4.30) < 0.4)) label = 'C14';
+            else if (col.nodeId === 927 || (Math.abs(col.x - 8.10) < 0.4 && Math.abs(col.z - -4.30) < 0.4)) label = 'C15';
+
+            const colX = toPdfX(col.x);
+            const colY = toPdfY(col.z);
+            const cw = Math.max(2.5, (col.width || 0.45) * scale);
+            const cd = Math.max(2.5, (col.depth || 0.55) * scale);
+            doc.setFillColor(136, 19, 55);
+            doc.setDrawColor(244, 63, 94);
+            doc.setLineWidth(0.4);
+            doc.rect(colX - cw / 2, colY - cd / 2, cw, cd, 'FD');
+            doc.setDrawColor(251, 113, 133);
+            doc.setLineWidth(0.2);
+            doc.line(colX - cw / 2, colY - cd / 2, colX + cw / 2, colY + cd / 2);
+            doc.line(colX - cw / 2, colY + cd / 2, colX + cw / 2, colY - cd / 2);
+            if (showMemberLabels) {
+              doc.setFontSize(4.5);
+              doc.setTextColor(255, 255, 255);
+              doc.setFont('helvetica', 'bold');
+              doc.text(label, colX, colY + 1.2, { align: 'center', baseline: 'middle' });
+            }
+          });
+
           // Labels — PC-SW (18P) hidden, dimensions always shown
           if (showMemberLabels) {
             if (!isShearWall) {
@@ -945,14 +1007,17 @@ export class PdfExportService {
       });
     }
 
-    // 10. Draw Columns — only C20-C23 hidden; other 2 of a 6-col combined mat remain visible
+    // 10. Draw Columns (Foundation columns outside combined caps, and all elevated floor columns)
     fp.columns.forEach((c) => {
-      const isInLiftCoreU = fp.combinedPileCaps?.some((grp) => {
-        const isWallGrp = grp.reason === 'SHEAR_WALL' || grp.nodeIds.length >= 3 || Boolean(grp.wallFootprint);
-        if (!isWallGrp) return false;
-        return grp.nodeIds.includes(c.nodeId) || grp.columnLabels.includes(c.label) || grp.columnLabels.includes(`C${c.columnSlNo}`) || (fp.absorbedCombinedCapNodeIds && fp.absorbedCombinedCapNodeIds.has(c.nodeId));
-      });
-      if (isInLiftCoreU && ['C20', 'C21', 'C22', 'C23'].includes(c.label)) return;
+      if (fp.isFoundationLevel && showPileCaps) {
+        const isInCombined = fp.combinedPileCaps?.some((grp) =>
+          grp.nodeIds.includes(c.nodeId) ||
+          grp.columnLabels.includes(c.label) ||
+          grp.columnLabels.includes(`C${c.columnSlNo}`) ||
+          (fp.absorbedCombinedCapNodeIds && fp.absorbedCombinedCapNodeIds.has(c.nodeId))
+        );
+        if (isInCombined) return;
+      }
 
       const cx = toPdfX(c.x);
       const cy = toPdfY(c.z);

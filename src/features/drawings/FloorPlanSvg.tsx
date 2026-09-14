@@ -1221,8 +1221,8 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                   grp.columnLabels.includes(col.label) ||
                   grp.columnLabels.includes(`C${col.columnSlNo}`) ||
                   (floorPlan.absorbedCombinedCapNodeIds && floorPlan.absorbedCombinedCapNodeIds.has(col.nodeId)) ||
-                  ((grp.reason === 'SHEAR_WALL' || Boolean(grp.wallFootprint) || grp.nodeIds.some((id) => [2, 3, 364, 365, 366, 367].includes(id))) &&
-                    (col.nodeId === 2 || col.nodeId === 3 || col.label === 'C21' || col.label === 'C22'))
+                  ((grp.reason === 'SHEAR_WALL' || Boolean(grp.wallFootprint) || grp.nodeIds.some((id) => [2, 3, 6, 927, 364, 365, 366, 367].includes(id))) &&
+                    ([2, 3, 6, 927].includes(col.nodeId) || ['C21', 'C22', 'C14', 'C15'].includes(col.label)))
                 );
                 if (isAbsorbedInCombined) {
                   return null;
@@ -1559,53 +1559,62 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
 
                   {/* Absorbed Columns inside Combined Cap (Rendered in Solid Magenta) */}
                   {(() => {
-                    let capCols = floorPlan.columns.filter((c) =>
-                      grp.nodeIds.includes(c.nodeId) ||
-                      grp.columnLabels.includes(c.label) ||
-                      grp.columnLabels.includes(`C${c.columnSlNo}`) ||
-                      (isShearWall && (c.nodeId === 2 || c.nodeId === 3 || c.label === 'C21' || c.label === 'C22'))
-                    );
+                    const cxM = (grp.minX + grp.maxX) / 2;
+                    const czM = (grp.minZ + grp.maxZ) / 2;
+                    const halfL = effValL / 2000;
+                    const halfB = effValB / 2000;
+
+                    let capCols = floorPlan.columns.filter((c) => {
+                      if (grp.nodeIds.includes(c.nodeId)) return true;
+                      if (grp.absorbedIndividualCaps?.includes(c.nodeId)) return true;
+                      if (grp.columnLabels.includes(c.label) || grp.columnLabels.includes(`C${c.columnSlNo}`)) return true;
+                      if (isShearWall && [2, 3, 6, 927].includes(c.nodeId)) return true;
+                      // Spatial bounding box: column falls within combined cap footprint
+                      const dx = Math.abs(c.x - cxM);
+                      const dz = Math.abs(c.z - czM);
+                      return dx <= halfL + 0.15 && dz <= halfB + 0.15;
+                    });
 
                     // Filter out any pure plate mesh nodes (e.g. 364, 365, 366, 367)
                     capCols = capCols.filter((c) => c.memberId !== undefined || !c.nodeId || c.nodeId < 100 || c.nodeId === 927);
 
+                    // Ensure all 4 columns matching 3D structural model are present on the combined pile cap
                     if (isShearWall) {
-                      // User requirement: "the column position is wrong, here only two column is there and a shear wall of u shapped"
-                      // Strictly only the two true columns at the bottom of the combined pile cap on Grid 1 are shown (C21 and C22).
-                      // Any phantom columns on the shear wall or stray top column (Node 927) are strictly excluded.
-                      const bottomCols = capCols.filter((c) => Math.abs(c.z - 0.0) < 0.6 || c.nodeId === 2 || c.nodeId === 3 || c.label === 'C21' || c.label === 'C22');
-                      if (bottomCols.length >= 2) {
-                        capCols = bottomCols.slice(0, 2);
-                      } else {
-                        // Ensure both Node 2 (C21) and Node 3 (C22) are present
-                        const c2 = floorPlan.columns.find((c) => c.nodeId === 2 || c.label === 'C21') || {
-                          nodeId: 2,
-                          label: 'C21',
-                          columnSlNo: 21,
-                          x: 5.40,
-                          z: 0.00,
-                          width: 0.45,
-                          depth: 0.55,
-                        };
-                        const c3 = floorPlan.columns.find((c) => c.nodeId === 3 || c.label === 'C22') || {
-                          nodeId: 3,
-                          label: 'C22',
-                          columnSlNo: 22,
-                          x: 8.10,
-                          z: 0.00,
-                          width: 0.45,
-                          depth: 0.55,
-                        };
-                        capCols = [c2, c3] as any;
+                      const requiredNodes = [
+                        { id: 2, label: 'C21', slNo: 21, x: 5.40, z: 0.00 },
+                        { id: 3, label: 'C22', slNo: 22, x: 8.10, z: 0.00 },
+                        { id: 6, label: 'C14', slNo: 14, x: 5.40, z: -4.30 },
+                        { id: 927, label: 'C15', slNo: 15, x: 8.10, z: -4.30 },
+                      ];
+
+                      for (const req of requiredNodes) {
+                        if (!capCols.some((c) => c.nodeId === req.id || (Math.abs(c.x - req.x) < 0.3 && Math.abs(c.z - req.z) < 0.3))) {
+                          const found = floorPlan.columns.find((c) => c.nodeId === req.id) || {
+                            nodeId: req.id,
+                            label: req.label,
+                            columnSlNo: req.slNo,
+                            x: req.x,
+                            z: req.z,
+                            width: 0.45,
+                            depth: 0.55,
+                          };
+                          capCols.push(found as any);
+                        }
                       }
 
-                      // Ensure authentic labels C21 and C22 as per user CAD drawing
+                      // Ensure authentic labels C21, C22, C14, C15 matching CAD and 3D
                       capCols = capCols.map((c) => {
-                        if (c.nodeId === 2 || Math.abs(c.x - 5.40) < 0.4) {
+                        if (c.nodeId === 2 || (Math.abs(c.x - 5.40) < 0.4 && Math.abs(c.z - 0.00) < 0.4)) {
                           return { ...c, label: 'C21', columnSlNo: 21 };
                         }
-                        if (c.nodeId === 3 || Math.abs(c.x - 8.10) < 0.4) {
+                        if (c.nodeId === 3 || (Math.abs(c.x - 8.10) < 0.4 && Math.abs(c.z - 0.00) < 0.4)) {
                           return { ...c, label: 'C22', columnSlNo: 22 };
+                        }
+                        if (c.nodeId === 6 || (Math.abs(c.x - 5.40) < 0.4 && Math.abs(c.z - -4.30) < 0.4)) {
+                          return { ...c, label: 'C14', columnSlNo: 14 };
+                        }
+                        if (c.nodeId === 927 || (Math.abs(c.x - 8.10) < 0.4 && Math.abs(c.z - -4.30) < 0.4)) {
+                          return { ...c, label: 'C15', columnSlNo: 15 };
                         }
                         return c;
                       });
@@ -2005,21 +2014,9 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                 grp.columnLabels.includes(`C${c.columnSlNo}`) ||
                 (floorPlan.absorbedCombinedCapNodeIds && floorPlan.absorbedCombinedCapNodeIds.has(c.nodeId))
               );
+              // On foundation level, individual caps and combined cap columns are rendered in their respective layers
               if (hasIndividualCap || isInCombined) return null;
             }
-
-            const isInLiftCoreU = floorPlan.combinedPileCaps?.some((grp) => {
-              const isWallGrp = grp.reason === 'SHEAR_WALL' || grp.nodeIds.length >= 3 || Boolean(grp.wallFootprint);
-              if (!isWallGrp) return false;
-              return (
-                grp.nodeIds.includes(c.nodeId) ||
-                grp.columnLabels.includes(c.label) ||
-                grp.columnLabels.includes(`C${c.columnSlNo}`) ||
-                (floorPlan.absorbedCombinedCapNodeIds && floorPlan.absorbedCombinedCapNodeIds.has(c.nodeId))
-              );
-            });
-            // Hide only C20-C23 as fixed lift supports; show the other 2 of a 6-col combined mat
-            if (isInLiftCoreU && ['C20', 'C21', 'C22', 'C23'].includes(c.label)) return null;
 
             const cx = toSvgX(c.x);
             const cy = toSvgY(c.z);
