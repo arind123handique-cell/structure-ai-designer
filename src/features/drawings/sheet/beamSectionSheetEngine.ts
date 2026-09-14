@@ -1049,6 +1049,10 @@ export class BeamSectionSheetEngine {
     const spanUnits = xEnd - xStart;
     const totalZoneMm = design.zones.reduce((s, z) => s + (z.endMm - z.startMm), 0) || 1;
 
+    // Minimum drawing width needed for text (approx text width + padding)
+    const MIN_TEXT_ZONE_W = 1200;
+    const MIN_DIM_ZONE_W = 800;
+
     let cursorX = xStart;
     design.zones.forEach((zone) => {
       const zoneMm = zone.endMm - zone.startMm;
@@ -1066,24 +1070,37 @@ export class BeamSectionSheetEngine {
       // Zone delimiter vertical tick
       b.line(LAYER_LINK.name, zEnd, yBot, zEnd, yTop);
 
-      // Callout below in exact format requested: "8mm@200mm c/c"
       const zMid = (cursorX + zEnd) / 2;
       const dia = zone.stirrupDia || design.stirrups.dia || 8;
       const spacing = zone.spacing || 200;
-      const stirrupText = `${dia}mm@${spacing}mm c/c`;
 
-      // Stagger middle zone when multiple zones exist to prevent horizontal collision
-      const isMidZone = design.zones.length > 1 && design.zones.indexOf(zone) === 1;
-      const calloutY = isMidZone ? yBot - 1240 : yBot - 1050;
+      if (zoneW >= MIN_TEXT_ZONE_W) {
+        // Full callout: "8mm@200mm c/c"
+        const stirrupText = `${dia}mm@${spacing}mm c/c`;
+        const isMidZone = design.zones.length > 1 && design.zones.indexOf(zone) === 1;
+        const calloutY = isMidZone ? yBot - 1240 : yBot - 1050;
 
-      b.text(LAYER_SCHEDULE_TEXT.name, zMid, calloutY, stirrupText, TEXT_H.CALLOUT, {
-        anchor: 'middle',
-        bold: true,
-      });
+        b.text(LAYER_SCHEDULE_TEXT.name, zMid, calloutY, stirrupText, TEXT_H.CALLOUT, {
+          anchor: 'middle',
+          bold: true,
+        });
+      } else if (zoneW >= 500) {
+        // Compact callout for narrow zones: "8@200"
+        const compactText = `${dia}@${spacing}`;
+        b.text(LAYER_SCHEDULE_TEXT.name, zMid, yBot - 1050, compactText, TEXT_H.CALLOUT - 40, {
+          anchor: 'middle',
+          bold: true,
+        });
+      }
 
-      if (zoneMm > 0) {
+      if (zoneMm > 0 && zoneW >= MIN_DIM_ZONE_W) {
         b.dimHorizontal(cursorX, zEnd, yBot - 1520, Math.round(zoneMm), {
           textHeight: TEXT_H.DIM + 20,
+        });
+      } else if (zoneMm > 0 && zoneW >= 400) {
+        // Small dimension without arrows for very narrow zones
+        b.text(LAYER_DIMENSION.name, zMid, yBot - 1520, String(Math.round(zoneMm)), TEXT_H.CALLOUT - 40, {
+          anchor: 'middle',
         });
       }
 
@@ -1421,59 +1438,60 @@ export class BeamSectionSheetEngine {
     // -----------------------------------------------------------------------
     // 6. Stirrup Zone Callouts & Dimensions Below
     // -----------------------------------------------------------------------
+    const MIN_TEXT_W = 1200;
+    const MIN_DIM_W = 800;
+
     if (zones.length >= 3) {
       // Left Confinement Zone
       const z0Len = Math.round(zones[0].endMm - zones[0].startMm);
-      const z0Cx = xLeft + (z0Len * S) / 2;
+      const z0W = z0Len * S;
+      const z0Cx = xLeft + z0W / 2;
       const z0Dia = zones[0].stirrupDia || design.stirrups.dia || 8;
-      b.text(
-        LAYER_SCHEDULE_TEXT.name,
-        z0Cx,
-        yBot - 850,
-        `${z0Dia}mm@${zones[0].spacing}mm c/c`,
-        TEXT_H.CALLOUT,
-        { anchor: 'middle', bold: true }
-      );
-      b.dimHorizontal(xLeft, xLeft + z0Len * S, yBot - 1200, z0Len, { textHeight: TEXT_H.DIM + 20 });
+      if (z0W >= MIN_TEXT_W) {
+        b.text(LAYER_SCHEDULE_TEXT.name, z0Cx, yBot - 850, `${z0Dia}mm@${zones[0].spacing}mm c/c`, TEXT_H.CALLOUT, { anchor: 'middle', bold: true });
+      } else if (z0W >= 500) {
+        b.text(LAYER_SCHEDULE_TEXT.name, z0Cx, yBot - 850, `${z0Dia}@${zones[0].spacing}`, TEXT_H.CALLOUT - 40, { anchor: 'middle', bold: true });
+      }
+      if (z0W >= MIN_DIM_W) {
+        b.dimHorizontal(xLeft, xLeft + z0W, yBot - 1200, z0Len, { textHeight: TEXT_H.DIM + 20 });
+      }
 
       // Midspan Zone
       const z1Cx = cx;
       const z1Dia = zones[1].stirrupDia || design.stirrups.dia || 8;
-      b.text(
-        LAYER_SCHEDULE_TEXT.name,
-        z1Cx,
-        yBot - 850,
-        `${z1Dia}mm@${zones[1].spacing}mm c/c`,
-        TEXT_H.CALLOUT,
-        { anchor: 'middle', bold: true }
-      );
       const z1Len = Math.round(zones[1].endMm - zones[1].startMm);
-      b.dimHorizontal(xLeft + z0Len * S, xRight - Math.round(zones[2].endMm - zones[2].startMm) * S, yBot - 1200, z1Len, { textHeight: TEXT_H.DIM + 20 });
+      const z1W = z1Len * S;
+      if (z1W >= MIN_TEXT_W) {
+        b.text(LAYER_SCHEDULE_TEXT.name, z1Cx, yBot - 850, `${z1Dia}mm@${zones[1].spacing}mm c/c`, TEXT_H.CALLOUT, { anchor: 'middle', bold: true });
+      } else if (z1W >= 500) {
+        b.text(LAYER_SCHEDULE_TEXT.name, z1Cx, yBot - 850, `${z1Dia}@${zones[1].spacing}`, TEXT_H.CALLOUT - 40, { anchor: 'middle', bold: true });
+      }
+      if (z1W >= MIN_DIM_W) {
+        b.dimHorizontal(xLeft + z0W, xRight - Math.round(zones[2].endMm - zones[2].startMm) * S, yBot - 1200, z1Len, { textHeight: TEXT_H.DIM + 20 });
+      }
 
       // Right Confinement Zone
       const z2Len = Math.round(zones[2].endMm - zones[2].startMm);
-      const z2Cx = xRight - (z2Len * S) / 2;
+      const z2W = z2Len * S;
+      const z2Cx = xRight - z2W / 2;
       const z2Dia = zones[2].stirrupDia || design.stirrups.dia || 8;
-      b.text(
-        LAYER_SCHEDULE_TEXT.name,
-        z2Cx,
-        yBot - 850,
-        `${z2Dia}mm@${zones[2].spacing}mm c/c`,
-        TEXT_H.CALLOUT,
-        { anchor: 'middle', bold: true }
-      );
-      b.dimHorizontal(xRight - z2Len * S, xRight, yBot - 1200, z2Len, { textHeight: TEXT_H.DIM + 20 });
+      if (z2W >= MIN_TEXT_W) {
+        b.text(LAYER_SCHEDULE_TEXT.name, z2Cx, yBot - 850, `${z2Dia}mm@${zones[2].spacing}mm c/c`, TEXT_H.CALLOUT, { anchor: 'middle', bold: true });
+      } else if (z2W >= 500) {
+        b.text(LAYER_SCHEDULE_TEXT.name, z2Cx, yBot - 850, `${z2Dia}@${zones[2].spacing}`, TEXT_H.CALLOUT - 40, { anchor: 'middle', bold: true });
+      }
+      if (z2W >= MIN_DIM_W) {
+        b.dimHorizontal(xRight - z2W, xRight, yBot - 1200, z2Len, { textHeight: TEXT_H.DIM + 20 });
+      }
     } else {
       // Uniform zone
       const dia = zones[0].stirrupDia || design.stirrups.dia || 8;
-      b.text(
-        LAYER_SCHEDULE_TEXT.name,
-        cx,
-        yBot - 850,
-        `${dia}mm@${zones[0].spacing}mm c/c`,
-        TEXT_H.CALLOUT,
-        { anchor: 'middle', bold: true }
-      );
+      const fullW = spanUnits;
+      if (fullW >= MIN_TEXT_W) {
+        b.text(LAYER_SCHEDULE_TEXT.name, cx, yBot - 850, `${dia}mm@${zones[0].spacing}mm c/c`, TEXT_H.CALLOUT, { anchor: 'middle', bold: true });
+      } else if (fullW >= 500) {
+        b.text(LAYER_SCHEDULE_TEXT.name, cx, yBot - 850, `${dia}@${zones[0].spacing}`, TEXT_H.CALLOUT - 40, { anchor: 'middle', bold: true });
+      }
     }
 
     // Schedule location reference and subtle separator line
