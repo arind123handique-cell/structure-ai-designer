@@ -562,6 +562,7 @@ export const Structural3DViewer: React.FC = () => {
     return GradeBeamDesignEngine.discoverAndDesignAll(activeModel);
   }, [activeModel, activeProject?.savedGradeBeamDesigns]);
 
+
   // Diaphragm Levels from STAAD model
   const diaphragmLevels = useMemo(() => {
     return StaircaseDesignEngine.extractDiaphragmLevels(activeModel);

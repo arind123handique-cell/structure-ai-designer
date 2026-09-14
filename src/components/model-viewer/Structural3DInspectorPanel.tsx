@@ -1276,7 +1276,7 @@ export const Structural3DInspectorPanel: React.FC<Structural3DInspectorPanelProp
         {/* ========================================================================= */}
         {/* CASE 5: NOTHING SELECTED — SUMMARY & SEARCHABLE QUICK INSPECTOR          */}
         {/* ========================================================================= */}
-        {(!hasSelection || (!selectedMember && !activeSupportNodeId && !selectedGradeBeam && !selectedNode && !selectedPlate)) && (
+        {(!hasSelection || (!selectedMember && !activeSupportNodeId && !selectedGradeBeamId && !selectedNodeId && !selectedPlateId)) && (
           <div className="space-y-4">
             {/* Structural Summary Card */}
             <div className="p-3.5 bg-slate-800/60 rounded-xl border border-slate-700/80 space-y-2.5">
