@@ -272,6 +272,20 @@ export const PileCapDesignView: React.FC = () => {
     setIsAutoDesignModalOpen(false);
   };
 
+  // Quick pile count override handler (dropdown in table)
+  const handleQuickPileCountChange = useCallback(
+    (nodeId: number, newPileCount: number) => {
+      const currentOverrides = customPileCapOverrides[nodeId] || {};
+      setCustomPileCapOverride(nodeId, {
+        ...currentOverrides,
+        customPileCount: newPileCount,
+      });
+      // Re-design this specific cap after override is applied
+      setTimeout(() => handleDesignAll(), 50);
+    },
+    [customPileCapOverrides, setCustomPileCapOverride, handleDesignAll]
+  );
+
   // Save manual edit from PileCapEditModal
   const handleSaveManualEdit = (
     nodeId: number,
@@ -660,29 +674,45 @@ export const PileCapDesignView: React.FC = () => {
       width: '180px',
     },
     {
-      header: 'PILES REQ. (Pu / Qsafe)',
+      header: 'PILES (CONFIG)',
       align: 'center',
       cell: (r) => {
         if (!r.design) return <span className="text-slate-400 font-mono">—</span>;
+        const nodeId = r.nodeIds[0];
         return (
-          <div className="flex items-center justify-center gap-1">
-            <span className="font-mono text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
-              {r.design.pileCount}-Pile Cap ({r.mark})
-            </span>
+          <div className="flex items-center justify-center gap-1.5">
+            <select
+              value={r.design.pileCount}
+              onChange={(e) => {
+                e.stopPropagation();
+                const val = parseInt(e.target.value, 10);
+                if (val >= 2 && val <= 6) handleQuickPileCountChange(nodeId, val);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="font-mono text-[11px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-300 hover:border-indigo-500 hover:bg-indigo-100 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              title="Change pile count configuration (2-6 piles)"
+            >
+              {[2, 3, 4, 5, 6].map((n) => (
+                <option key={n} value={n}>
+                  {n}-Pile
+                </option>
+              ))}
+            </select>
+            <span className="text-[9px] font-mono text-slate-500">({r.mark})</span>
             {r.count > 1 && (
               <span className="text-[9px] px-1 bg-slate-100 text-slate-600 rounded font-mono font-bold">
                 ×{r.count}
               </span>
             )}
             {r.isCustomized && (
-              <span className="text-[9px] px-1 bg-amber-100 text-amber-800 rounded font-mono font-bold" title="Manually edited">
-                Manual
+              <span className="text-[8px] px-1 bg-amber-100 text-amber-800 rounded font-mono font-bold" title="Manually edited">
+                ✎
               </span>
             )}
           </div>
         );
       },
-      width: '180px',
+      width: '170px',
     },
     {
       header: 'CAP SIZE (L × B × D)',
@@ -1540,6 +1570,38 @@ export const PileCapDesignView: React.FC = () => {
             </button>
           </div>
         ) : (
+          <>
+            {/* Batch Pile Count Change Bar (when 1+ caps selected via checkboxes) */}
+            {selectedDrawingCaps.size > 0 && (
+              <div className="px-4 py-2 bg-rose-50 border-b border-rose-200 flex items-center gap-3 flex-wrap">
+                <span className="text-[11px] font-mono font-bold text-rose-700">
+                  {selectedDrawingCaps.size} cap{selectedDrawingCaps.size > 1 ? 's' : ''} selected
+                </span>
+                <span className="text-[10px] font-mono text-slate-500">|</span>
+                <span className="text-[10px] font-mono text-slate-600">Batch set pile count:</span>
+                {[2, 3, 4, 5, 6].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => {
+                      selectedDrawingCaps.forEach((nodeId) => {
+                        const currentOverrides = customPileCapOverrides[nodeId] || {};
+                        setCustomPileCapOverride(nodeId, { ...currentOverrides, customPileCount: n });
+                      });
+                      setTimeout(() => handleDesignAll(), 50);
+                    }}
+                    className="px-2 py-0.5 text-[10px] font-mono font-bold text-indigo-700 bg-white hover:bg-indigo-100 border border-indigo-300 rounded transition-colors"
+                  >
+                    {n}-Pile
+                  </button>
+                ))}
+                <button
+                  onClick={() => setSelectedDrawingCaps(new Set())}
+                  className="ml-auto text-[10px] font-mono text-slate-500 hover:text-slate-700 underline"
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
           <DataTable
             data={filteredRows}
             columns={columns}
@@ -1553,6 +1615,7 @@ export const PileCapDesignView: React.FC = () => {
             }
             onExportCsv={handleExport}
           />
+          </>
         )}
         </div>
       </CollapsiblePanel>
@@ -1629,42 +1692,72 @@ export const PileCapDesignView: React.FC = () => {
 
       {/* Drawing Modal */}
       {selectedDrawingCap && (
-        <div className="fixed inset-0 bg-deep-navy/80 backdrop-blur-2xs z-50 flex items-center justify-center p-4 font-sans animate-in fade-in">
-          <div className="w-full max-w-5xl bg-surface-card rounded-lg border border-ui-border shadow-2xl overflow-hidden flex flex-col">
-            <div className="px-6 py-4 bg-slate-50 border-b border-ui-border flex items-center justify-between">
-              <h3 className="font-mono text-sm font-bold text-deep-navy">
-                CAD PILE CAP PLAN & REBAR MESH — CAP PC-{selectedDrawingCap.supportNodeId}
-              </h3>
+        <div className="fixed inset-0 bg-deep-navy/80 backdrop-blur-2xs z-50 flex items-center justify-center p-3 font-sans animate-in fade-in">
+          <div className="w-full max-w-4xl bg-surface-card rounded-lg border border-ui-border shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="px-5 py-3 bg-slate-50 border-b border-ui-border flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
+                <h3 className="font-mono text-sm font-bold text-deep-navy">
+                  PILE CAP DRAWING — PC-{selectedDrawingCap.supportNodeId}
+                </h3>
+                <span className="font-mono text-[10px] text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
+                  {selectedDrawingCap.pileCount}-Pile • {selectedDrawingCap.capLength}×{selectedDrawingCap.capWidth}×{selectedDrawingCap.capDepth} mm
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
                 {/* Font Size Controls */}
-                <div className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded">
-                  <span className="text-[10px] font-mono text-slate-500 font-semibold">DIM TEXT:</span>
+                <div className="flex items-center gap-1 px-2 py-0.5 bg-white border border-slate-200 rounded">
+                  <span className="text-[9px] font-mono text-slate-500 font-semibold">TEXT:</span>
                   <button
                     onClick={() => setDimFontSize((f) => Math.max(0.5, f - 0.1))}
-                    className="w-6 h-6 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded text-sm font-bold text-slate-700 transition-colors"
+                    className="w-5 h-5 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded text-xs font-bold text-slate-700 transition-colors"
                     title="Decrease dimension text size"
                   >
                     −
                   </button>
-                  <span className="text-[10px] font-mono text-slate-700 w-8 text-center font-bold">
+                  <span className="text-[9px] font-mono text-slate-700 w-7 text-center font-bold">
                     {Math.round(dimFontSize * 100)}%
                   </span>
                   <button
                     onClick={() => setDimFontSize((f) => Math.min(2, f + 0.1))}
-                    className="w-6 h-6 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded text-sm font-bold text-slate-700 transition-colors"
+                    className="w-5 h-5 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded text-xs font-bold text-slate-700 transition-colors"
                     title="Increase dimension text size"
                   >
                     +
                   </button>
                 </div>
-                <button onClick={() => setSelectedDrawingCap(null)} className="p-1 hover:bg-slate-200 rounded text-slate-500">
+                <button onClick={() => setSelectedDrawingCap(null)} className="p-1 hover:bg-slate-200 rounded text-slate-500 transition-colors" title="Close">
                   <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
-            <div className="p-6 overflow-auto max-h-[80vh]" ref={drawingContainerRef}>
-              <div data-drawing-element>
+
+            {/* Scrollable Drawing Area */}
+            <div className="flex-1 overflow-auto p-4" ref={drawingContainerRef} style={{ minHeight: 0 }}>
+              <div data-drawing-element className="flex justify-center">
                 <PileCapDrawingSvg pileCap={selectedDrawingCap} dimFontSize={dimFontSize} />
+              </div>
+            </div>
+
+            {/* Footer with Design Info & Actions */}
+            <div className="px-5 py-2.5 bg-slate-50 border-t border-ui-border flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-4 text-[10px] font-mono text-slate-500">
+                <span>Load: <strong className="text-slate-700">{selectedDrawingCap.factoredVerticalLoad?.toFixed(1)} kN</strong></span>
+                <span>P/pile: <strong className="text-slate-700">{selectedDrawingCap.loadPerPile} kN</strong></span>
+                <span>Depth: <strong className="text-slate-700">{selectedDrawingCap.effectiveDepth} mm</strong></span>
+                <span className={`px-1.5 py-0.5 rounded font-bold text-[9px] ${
+                  selectedDrawingCap.status === 'PASS' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                }`}>
+                  {selectedDrawingCap.status}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setSelectedDrawingCap(null)}
+                  className="px-3 py-1 text-[11px] font-mono text-slate-600 bg-white hover:bg-slate-100 border border-ui-border rounded transition-colors"
+                >
+                  Close
+                </button>
               </div>
             </div>
           </div>
