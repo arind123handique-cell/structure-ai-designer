@@ -1101,15 +1101,11 @@ export class BeamSectionSheetEngine {
 
     const firstTopThru = `${run.spans[0].design.top.through.count}-T ${run.spans[0].design.top.through.dia}`;
     const topCalloutX = spanXStarts[0] + (spanXEnds[0] - spanXStarts[0]) * 0.22;
-    b.leader(LAYER_REBAR.name, topCalloutX, yTopBar + 170, topCalloutX, yTopBar, { h: TEXT_H.CALLOUT });
-    b.text(LAYER_REBAR.name, topCalloutX, yTopBar + 210, firstTopThru, TEXT_H.CALLOUT, {
-      anchor: 'middle',
-      bold: true,
-    });
+    b.leader(LAYER_REBAR.name, topCalloutX, yTopBar + 170, topCalloutX, yTopBar, { h: TEXT_H.CALLOUT - 20 });
 
     // 4. Per-Span Reinforcement & Detailing
-    // Collect all text callouts for overlap resolution
-    interface RebarCallout {
+    // Collect ALL text callouts (rebar + dims + labels) for GLOBAL overlap resolution
+    interface TextEntry {
       x: number;
       y: number;
       w: number;
@@ -1118,8 +1114,13 @@ export class BeamSectionSheetEngine {
       layer: string;
       fontSize: number;
       bold: boolean;
+      /** If set, also draw dimension lines (x1,y) to (x2,y) with this text */
+      dimLine?: { x1: number; x2: number; y: number };
     }
-    const allCallouts: RebarCallout[] = [];
+    const allText: TextEntry[] = [];
+
+    // Top through rebar callout (collected, not drawn yet)
+    allText.push({ x: topCalloutX, y: yTopBar + 210, w: firstTopThru.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: firstTopThru, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
 
     run.spans.forEach((spanItem, idx) => {
       const design = spanItem.design;
@@ -1148,7 +1149,7 @@ export class BeamSectionSheetEngine {
       const botCalloutX = xStart + spanUnits * 0.22;
       b.leader(LAYER_REBAR.name, botCalloutX, yBot - 170, botCalloutX, yBotBar, { h: TEXT_H.CALLOUT - 20 });
       const botText = `${design.bottom.through.count}-T ${design.bottom.through.dia}`;
-      allCallouts.push({ x: botCalloutX, y: yBot - 210, w: botText.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: botText, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
+      allText.push({ x: botCalloutX, y: yBot - 210, w: botText.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: botText, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
 
       // Bottom Extra Midspan Rebar
       if (design.bottom.extra && design.bottom.extra.count > 0) {
@@ -1165,8 +1166,9 @@ export class BeamSectionSheetEngine {
         const midCalloutX = (xMidStart + xMidEnd) / 2;
         b.leader(LAYER_REBAR.name, midCalloutX, yBot - 370, midCalloutX, yBotExtra, { h: TEXT_H.CALLOUT - 20 });
         const extraText = `${design.bottom.extra.count}-T ${design.bottom.extra.dia}`;
-        allCallouts.push({ x: midCalloutX, y: yBot - 410, w: extraText.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: extraText, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
-        b.dimHorizontal(xMidStart, xMidEnd, yBot - 720, midLenMm, { textHeight: TEXT_H.DIM - 40 });
+        const dimTextBot = String(midLenMm);
+        allText.push({ x: midCalloutX, y: yBot - 410, w: extraText.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: extraText, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
+        allText.push({ x: (xMidStart + xMidEnd) / 2, y: yBot - 720, w: dimTextBot.length * 50 + 60, h: TEXT_H.DIM - 20, text: dimTextBot, layer: LAYER_DIMENSION.name, fontSize: TEXT_H.DIM - 40, bold: false, dimLine: { x1: xMidStart, x2: xMidEnd, y: yBot - 720 } });
       }
 
       // Top Extra End Support Rebar
@@ -1179,8 +1181,9 @@ export class BeamSectionSheetEngine {
         const extraCalloutX = (xStart + xCutLeft) / 2;
         b.leader(LAYER_REBAR.name, extraCalloutX, yTop + 200, extraCalloutX, yTopExtra, { h: TEXT_H.CALLOUT - 20 });
         const extraTopText = `${design.top.extra.count}-T ${design.top.extra.dia}`;
-        allCallouts.push({ x: extraCalloutX, y: yTop + 240, w: extraTopText.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: extraTopText, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
-        b.dimHorizontal(xStart, xCutLeft, yTop + 580, cutLeftMm, { textHeight: TEXT_H.DIM - 40 });
+        const dimTextTop = String(cutLeftMm);
+        allText.push({ x: extraCalloutX, y: yTop + 240, w: extraTopText.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: extraTopText, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
+        allText.push({ x: (xStart + xCutLeft) / 2, y: yTop + 580, w: dimTextTop.length * 50 + 60, h: TEXT_H.DIM - 20, text: dimTextTop, layer: LAYER_DIMENSION.name, fontSize: TEXT_H.DIM - 40, bold: false, dimLine: { x1: xStart, x2: xCutLeft, y: yTop + 580 } });
       }
 
       if (idx === N - 1 && design.top.extra && design.top.extra.count > 0) {
@@ -1192,31 +1195,50 @@ export class BeamSectionSheetEngine {
         const extraCalloutX = (xCutRight + xEnd) / 2;
         b.leader(LAYER_REBAR.name, extraCalloutX, yTop + 200, extraCalloutX, yTopExtra, { h: TEXT_H.CALLOUT - 20 });
         const extraTopText2 = `${design.top.extra.count}-T ${design.top.extra.dia}`;
-        allCallouts.push({ x: extraCalloutX, y: yTop + 240, w: extraTopText2.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: extraTopText2, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
-        b.dimHorizontal(xCutRight, xEnd, yTop + 580, cutRightMm, { textHeight: TEXT_H.DIM - 40 });
+        const dimTextTopR = String(cutRightMm);
+        allText.push({ x: extraCalloutX, y: yTop + 240, w: extraTopText2.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: extraTopText2, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
+        allText.push({ x: (xCutRight + xEnd) / 2, y: yTop + 580, w: dimTextTopR.length * 50 + 60, h: TEXT_H.DIM - 20, text: dimTextTopR, layer: LAYER_DIMENSION.name, fontSize: TEXT_H.DIM - 40, bold: false, dimLine: { x1: xCutRight, x2: xEnd, y: yTop + 580 } });
       }
 
-      // Stirrups in 3 Zones
-      this.drawSpanStirrups(b, design, xStart, xEnd, yBot, yTop, S);
+      // Stirrups in 3 Zones — draw lines then collect text
+      this.drawStirrupLines(b, design, xStart, xEnd, yBot, yTop, S);
+      this.collectSpanStirrupTexts(allText, design, xStart, xEnd, yBot, yTop, S);
 
-      // Top Span Dimension — center-to-center (at yTop + 1650)
-      b.dimHorizontal(xStart, xEnd, yTop + 1650, spanMm, { textHeight: TEXT_H.DIM + 20 });
+      // Span center-to-center dimension
+      const spanDimText = String(spanMm);
+      allText.push({ x: (xStart + xEnd) / 2, y: yTop + 1650, w: spanDimText.length * 50 + 60, h: TEXT_H.DIM - 20, text: spanDimText, layer: LAYER_DIMENSION.name, fontSize: TEXT_H.DIM - 20, bold: false, dimLine: { x1: xStart, x2: xEnd, y: yTop + 1650 } });
 
-      // Beam Mark & Size below span (at yBot - 1880, auto-wrap on narrow spans)
+      // Beam Mark & Size below span
       const availW = spanUnits - 80;
       const midX = (xStart + xEnd) / 2;
       if (availW < 1600) {
-        b.text(LAYER_LABELS.name, midX, yBot - 1800, design.mark, TEXT_H.MARK, { anchor: 'middle', bold: true });
-        b.text(LAYER_LABELS.name, midX, yBot - 2020, `${design.b}x${design.D}`, TEXT_H.MARK, { anchor: 'middle', bold: true });
+        allText.push({ x: midX, y: yBot - 1800, w: 400, h: TEXT_H.MARK + 20, text: design.mark, layer: LAYER_LABELS.name, fontSize: TEXT_H.MARK, bold: true });
+        allText.push({ x: midX, y: yBot - 2020, w: 500, h: TEXT_H.MARK + 20, text: `${design.b}x${design.D}`, layer: LAYER_LABELS.name, fontSize: TEXT_H.MARK, bold: false });
       } else {
-        b.text(LAYER_LABELS.name, midX, yBot - 1880, `${design.mark}:${design.b}x${design.D}`, TEXT_H.LABEL, { anchor: 'middle', bold: true });
+        const fullMark = `${design.mark}:${design.b}x${design.D}`;
+        allText.push({ x: midX, y: yBot - 1880, w: fullMark.length * 70 + 80, h: TEXT_H.LABEL + 20, text: fullMark, layer: LAYER_LABELS.name, fontSize: TEXT_H.LABEL, bold: true });
       }
     });
 
-    // Resolve text overlaps and draw all rebar callouts
-    const resolvedRebarCallouts = this.resolveTextOverlaps(allCallouts);
-    resolvedRebarCallouts.forEach((rc, i) => {
-      b.text(allCallouts[i].layer, rc.x, rc.y, rc.text, allCallouts[i].fontSize, { anchor: 'middle', bold: allCallouts[i].bold });
+    // GLOBAL overlap resolution across ALL text in this run
+    const resolvedAll = this.resolveTextOverlaps(allText);
+    resolvedAll.forEach((rt, i) => {
+      const entry = allText[i];
+      // Draw dim lines+arrows if this entry has them
+      if (entry.dimLine) {
+        const dl = entry.dimLine;
+        const left = Math.min(dl.x1, dl.x2);
+        const right = Math.max(dl.x1, dl.x2);
+        const ext = Math.min(entry.fontSize * 1.35, 300);
+        const arrow = Math.min(entry.fontSize * 0.85, 120);
+        b.line(entry.layer, left, dl.y - ext, left, dl.y + ext * 0.6);
+        b.line(entry.layer, right, dl.y - ext, right, dl.y + ext * 0.6);
+        b.line(entry.layer, left, dl.y, right, dl.y);
+        b.arrowHead(entry.layer, left, dl.y, Math.PI, arrow);
+        b.arrowHead(entry.layer, right, dl.y, 0, arrow);
+      }
+      // Draw text at resolved position
+      b.text(entry.layer, rt.x, rt.y, rt.text, entry.fontSize, { anchor: 'middle', bold: entry.bold });
     });
 
     // 5. Top Extra Rebar Over Intermediate Supports
@@ -1262,7 +1284,10 @@ export class BeamSectionSheetEngine {
     );
   }
 
-  private static drawSpanStirrups(
+  /**
+   * Draws stirrup lines and zone delimiters (geometry only, no text).
+   */
+  private static drawStirrupLines(
     b: SheetBuilder,
     design: BeamSectionDesign,
     xStart: number,
@@ -1273,25 +1298,6 @@ export class BeamSectionSheetEngine {
   ) {
     const spanUnits = xEnd - xStart;
     const totalZoneMm = design.zones.reduce((s, z) => s + (z.endMm - z.startMm), 0) || 1;
-
-    // Minimum drawing width needed for text (approx text width + padding)
-    const MIN_TEXT_ZONE_W = 1200;
-    const MIN_DIM_ZONE_W = 800;
-
-    // Collect all text placements for overlap resolution
-    interface TextPlacement {
-      x: number;
-      y: number;
-      w: number;
-      h: number;
-      text: string;
-      layer: string;
-      fontSize: number;
-      bold: boolean;
-    }
-
-    const callouts: TextPlacement[] = [];
-    const dims: TextPlacement[] = [];
 
     let cursorX = xStart;
     design.zones.forEach((zone) => {
@@ -1310,6 +1316,35 @@ export class BeamSectionSheetEngine {
       // Zone delimiter vertical tick
       b.line(LAYER_LINK.name, zEnd, yBot, zEnd, yTop);
 
+      cursorX = zEnd;
+    });
+  }
+
+  /**
+   * Collects stirrup callout and dimension texts into the parent's allText array
+   * for global overlap resolution.
+   */
+  private static collectSpanStirrupTexts(
+    allText: Array<{ x: number; y: number; w: number; h: number; text: string; layer: string; fontSize: number; bold: boolean; dimLine?: { x1: number; x2: number; y: number } }>,
+    design: BeamSectionDesign,
+    xStart: number,
+    xEnd: number,
+    yBot: number,
+    yTop: number,
+    S: number
+  ) {
+    const spanUnits = xEnd - xStart;
+    const totalZoneMm = design.zones.reduce((s, z) => s + (z.endMm - z.startMm), 0) || 1;
+
+    const MIN_TEXT_ZONE_W = 1200;
+    const MIN_DIM_ZONE_W = 800;
+
+    let cursorX = xStart;
+    design.zones.forEach((zone) => {
+      const zoneMm = zone.endMm - zone.startMm;
+      const zoneW = (spanUnits * zoneMm) / totalZoneMm;
+      const zEnd = cursorX + zoneW;
+
       const zMid = (cursorX + zEnd) / 2;
       const dia = zone.stirrupDia || design.stirrups.dia || 8;
       const spacing = zone.spacing || 200;
@@ -1318,31 +1353,19 @@ export class BeamSectionSheetEngine {
         const stirrupText = `${dia}mm@${spacing}mm c/c`;
         const isMidZone = design.zones.length > 1 && design.zones.indexOf(zone) === 1;
         const calloutY = isMidZone ? yBot - 1240 : yBot - 1050;
-        callouts.push({ x: zMid, y: calloutY, w: stirrupText.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: stirrupText, layer: LAYER_SCHEDULE_TEXT.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
+        allText.push({ x: zMid, y: calloutY, w: stirrupText.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: stirrupText, layer: LAYER_SCHEDULE_TEXT.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
       } else if (zoneW >= 500) {
         const compactText = `${dia}@${spacing}`;
-        callouts.push({ x: zMid, y: yBot - 1050, w: compactText.length * 50 + 60, h: TEXT_H.CALLOUT - 40, text: compactText, layer: LAYER_SCHEDULE_TEXT.name, fontSize: TEXT_H.CALLOUT - 60, bold: true });
+        allText.push({ x: zMid, y: yBot - 1050, w: compactText.length * 50 + 60, h: TEXT_H.CALLOUT - 40, text: compactText, layer: LAYER_SCHEDULE_TEXT.name, fontSize: TEXT_H.CALLOUT - 60, bold: true });
       }
 
       if (zoneMm > 0 && zoneW >= MIN_DIM_ZONE_W) {
-        dims.push({ x: zMid, y: yBot - 1520, w: 400, h: TEXT_H.DIM - 20, text: String(Math.round(zoneMm)), layer: LAYER_DIMENSION.name, fontSize: TEXT_H.DIM - 20, bold: false });
+        allText.push({ x: zMid, y: yBot - 1520, w: 400, h: TEXT_H.DIM - 20, text: String(Math.round(zoneMm)), layer: LAYER_DIMENSION.name, fontSize: TEXT_H.DIM - 20, bold: false, dimLine: { x1: cursorX, x2: zEnd, y: yBot - 1520 } });
       } else if (zoneMm > 0 && zoneW >= 400) {
-        dims.push({ x: zMid, y: yBot - 1520, w: 250, h: TEXT_H.CALLOUT - 40, text: String(Math.round(zoneMm)), layer: LAYER_DIMENSION.name, fontSize: TEXT_H.CALLOUT - 60, bold: false });
+        allText.push({ x: zMid, y: yBot - 1520, w: 250, h: TEXT_H.CALLOUT - 40, text: String(Math.round(zoneMm)), layer: LAYER_DIMENSION.name, fontSize: TEXT_H.CALLOUT - 60, bold: false });
       }
 
       cursorX = zEnd;
-    });
-
-    // Resolve overlaps and draw callouts
-    const resolvedCallouts = this.resolveTextOverlaps(callouts);
-    resolvedCallouts.forEach((rc, i) => {
-      b.text(callouts[i].layer, rc.x, rc.y, rc.text, callouts[i].fontSize, { anchor: 'middle', bold: callouts[i].bold });
-    });
-
-    // Resolve overlaps and draw dims
-    const resolvedDims = this.resolveTextOverlaps(dims);
-    resolvedDims.forEach((rd, i) => {
-      b.text(dims[i].layer, rd.x, rd.y, rd.text, dims[i].fontSize, { anchor: 'middle' });
     });
   }
 
