@@ -988,7 +988,7 @@ export class BeamSectionSheetEngine {
       const midX = (xStart + xEnd) / 2;
       if (availW < 1600) {
         b.text(LAYER_LABELS.name, midX, yBot - 1800, design.mark, TEXT_H.MARK, { anchor: 'middle', bold: true });
-        b.text(LAYER_LABELS.name, midX, yBot - 2020, `${design.b}x${design.D}`, TEXT_H.MARK - 20, { anchor: 'middle', bold: true });
+        b.text(LAYER_LABELS.name, midX, yBot - 2020, `${design.b}x${design.D}`, TEXT_H.MARK, { anchor: 'middle', bold: true });
       } else {
         b.text(LAYER_LABELS.name, midX, yBot - 1880, `${design.mark}:${design.b}x${design.D}`, TEXT_H.LABEL, { anchor: 'middle', bold: true });
       }
@@ -1076,14 +1076,14 @@ export class BeamSectionSheetEngine {
       const isMidZone = design.zones.length > 1 && design.zones.indexOf(zone) === 1;
       const calloutY = isMidZone ? yBot - 1240 : yBot - 1050;
 
-      b.text(LAYER_SCHEDULE_TEXT.name, zMid, calloutY, stirrupText, TEXT_H.CALLOUT - 40, {
+      b.text(LAYER_SCHEDULE_TEXT.name, zMid, calloutY, stirrupText, TEXT_H.CALLOUT, {
         anchor: 'middle',
         bold: true,
       });
 
       if (zoneMm > 0) {
         b.dimHorizontal(cursorX, zEnd, yBot - 1520, Math.round(zoneMm), {
-          textHeight: TEXT_H.DIM,
+          textHeight: TEXT_H.DIM + 20,
         });
       }
 
@@ -1434,7 +1434,7 @@ export class BeamSectionSheetEngine {
         TEXT_H.CALLOUT,
         { anchor: 'middle', bold: true }
       );
-      b.dimHorizontal(xLeft, xLeft + z0Len * S, yBot - 1200, z0Len, { textHeight: TEXT_H.DIM });
+      b.dimHorizontal(xLeft, xLeft + z0Len * S, yBot - 1200, z0Len, { textHeight: TEXT_H.DIM + 20 });
 
       // Midspan Zone
       const z1Cx = cx;
@@ -1448,7 +1448,7 @@ export class BeamSectionSheetEngine {
         { anchor: 'middle', bold: true }
       );
       const z1Len = Math.round(zones[1].endMm - zones[1].startMm);
-      b.dimHorizontal(xLeft + z0Len * S, xRight - Math.round(zones[2].endMm - zones[2].startMm) * S, yBot - 1200, z1Len, { textHeight: TEXT_H.DIM });
+      b.dimHorizontal(xLeft + z0Len * S, xRight - Math.round(zones[2].endMm - zones[2].startMm) * S, yBot - 1200, z1Len, { textHeight: TEXT_H.DIM + 20 });
 
       // Right Confinement Zone
       const z2Len = Math.round(zones[2].endMm - zones[2].startMm);
@@ -1462,7 +1462,7 @@ export class BeamSectionSheetEngine {
         TEXT_H.CALLOUT,
         { anchor: 'middle', bold: true }
       );
-      b.dimHorizontal(xRight - z2Len * S, xRight, yBot - 1200, z2Len, { textHeight: TEXT_H.DIM });
+      b.dimHorizontal(xRight - z2Len * S, xRight, yBot - 1200, z2Len, { textHeight: TEXT_H.DIM + 20 });
     } else {
       // Uniform zone
       const dia = zones[0].stirrupDia || design.stirrups.dia || 8;
