@@ -1579,104 +1579,12 @@ export class PdfExportService {
       doc.rect(0, 0, pageWidth, pageHeight, 'F');
     }
 
-    // 1. Drawing Borders (Outer border: 10mm margins, Inner border: 13mm margins)
-    doc.setDrawColor(theme === 'dark' ? 71 : 30, theme === 'dark' ? 85 : 41, theme === 'dark' ? 105 : 59);
-    doc.setLineWidth(1.2);
-    doc.rect(10, 10, pageWidth - 20, pageHeight - 20);
-    doc.setLineWidth(0.4);
-    doc.rect(13, 13, pageWidth - 26, pageHeight - 26);
+    // The SVG from the drawing sheet already contains the A3 border and title block
+    // from drawA3BorderAndTitleBlock — no need to duplicate them here.
 
-    // 2. Title Block Geometry
-    const tbW = isPortrait ? pageWidth - 26 : 145;
+    // Calculate title block Y position for printable area calculation
     const tbH = 46;
-    const tbX = isPortrait ? 13 : pageWidth - 13 - tbW;
     const tbY = pageHeight - 13 - tbH;
-
-    // 3. Notes & Legend Box (Landscape mode: placed to the left of the title block)
-    if (!isPortrait) {
-      const nbX = 16;
-      const nbY = tbY;
-      const nbW = tbX - nbX - 4;
-      const nbH = tbH;
-      doc.setFillColor(theme === 'dark' ? 15 : 248, theme === 'dark' ? 23 : 250, theme === 'dark' ? 42 : 252);
-      doc.rect(nbX, nbY, nbW, nbH, 'F');
-      doc.setDrawColor(theme === 'dark' ? 51 : 203, theme === 'dark' ? 65 : 213, theme === 'dark' ? 85 : 225);
-      doc.setLineWidth(0.35);
-      doc.rect(nbX, nbY, nbW, nbH, 'S');
-
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(7.5);
-      doc.setTextColor(theme === 'dark' ? 226 : 30, theme === 'dark' ? 232 : 41, theme === 'dark' ? 240 : 59);
-      doc.text('GENERAL STRUCTURAL & DETAILING SPECIFICATIONS (IS 456 & IS 13920):', nbX + 4, nbY + 6.5);
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(6.5);
-      doc.setTextColor(theme === 'dark' ? 148 : 71, theme === 'dark' ? 163 : 85, theme === 'dark' ? 184 : 105);
-      doc.text('1. All dimensions are in millimeters (mm) and levels in meters (m) unless specified.', nbX + 4, nbY + 12.5);
-      const concreteGrade = project?.metadata?.designSettings?.concreteGrade || 'M25';
-      const steelGrade = project?.metadata?.designSettings?.steelGrade || 'Fe500D';
-      doc.text(`2. Concrete: ${concreteGrade} / Steel: ${steelGrade} TMT (IS 1786). Clear covers: Slabs=20mm, Beams=30mm, Cols=40mm.`, nbX + 4, nbY + 18);
-      doc.text('3. Confinement hoops & stirrup details strictly comply with ductile detailing code IS 13920:2016.', nbX + 4, nbY + 23.5);
-      const scaleNotes = sheet.notes && sheet.notes.length > 0 ? sheet.notes.join('  ·  ') : 'Scales as noted on details';
-      doc.text(`4. Scales: ${scaleNotes}`, nbX + 4, nbY + 29);
-      if (sheet.subtitle) {
-        doc.text(`5. Schedule info: ${sheet.subtitle}`, nbX + 4, nbY + 34.5);
-      } else {
-        doc.text('5. All lap lengths to be staggered and strictly as per IS 456 provisions.', nbX + 4, nbY + 34.5);
-      }
-      doc.text('6. Construction shall conform strictly to National Building Code (NBC 2016).', nbX + 4, nbY + 40);
-    }
-
-    // 4. Title Block
-    doc.setFillColor(theme === 'dark' ? 15 : 248, theme === 'dark' ? 23 : 250, theme === 'dark' ? 42 : 252);
-    doc.rect(tbX, tbY, tbW, tbH, 'F');
-    doc.setDrawColor(theme === 'dark' ? 71 : 51, theme === 'dark' ? 85 : 65, theme === 'dark' ? 105 : 85);
-    doc.setLineWidth(0.6);
-    doc.rect(tbX, tbY, tbW, tbH, 'S');
-
-    doc.line(tbX, tbY + 11, tbX + tbW, tbY + 11);
-    doc.line(tbX, tbY + 26, tbX + tbW, tbY + 26);
-    const midColX = isPortrait ? tbX + 135 : tbX + 75;
-    doc.line(midColX, tbY + 26, midColX, tbY + tbH);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(theme === 'dark' ? 241 : 15, theme === 'dark' ? 245 : 23, theme === 'dark' ? 249 : 42);
-    doc.text('STRUCTURE AI DESIGNER - DETAILING SUITE', tbX + 4, tbY + 7.5);
-
-    doc.setFontSize(7.5);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(theme === 'dark' ? 148 : 71, theme === 'dark' ? 163 : 85, theme === 'dark' ? 184 : 105);
-    const projectName = project?.metadata?.name || 'G+4 RCC Residential Building';
-    doc.text(`PROJECT: ${projectName.length > 32 ? projectName.substring(0, 30) + '...' : projectName}`, tbX + 4, tbY + 16);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(2, 132, 199);
-    const titleWithLevel = sheet.levelName ? `${sheet.title} (${sheet.levelName})` : sheet.title;
-    doc.text(titleWithLevel.length > 36 ? titleWithLevel.substring(0, 34) + '...' : titleWithLevel, tbX + 4, tbY + 22);
-
-    doc.setFontSize(6.8);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(theme === 'dark' ? 203 : 51, theme === 'dark' ? 213 : 65, theme === 'dark' ? 225 : 85);
-    const engineer = project?.metadata?.engineer || 'Er. E. Rogers (Lead Struct. Eng)';
-    const location = project?.metadata?.location || 'Standard Project Site';
-    doc.text(`ENGINEER: ${engineer.length > 22 ? engineer.substring(0, 20) + '...' : engineer}`, tbX + 4, tbY + 31.5);
-    doc.text(`LOCATION: ${location.length > 22 ? location.substring(0, 20) + '...' : location}`, tbX + 4, tbY + 36.5);
-    doc.text(`DATE: ${new Date().toLocaleDateString()}`, tbX + 4, tbY + 41.5);
-
-    doc.setFont('helvetica', 'bold');
-    doc.text(`DWG NO: ${sheet.sheetNumber}`, midColX + 4, tbY + 31.5);
-    const primaryScale = sheet.notes?.[0] || '1:100 @ A3';
-    doc.text(`SCALE: ${primaryScale}`, midColX + 4, tbY + 36.5);
-    doc.setTextColor(5, 150, 105);
-    doc.text(`SHEET: ${pageNumber} OF ${totalPages} (APPROVED)`, midColX + 4, tbY + 41.5);
-
-    // 5. Sheet Identity Caption (top-left inside margin)
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
-    doc.setTextColor(theme === 'dark' ? 207 : 15, theme === 'dark' ? 227 : 23, theme === 'dark' ? 255 : 42);
-    const headerTitle = `${sheet.sheetNumber} — ${sheet.title}${sheet.levelName ? ` (${sheet.levelName})` : ''}`;
-    doc.text(headerTitle, 16, 17.5);
 
     // 6. North Arrow (top-right)
     const naX = pageWidth - 24;
