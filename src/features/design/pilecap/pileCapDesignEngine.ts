@@ -13,6 +13,7 @@ export interface PileCapDesignInput {
   customCapLength?: number; // mm
   customCapWidth?: number; // mm
   customCapDepth?: number; // mm
+  customCapShape?: 'RECTANGULAR' | 'TRIANGULAR' | 'PENTAGONAL' | 'HEXAGONAL';
   assignedPileTypeId?: string;
   rotationAngle?: number; // 0, 90, 180, 270 degrees
   factoredVerticalLoad: number; // Pu in kN (from STAAD reaction)
@@ -30,7 +31,7 @@ export interface PileCapDesignOutput {
   factoredMomentX: number; // kNm
   factoredMomentY: number; // kNm
   pileCount: number;
-  capShape: 'RECTANGULAR' | 'TRIANGULAR' | 'PENTAGONAL';
+  capShape: 'RECTANGULAR' | 'TRIANGULAR' | 'PENTAGONAL' | 'HEXAGONAL';
   pileDiameter: number;
   rotationAngle?: number;
   safePileCapacity: number;
@@ -122,7 +123,7 @@ export class PileCapDesignEngine {
     if (pileCount > 6 && !input.customPileCount) pileCount = 6;
 
     // 2. Pile Cap Geometry, Shape & Plan Dimensions (L x B)
-    let capShape: 'RECTANGULAR' | 'TRIANGULAR' | 'PENTAGONAL' = 'RECTANGULAR';
+    let capShape: 'RECTANGULAR' | 'TRIANGULAR' | 'PENTAGONAL' | 'HEXAGONAL' = 'RECTANGULAR';
     let autoCapLength = 0;
     let autoCapWidth = 0;
     let pileOffsets: { x: number; y: number }[] = [];
@@ -177,38 +178,42 @@ export class PileCapDesignEngine {
       // 5 piles at vertices of regular pentagon with adjacent chord spacing s
       capShape = 'PENTAGONAL';
       const Rp = pileSpacing / (2 * Math.sin(Math.PI / 5)); // Circumradius Rp = s / (2 * sin 36 deg) ~= 0.85065 * s
+      const Rcap = Rp + overhang / Math.cos(Math.PI / 5);
 
       // Bounding box dimensions for 5-pile pentagon
-      autoCapWidth = Math.round(2 * (Rp * Math.cos(Math.PI / 10) + overhang)); // 2 * (Rp * cos 18 deg + eo)
-      autoCapLength = Math.round(Rp * (1 + Math.cos(Math.PI / 5)) + 2 * overhang); // Rp * (1 + cos 36 deg) + 2*eo
+      autoCapWidth = Math.round(2 * Rcap * Math.cos(Math.PI / 10)); // 2 * Rcap * cos 18 deg
+      autoCapLength = Math.round(Rcap * (1 + Math.cos(Math.PI / 5))); // Rcap * (1 + cos 36 deg)
 
-      pileOffsets = [
-        { x: 0, y: Math.round(Rp) }, // Vertex 1 (Top / 90 deg)
-        { x: -Math.round(Rp * Math.cos(Math.PI / 10)), y: Math.round(Rp * Math.sin(Math.PI / 10)) }, // Vertex 2 (Top Left / 162 deg)
-        { x: -Math.round(Rp * Math.sin(Math.PI / 5)), y: -Math.round(Rp * Math.cos(Math.PI / 5)) }, // Vertex 3 (Bottom Left / 234 deg)
-        { x: Math.round(Rp * Math.sin(Math.PI / 5)), y: -Math.round(Rp * Math.cos(Math.PI / 5)) }, // Vertex 4 (Bottom Right / 306 deg)
-        { x: Math.round(Rp * Math.cos(Math.PI / 10)), y: Math.round(Rp * Math.sin(Math.PI / 10)) }, // Vertex 5 (Top Right / 18 deg)
-      ];
+      pileOffsets = getPileOffsetsMm(5, pileSpacing, 'UP');
 
       armX = Math.max(0.1, (Rp * Math.cos(Math.PI / 10) - colA / 2) / 1000);
       armY = Math.max(0.1, (Rp - colB / 2) / 1000);
     } else if (pileCount === 6) {
-      // 6-PILE RECTANGULAR RIGID CAP (3x2 Grid)
-      capShape = 'RECTANGULAR';
-      autoCapLength = 2 * pileSpacing + 2 * overhang;
-      autoCapWidth = pileSpacing + 2 * overhang;
+      if (input.customCapShape === 'RECTANGULAR') {
+        // 6-PILE RECTANGULAR RIGID CAP (3x2 Grid)
+        capShape = 'RECTANGULAR';
+        autoCapLength = 2 * pileSpacing + 2 * overhang;
+        autoCapWidth = pileSpacing + 2 * overhang;
 
-      pileOffsets = [
-        { x: -Math.round(pileSpacing), y: Math.round(pileSpacing / 2) },
-        { x: 0, y: Math.round(pileSpacing / 2) },
-        { x: Math.round(pileSpacing), y: Math.round(pileSpacing / 2) },
-        { x: -Math.round(pileSpacing), y: -Math.round(pileSpacing / 2) },
-        { x: 0, y: -Math.round(pileSpacing / 2) },
-        { x: Math.round(pileSpacing), y: -Math.round(pileSpacing / 2) },
-      ];
+        pileOffsets = getPileOffsetsMm(6, pileSpacing, 'UP', 'RECTANGULAR');
 
-      armX = Math.max(0.1, (pileSpacing - colA / 2) / 1000);
-      armY = Math.max(0.1, (pileSpacing / 2 - colB / 2) / 1000);
+        armX = Math.max(0.1, (pileSpacing - colA / 2) / 1000);
+        armY = Math.max(0.1, (pileSpacing / 2 - colB / 2) / 1000);
+      } else {
+        // 6-PILE SYMMETRICAL REGULAR HEXAGONAL CAP (IS 2911 Cl. 6.6 & SP:34)
+        // 6 piles at the 6 vertices of a regular hexagon, circumradius Rp = s
+        capShape = 'HEXAGONAL';
+        const Rp = pileSpacing; // Circumradius Rp = s
+        const Rcap = Math.round(pileSpacing + (2 / Math.sqrt(3)) * overhang);
+
+        autoCapLength = 2 * Rcap; // Point-to-point dimension
+        autoCapWidth = Math.round(Math.sqrt(3) * Rcap); // Flat-to-flat dimension
+
+        pileOffsets = getPileOffsetsMm(6, pileSpacing, 'UP', 'HEXAGONAL');
+
+        armX = Math.max(0.1, (Rp - colA / 2) / 1000);
+        armY = Math.max(0.1, (Rp * Math.sin(Math.PI / 3) - colB / 2) / 1000);
+      }
     } else {
       capShape = 'RECTANGULAR';
       autoCapLength = pileSpacing + 2 * overhang;
@@ -363,7 +368,7 @@ export class PileCapDesignEngine {
             {
               symbol: 'Shape',
               description: 'Pile Cap Plan Geometry',
-              formula: pileCount === 3 ? 'Equilateral Triangular Cap (3 Piles at Vertices)' : pileCount === 5 ? 'Symmetrical Regular Pentagonal Cap (5 Piles at Vertices)' : 'Rectangular / Square Rigid Cap',
+              formula: pileCount === 3 ? 'Equilateral Triangular Cap (3 Piles at Vertices)' : pileCount === 5 ? 'Symmetrical Regular Pentagonal Cap (5 Piles at Vertices)' : (pileCount === 6 && capShape === 'HEXAGONAL') ? 'Symmetrical Regular Hexagonal Cap (6 Piles at Vertices)' : 'Rectangular / Square Rigid Cap',
               substitution: `N = ${pileCount} -> ${capShape} Plan Geometry`,
               result: `${capShape} SHAPE (Centroid at (0,0))`,
               codeReference: 'IS 2911:2010 Cl. 6.6 & SP:34',

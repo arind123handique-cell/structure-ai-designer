@@ -37,7 +37,8 @@ export interface DimensionChainItem {
 export function getPileOffsetsMm(
   count: number,
   spacingMm: number,
-  orientation: CapOrientation = 'UP'
+  orientation: CapOrientation = 'UP',
+  shape?: string
 ): Point2D[] {
   const s = spacingMm;
 
@@ -103,32 +104,57 @@ export function getPileOffsetsMm(
   }
 
   if (count === 5) {
-    // 5-pile regular pentagon
+    // 5-pile regular pentagon (IS 2911 Cl. 6.6 & SP:34)
     const Rp = Math.round(s / (2 * Math.sin(Math.PI / 5)));
     const cos18 = Math.cos(Math.PI / 10);
     const sin18 = Math.sin(Math.PI / 10);
     const sin36 = Math.sin(Math.PI / 5);
     const cos36 = Math.cos(Math.PI / 5);
 
-    return [
-      { x: 0, y: Rp },
-      { x: -Math.round(Rp * cos18), y: Math.round(Rp * sin18) },
-      { x: -Math.round(Rp * sin36), y: -Math.round(Rp * cos36) },
-      { x: Math.round(Rp * sin36), y: -Math.round(Rp * cos36) },
-      { x: Math.round(Rp * cos18), y: Math.round(Rp * sin18) },
+    const ptsUp: Point2D[] = [
+      { x: 0, y: Rp }, // Apex (Top)
+      { x: -Math.round(Rp * cos18), y: Math.round(Rp * sin18) }, // Top Left
+      { x: -Math.round(Rp * sin36), y: -Math.round(Rp * cos36) }, // Bottom Left
+      { x: Math.round(Rp * sin36), y: -Math.round(Rp * cos36) }, // Bottom Right
+      { x: Math.round(Rp * cos18), y: Math.round(Rp * sin18) }, // Top Right
     ];
+    if (orientation === 'UP') return ptsUp;
+    return rotatePoints2D(ptsUp, orientationToAngle(orientation), { x: 0, y: 0 });
   }
 
-  // 6 piles: 3x2 grid
-  const halfS = Math.round(s / 2);
-  return [
-    { x: -s, y: halfS },
-    { x: 0, y: halfS },
-    { x: s, y: halfS },
-    { x: -s, y: -halfS },
-    { x: 0, y: -halfS },
-    { x: s, y: -halfS },
-  ];
+  if (count === 6) {
+    if (shape === 'RECTANGULAR') {
+      // 6 piles: 3x2 rectangular grid
+      const halfS = Math.round(s / 2);
+      const rectPts: Point2D[] = [
+        { x: -s, y: halfS },
+        { x: 0, y: halfS },
+        { x: s, y: halfS },
+        { x: -s, y: -halfS },
+        { x: 0, y: -halfS },
+        { x: s, y: -halfS },
+      ];
+      if (orientation === 'UP' || orientation === 'DOWN') return rectPts;
+      return rotatePoints2D(rectPts, orientationToAngle(orientation), { x: 0, y: 0 });
+    }
+
+    // Default 6-pile regular hexagon (IS 2911 Cl. 6.6 & SP:34)
+    // 6 piles at the 6 vertices of a regular hexagon, circumradius Rp = s
+    const halfS = Math.round(s / 2);
+    const rIn = Math.round(s * Math.cos(Math.PI / 6)); // s * sqrt(3) / 2
+    const hexPtsUp: Point2D[] = [
+      { x: s, y: 0 }, // Right Apex
+      { x: halfS, y: rIn }, // Top Right
+      { x: -halfS, y: rIn }, // Top Left
+      { x: -s, y: 0 }, // Left Apex
+      { x: -halfS, y: -rIn }, // Bottom Left
+      { x: halfS, y: -rIn }, // Bottom Right
+    ];
+    if (orientation === 'UP') return hexPtsUp;
+    return rotatePoints2D(hexPtsUp, orientationToAngle(orientation), { x: 0, y: 0 });
+  }
+
+  return [];
 }
 
 /**
@@ -213,6 +239,114 @@ export function get3PileDimensionsMm(s: number, eo: number): {
     halfRpMm: halfRp,
     diagonalChamferMm,
   };
+}
+
+/**
+ * Generates polygon vertices for a symmetrical 5-pile regular pentagonal cap.
+ * Coordinates are in millimeters relative to the column centroid (0,0).
+ *
+ * @param s Pile spacing in mm (chord distance between adjacent piles)
+ * @param eo Edge distance in mm (perpendicular clearance from pile center to cap faces)
+ * @param orientation Direction apex points: 'UP', 'DOWN', 'LEFT', 'RIGHT' (or use rotationAngle with rotatePoints2D)
+ * @param extraOffsetMm Positive for PCC (+150mm), negative for rebar cage (-60mm)
+ */
+export function get5PilePolygonMm(
+  s: number,
+  eo: number,
+  orientation: CapOrientation = 'UP',
+  extraOffsetMm: number = 0
+): Point2D[] {
+  const curEo = eo + extraOffsetMm;
+  const Rp = s / (2 * Math.sin(Math.PI / 5)); // Circumradius of piles
+  const Rcap = Rp + curEo / Math.cos(Math.PI / 5); // Corner circumradius ensuring exact curEo perpendicular clearance
+
+  const cos18 = Math.cos(Math.PI / 10);
+  const sin18 = Math.sin(Math.PI / 10);
+  const sin36 = Math.sin(Math.PI / 5);
+  const cos36 = Math.cos(Math.PI / 5);
+
+  const rawPtsUp: Point2D[] = [
+    { x: 0, y: Math.round(Rcap) }, // Apex (Top)
+    { x: -Math.round(Rcap * cos18), y: Math.round(Rcap * sin18) }, // Top Left
+    { x: -Math.round(Rcap * sin36), y: -Math.round(Rcap * cos36) }, // Bottom Left
+    { x: Math.round(Rcap * sin36), y: -Math.round(Rcap * cos36) }, // Bottom Right
+    { x: Math.round(Rcap * cos18), y: Math.round(Rcap * sin18) }, // Top Right
+  ];
+
+  if (orientation === 'UP') return rawPtsUp;
+  return rotatePoints2D(rawPtsUp, orientationToAngle(orientation), { x: 0, y: 0 });
+}
+
+/**
+ * Returns dimensions and facet lengths for a symmetrical 5-pile regular pentagonal cap.
+ */
+export function get5PileDimensionsMm(s: number, eo: number): {
+  RpMm: number;
+  RcapMm: number;
+  facetDimMm: number;
+  widthMm: number;
+  lengthMm: number;
+} {
+  const Rp = Math.round(s / (2 * Math.sin(Math.PI / 5)));
+  const Rcap = Math.round(Rp + eo / Math.cos(Math.PI / 5));
+  const facetDimMm = Math.round(2 * Rcap * Math.sin(Math.PI / 5)); // = s + 2 * eo * tan(36 deg)
+  const widthMm = Math.round(2 * Rcap * Math.cos(Math.PI / 10)); // Total horizontal span across corners
+  const lengthMm = Math.round(Rcap * (1 + Math.cos(Math.PI / 5))); // Total vertical span from flat base to apex
+  return { RpMm: Rp, RcapMm: Rcap, facetDimMm, widthMm, lengthMm };
+}
+
+/**
+ * Generates polygon vertices for a symmetrical 6-pile regular hexagonal cap.
+ * Coordinates are in millimeters relative to the column centroid (0,0).
+ *
+ * @param s Pile spacing in mm (chord distance between adjacent piles)
+ * @param eo Edge distance in mm (perpendicular clearance from pile center to cap faces)
+ * @param orientation Direction apex points: 'UP', 'DOWN', 'LEFT', 'RIGHT' (or use rotationAngle with rotatePoints2D)
+ * @param extraOffsetMm Positive for PCC (+150mm), negative for rebar cage (-60mm)
+ */
+export function get6PilePolygonMm(
+  s: number,
+  eo: number,
+  orientation: CapOrientation = 'UP',
+  extraOffsetMm: number = 0
+): Point2D[] {
+  const curEo = eo + extraOffsetMm;
+  const Rp = s; // In a regular hexagon, circumradius Rp = s
+  const Rcap = s + curEo / Math.cos(Math.PI / 6); // Corner circumradius: s + 2/sqrt(3)*curEo
+
+  const halfRcap = Math.round(Rcap / 2);
+  const rIn = Math.round(Rcap * Math.cos(Math.PI / 6)); // Rcap * sqrt(3) / 2
+
+  // Orientation 'UP' has horizontal top and bottom faces, left and right apexes
+  const rawPtsUp: Point2D[] = [
+    { x: Math.round(Rcap), y: 0 }, // Right Apex
+    { x: halfRcap, y: rIn }, // Top Right
+    { x: -halfRcap, y: rIn }, // Top Left
+    { x: -Math.round(Rcap), y: 0 }, // Left Apex
+    { x: -halfRcap, y: -rIn }, // Bottom Left
+    { x: halfRcap, y: -rIn }, // Bottom Right
+  ];
+
+  if (orientation === 'UP') return rawPtsUp;
+  return rotatePoints2D(rawPtsUp, orientationToAngle(orientation), { x: 0, y: 0 });
+}
+
+/**
+ * Returns dimensions and facet lengths for a symmetrical 6-pile regular hexagonal cap.
+ */
+export function get6PileDimensionsMm(s: number, eo: number): {
+  RpMm: number;
+  RcapMm: number;
+  facetDimMm: number;
+  widthMm: number;
+  lengthMm: number;
+} {
+  const Rp = s;
+  const Rcap = Math.round(s + (2 / Math.sqrt(3)) * eo);
+  const facetDimMm = Rcap; // In regular hexagon, side length = Rcap
+  const widthMm = 2 * Rcap; // Point-to-point dimension
+  const lengthMm = Math.round(Math.sqrt(3) * Rcap); // Flat-to-flat dimension
+  return { RpMm: Rp, RcapMm: Rcap, facetDimMm, widthMm, lengthMm };
 }
 
 /**

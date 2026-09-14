@@ -5,8 +5,11 @@ import { NormalizedStructuralModel } from '@/features/model/types';
 import {
   getPileOffsetsMm,
   getTruncated3PilePolygonMm,
+  get5PilePolygonMm,
+  get6PilePolygonMm,
   get3PileDimensionsMm,
   angleToOrientation,
+  rotatePoints2D,
   CapOrientation,
 } from './pileCapGeometryUtils';
 import { ColumnNumberingService } from '@/features/model/columnNumbering';
@@ -138,13 +141,11 @@ export const PileCapPlanView: React.FC<PileCapPlanViewProps> = ({
       if (count === 3 || shape === 'TRIANGULAR') {
         ptsMm = getTruncated3PilePolygonMm(s, eo, orientation, 0);
       } else if (count === 5 || shape === 'PENTAGONAL') {
-        const Rp = s / (2 * Math.sin(Math.PI / 5));
-        const Rcap = Rp + eo;
-        const rotRad = (rotDeg * Math.PI) / 180;
-        for (let i = 0; i < 5; i++) {
-          const angle = -Math.PI / 2 + (2 * Math.PI * i) / 5 + rotRad;
-          ptsMm.push({ x: Rcap * Math.cos(angle), y: Rcap * Math.sin(angle) });
-        }
+        const rawPts = get5PilePolygonMm(s, eo, 'UP', 0);
+        ptsMm = rotDeg !== 0 ? rotatePoints2D(rawPts, rotDeg, { x: 0, y: 0 }, false) : rawPts;
+      } else if (count === 6 && shape === 'HEXAGONAL') {
+        const rawPts = get6PilePolygonMm(s, eo, 'UP', 0);
+        ptsMm = rotDeg !== 0 ? rotatePoints2D(rawPts, rotDeg, { x: 0, y: 0 }, false) : rawPts;
       } else {
         const isRot90 = rotDeg === 90 || rotDeg === 270;
         const baseL = count === 2 ? s + 2 * eo : L;
@@ -581,16 +582,17 @@ const DesignPanel: React.FC<DesignPanelProps> = ({
       return pts.map((p) => `${mcx + p.x * mScale},${mcy - p.y * mScale}`).join(' ');
     }
     if (count === 5 || design.capShape === 'PENTAGONAL') {
-      const Rp = s / (2 * Math.sin(Math.PI / 5));
-      const Rcap = Rp + eo;
-      const rRad = (rotDeg * Math.PI) / 180;
-      return Array.from({ length: 5 }, (_, i) => {
-        const a = -Math.PI / 2 + (2 * Math.PI * i) / 5 + rRad;
-        return `${mcx + Rcap * mScale * Math.cos(a)},${mcy + Rcap * mScale * Math.sin(a)}`;
-      }).join(' ');
+      const rawPts = get5PilePolygonMm(s, eo, 'UP', 0);
+      const pts = rotDeg !== 0 ? rotatePoints2D(rawPts, rotDeg, { x: 0, y: 0 }, false) : rawPts;
+      return pts.map((p) => `${mcx + p.x * mScale},${mcy - p.y * mScale}`).join(' ');
+    }
+    if (count === 6 && design.capShape === 'HEXAGONAL') {
+      const rawPts = get6PilePolygonMm(s, eo, 'UP', 0);
+      const pts = rotDeg !== 0 ? rotatePoints2D(rawPts, rotDeg, { x: 0, y: 0 }, false) : rawPts;
+      return pts.map((p) => `${mcx + p.x * mScale},${mcy - p.y * mScale}`).join(' ');
     }
     const isRot90 = rotDeg === 90 || rotDeg === 270;
-    const baseL = count === 2 ? s + 2 * eo : L;
+    const baseL = count === 2 ? s + 2 * eo : (count === 6 && design.capShape === 'RECTANGULAR' ? 2 * s + 2 * eo : L);
     const baseB = count === 2 ? Dp + 2 * eo : B;
     const curL = isRot90 ? baseB : baseL;
     const curB = isRot90 ? baseL : baseB;
@@ -602,7 +604,11 @@ const DesignPanel: React.FC<DesignPanelProps> = ({
   const miniCapPts = getMiniCapPoints();
 
   // Pile positions for mini view
-  const pileOffsets = getPileOffsetsMm(count, s, orientation);
+  const pileOffsets = (count === 5 || design.capShape === 'PENTAGONAL')
+    ? (rotDeg !== 0 ? rotatePoints2D(getPileOffsetsMm(5, s, 'UP'), rotDeg, { x: 0, y: 0 }, false) : getPileOffsetsMm(5, s, 'UP'))
+    : (count === 6 && design.capShape === 'HEXAGONAL')
+    ? (rotDeg !== 0 ? rotatePoints2D(getPileOffsetsMm(6, s, 'UP', 'HEXAGONAL'), rotDeg, { x: 0, y: 0 }, false) : getPileOffsetsMm(6, s, 'UP', 'HEXAGONAL'))
+    : getPileOffsetsMm(count, s, orientation);
 
   return (
     <div className="flex flex-col h-full overflow-y-auto">
@@ -663,7 +669,7 @@ const DesignPanel: React.FC<DesignPanelProps> = ({
         <div className="mt-2 flex items-center gap-2">
           <span className="text-[10px] font-mono text-slate-500">Shape:</span>
           <span className="text-[10px] font-mono font-bold text-indigo-700">
-            {design.capShape === 'TRIANGULAR' ? '▲ Triangle' : design.capShape === 'PENTAGONAL' ? '⬠ Pentagon' : '▬ Rectangle'}
+            {design.capShape === 'TRIANGULAR' ? '▲ Triangle' : design.capShape === 'PENTAGONAL' ? '⬠ Pentagon' : design.capShape === 'HEXAGONAL' ? '⬡ Hexagon' : '▬ Rectangle'}
           </span>
         </div>
       </div>

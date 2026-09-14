@@ -9,6 +9,10 @@ import {
   CapOrientation,
   getTruncated3PilePolygonMm,
   get3PileDimensionsMm,
+  get5PilePolygonMm,
+  get5PileDimensionsMm,
+  get6PilePolygonMm,
+  get6PileDimensionsMm,
   renderQuarteredPileSvg,
   getSectionRebarPaths,
   getPileOffsetsMm,
@@ -512,7 +516,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
 
       const cap = col.pileCap;
       const count = cap.pileCount;
-      const shape = cap.capShape || (count === 3 ? 'TRIANGULAR' : count === 5 ? 'PENTAGONAL' : 'RECTANGULAR');
+      const shape = cap.capShape || (count === 3 ? 'TRIANGULAR' : count === 5 ? 'PENTAGONAL' : count === 6 ? 'HEXAGONAL' : 'RECTANGULAR');
       const key = `${count}_${shape}`;
 
       if (!typeMap.has(key)) {
@@ -524,19 +528,26 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
         let B = cap.capWidth;
         let facetDim: number | undefined = undefined;
 
-        if (count === 3) {
+        if (count === 3 || shape === 'TRIANGULAR') {
           const dims3p = get3PileDimensionsMm(s, eo);
           L = cap.capLength || dims3p.lengthMm;
           B = cap.capWidth || dims3p.widthMm;
-        } else if (count === 5) {
-          L = cap.capLength || 2316;
-          B = cap.capWidth || 2399;
-          const Rp = s / (2 * Math.sin(Math.PI / 5));
-          const Rcap = Rp + eo;
-          facetDim = Math.round(2 * Rcap * Math.sin(Math.PI / 5));
+        } else if (count === 5 || shape === 'PENTAGONAL') {
+          const dims5p = get5PileDimensionsMm(s, eo);
+          L = cap.capLength || dims5p.widthMm;
+          B = cap.capWidth || dims5p.lengthMm;
+          facetDim = dims5p.facetDimMm;
+        } else if (count === 6 && shape === 'HEXAGONAL') {
+          const dims6p = get6PileDimensionsMm(s, eo);
+          L = cap.capLength || dims6p.widthMm;
+          B = cap.capWidth || dims6p.lengthMm;
+          facetDim = dims6p.facetDimMm;
         } else if (count === 2) {
           L = cap.capLength || s + 2 * eo;
           B = cap.capWidth || Dp + 2 * eo;
+        } else if (count === 6 && shape === 'RECTANGULAR') {
+          L = cap.capLength || 2 * s + 2 * eo;
+          B = cap.capWidth || s + 2 * eo;
         } else {
           L = cap.capLength || s + 2 * eo;
           B = cap.capWidth || s + 2 * eo;
@@ -1352,57 +1363,41 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                       onSelectPileCap?.(isSelected ? null : col.nodeId);
                     }}
                   >
-                    {/* Shape 1: 5-Pile Pentagonal Cap */}
+                    {/* Shape 1: 5-Pile Pentagonal Cap (IS 2911 & SP:34 Symmetrical Regular Pentagon) */}
                     {(count === 5 || (shape as string) === 'PENTAGONAL') ? (
                       (() => {
-                        const L_mm = cap.capLength || 2629;
-                        const B_mm = cap.capWidth || 2237;
-                        const wTopFlat = Math.round(L_mm * 0.618);
-                        const wBtmFlat = Math.round(L_mm * 0.447);
-                        const hFlat = Math.round(B_mm * 0.764);
-                        const hRise = B_mm - hFlat;
+                        const s = cap.pileSpacing || 1500;
+                        const eo = cap.edgeDistance || 500;
+                        const rawPtsMm = get5PilePolygonMm(s, eo, 'UP', 0);
+                        const rawPtsInnerMm = get5PilePolygonMm(s, eo, 'UP', -50);
+                        const rawPileOffsets = (cap.pileOffsets && cap.pileOffsets.length === 5)
+                          ? cap.pileOffsets
+                          : getPileOffsetsMm(5, s, 'UP');
 
-                        const xLeft = cx - capL / 2;
-                        const xApex = cx + capL / 2;
-                        const xTopBreak = xLeft + (wTopFlat / 1000) * scale;
-                        const xBtmBreak = xLeft + (wBtmFlat / 1000) * scale;
-                        const yTop = cy - capW / 2;
-                        const yBtm = cy + capW / 2;
-                        const yApex = yTop + (hRise / 1000) * scale;
+                        const ptsSvg = rotDeg !== 0
+                          ? rotatePoints2D(rawPtsMm.map((p) => ({ x: cx + (p.x / 1000) * scale, y: cy - (p.y / 1000) * scale })), rotDeg, { x: cx, y: cy }, true)
+                          : rawPtsMm.map((p) => ({ x: cx + (p.x / 1000) * scale, y: cy - (p.y / 1000) * scale }));
 
-                        const rawPtsSvg = [
-                          { x: xLeft, y: yTop },
-                          { x: xTopBreak, y: yTop },
-                          { x: xApex, y: yApex },
-                          { x: xBtmBreak, y: yBtm },
-                          { x: xLeft, y: yBtm },
-                        ];
-                        const rawPtsMm = [
-                          { x: -L_mm / 2, y: -B_mm / 2 },
-                          { x: -L_mm / 2 + wTopFlat, y: -B_mm / 2 },
-                          { x: L_mm / 2, y: -B_mm / 2 + hRise },
-                          { x: -L_mm / 2 + wBtmFlat, y: B_mm / 2 },
-                          { x: -L_mm / 2, y: B_mm / 2 },
-                        ];
-                        const rawPilePositions = [
-                          { px: xLeft + rPile * 2.3, py: yTop + rPile * 2.3 },
-                          { px: xLeft + rPile * 2.3, py: yBtm - rPile * 2.3 },
-                          { px: cx, py: yTop + rPile * 2.3 },
-                          { px: cx, py: yBtm - rPile * 2.3 },
-                          { px: xApex - rPile * 2.4, py: yApex },
-                        ];
+                        const innerPtsSvg = rotDeg !== 0
+                          ? rotatePoints2D(rawPtsInnerMm.map((p) => ({ x: cx + (p.x / 1000) * scale, y: cy - (p.y / 1000) * scale })), rotDeg, { x: cx, y: cy }, true)
+                          : rawPtsInnerMm.map((p) => ({ x: cx + (p.x / 1000) * scale, y: cy - (p.y / 1000) * scale }));
 
-                        const ptsSvg = rotDeg !== 0 ? rotatePoints2D(rawPtsSvg, rotDeg, { x: cx, y: cy }, true) : rawPtsSvg;
-                        const ptsMm = rotDeg !== 0 ? rotatePoints2D(rawPtsMm, rotDeg, { x: 0, y: 0 }, false) : rawPtsMm;
+                        const ptsMm = rotDeg !== 0
+                          ? rotatePoints2D(rawPtsMm, rotDeg, { x: 0, y: 0 }, false)
+                          : rawPtsMm;
+
                         const pilePositions = rotDeg !== 0
-                          ? rawPilePositions.map((p) => {
-                              const rot = rotatePoint2D({ x: p.px, y: p.py }, rotDeg, { x: cx, y: cy }, true);
-                              return { px: rot.x, py: rot.y };
-                            })
-                          : rawPilePositions;
+                          ? rotatePoints2D(rawPileOffsets, rotDeg, { x: 0, y: 0 }, false).map((p) => ({
+                              px: cx + (p.x / 1000) * scale,
+                              py: cy - (p.y / 1000) * scale,
+                            }))
+                          : rawPileOffsets.map((p) => ({
+                              px: cx + (p.x / 1000) * scale,
+                              py: cy - (p.y / 1000) * scale,
+                            }));
 
-                        const outerPts = ptsSvg.map(p => `${p.x},${p.y}`).join(' ');
-                        const innerPts = ptsSvg.map(p => `${cx + (p.x - cx) * 0.92},${cy + (p.y - cy) * 0.92}`).join(' ');
+                        const outerPts = ptsSvg.map((p) => `${p.x},${p.y}`).join(' ');
+                        const innerPts = innerPtsSvg.map((p) => `${p.x},${p.y}`).join(' ');
 
                         return (
                           <g>
@@ -1424,65 +1419,55 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                           </g>
                         );
                       })()
-                    ) : (count === 6 || (shape as string) === 'HEXAGONAL') ? (
+                    ) : (count === 6 && (shape as string) === 'HEXAGONAL') ? (
                       (() => {
-                        const L_mm = cap.capLength || 2760;
-                        const B_mm = cap.capWidth || 2778;
-                        const wTop = Math.round(L_mm * 0.58);
+                        const s = cap.pileSpacing || 1500;
+                        const eo = cap.edgeDistance || 500;
+                        const rawPtsMm = get6PilePolygonMm(s, eo, 'UP', 0);
+                        const rawPtsInnerMm = get6PilePolygonMm(s, eo, 'UP', -50);
+                        const rawPileOffsets = (cap.pileOffsets && cap.pileOffsets.length === 6 && cap.capShape === 'HEXAGONAL')
+                          ? cap.pileOffsets
+                          : getPileOffsetsMm(6, s, 'UP', 'HEXAGONAL');
 
-                        const xL = cx - capL / 2;
-                        const xR = cx + capL / 2;
-                        const xTop1 = cx - (wTop / 2000) * scale;
-                        const xTop2 = cx + (wTop / 2000) * scale;
-                        const yT = cy - capW / 2;
-                        const yB = cy + capW / 2;
+                        const ptsSvg = rotDeg !== 0
+                          ? rotatePoints2D(rawPtsMm.map((p) => ({ x: cx + (p.x / 1000) * scale, y: cy - (p.y / 1000) * scale })), rotDeg, { x: cx, y: cy }, true)
+                          : rawPtsMm.map((p) => ({ x: cx + (p.x / 1000) * scale, y: cy - (p.y / 1000) * scale }));
 
-                        const rawPtsSvg = [
-                          { x: xTop1, y: yT },
-                          { x: xTop2, y: yT },
-                          { x: xR, y: cy },
-                          { x: xTop2, y: yB },
-                          { x: xTop1, y: yB },
-                          { x: xL, y: cy },
-                        ];
-                        const rawPtsMm = [
-                          { x: -wTop / 2, y: -B_mm / 2 },
-                          { x: wTop / 2, y: -B_mm / 2 },
-                          { x: L_mm / 2, y: 0 },
-                          { x: wTop / 2, y: B_mm / 2 },
-                          { x: -wTop / 2, y: B_mm / 2 },
-                          { x: -L_mm / 2, y: 0 },
-                        ];
-                        const rawPilePositions = [
-                          { px: cx - capL * 0.22, py: cy - capW * 0.28 },
-                          { px: cx + capL * 0.22, py: cy - capW * 0.28 },
-                          { px: cx - capL * 0.22, py: cy },
-                          { px: cx + capL * 0.22, py: cy },
-                          { px: cx - capL * 0.22, py: cy + capW * 0.28 },
-                          { px: cx + capL * 0.22, py: cy + capW * 0.28 },
-                        ];
+                        const innerPtsSvg = rotDeg !== 0
+                          ? rotatePoints2D(rawPtsInnerMm.map((p) => ({ x: cx + (p.x / 1000) * scale, y: cy - (p.y / 1000) * scale })), rotDeg, { x: cx, y: cy }, true)
+                          : rawPtsInnerMm.map((p) => ({ x: cx + (p.x / 1000) * scale, y: cy - (p.y / 1000) * scale }));
 
-                        const ptsSvg = rotDeg !== 0 ? rotatePoints2D(rawPtsSvg, rotDeg, { x: cx, y: cy }, true) : rawPtsSvg;
-                        const ptsMm = rotDeg !== 0 ? rotatePoints2D(rawPtsMm, rotDeg, { x: 0, y: 0 }, false) : rawPtsMm;
+                        const ptsMm = rotDeg !== 0
+                          ? rotatePoints2D(rawPtsMm, rotDeg, { x: 0, y: 0 }, false)
+                          : rawPtsMm;
+
                         const pilePositions = rotDeg !== 0
-                          ? rawPilePositions.map((p) => {
-                              const rot = rotatePoint2D({ x: p.px, y: p.py }, rotDeg, { x: cx, y: cy }, true);
-                              return { px: rot.x, py: rot.y };
-                            })
-                          : rawPilePositions;
+                          ? rotatePoints2D(rawPileOffsets, rotDeg, { x: 0, y: 0 }, false).map((p) => ({
+                              px: cx + (p.x / 1000) * scale,
+                              py: cy - (p.y / 1000) * scale,
+                            }))
+                          : rawPileOffsets.map((p) => ({
+                              px: cx + (p.x / 1000) * scale,
+                              py: cy - (p.y / 1000) * scale,
+                            }));
 
-                        const outerPts = ptsSvg.map(p => `${p.x},${p.y}`).join(' ');
-                        const innerPts = ptsSvg.map(p => `${cx + (p.x - cx) * 0.93},${cy + (p.y - cy) * 0.93}`).join(' ');
+                        const outerPts = ptsSvg.map((p) => `${p.x},${p.y}`).join(' ');
+                        const innerPts = innerPtsSvg.map((p) => `${p.x},${p.y}`).join(' ');
 
                         return (
                           <g>
+                            {/* Outer boundary */}
                             <polygon points={outerPts} fill={theme.capFill} stroke={isSelected ? '#2563eb' : theme.capOuterStroke} strokeWidth={isSelected ? '2.5' : '1.5'} strokeLinejoin="round" />
+                            {/* Inner cyan rebar boundary */}
                             <polygon points={innerPts} fill="none" stroke={theme.capInnerStroke} strokeWidth="1.0" strokeLinejoin="round" />
+                            {/* Bored Piles */}
                             {pilePositions.map((p, pIdx) => renderCadBoredPile(`p6_${col.nodeId}_${pIdx}`, p.px, p.py, rPile))}
+                            {/* Center Magenta Column */}
                             <rect x={cx - colW / 2} y={cy - colD / 2} width={colW} height={colD} fill={theme.columnFill} stroke={theme.columnStroke} strokeWidth="1.2" />
                             <text x={cx} y={cy + 3} fill={theme.columnText} fontSize="7" fontWeight="bold" textAnchor="middle">{col.label}</text>
                             {/* Aligned Facet Dimensions */}
                             {renderCadPolygonFacetDimensions(ptsSvg, ptsMm, `c6_${col.nodeId}`, 11, 6.8)}
+                            {/* Cap Mark & Rotation Tag */}
                             <text x={cx + capL / 2 + 8} y={cy + capW / 2 + 12} fill={theme.capLabelText} fontSize="8" fontWeight="bold">
                               {pcLabel}{rotDeg !== 0 ? ` (${rotDeg}°)` : ''}
                             </text>
@@ -2771,15 +2756,29 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
 
               // Compute Plan Piles Points
               const planPilePoints = () => {
-                if (item.count === 3) {
+                if (item.count === 3 || item.shape === 'TRIANGULAR') {
                   const offsets = getPileOffsetsMm(3, item.s, 'UP');
                   return offsets.map((p) => ({
                     px: plCx + p.x * dScale,
                     py: plCy - p.y * dScale,
                   }));
                 }
-                if (item.shape === 'PENTAGONAL') {
+                if (item.count === 5 || item.shape === 'PENTAGONAL') {
                   const offsets = getPileOffsetsMm(5, item.s, 'UP');
+                  return offsets.map((p) => ({
+                    px: plCx + p.x * dScale,
+                    py: plCy - p.y * dScale,
+                  }));
+                }
+                if (item.count === 6 && item.shape === 'HEXAGONAL') {
+                  const offsets = getPileOffsetsMm(6, item.s, 'UP', 'HEXAGONAL');
+                  return offsets.map((p) => ({
+                    px: plCx + p.x * dScale,
+                    py: plCy - p.y * dScale,
+                  }));
+                }
+                if (item.count === 6 && item.shape === 'RECTANGULAR') {
+                  const offsets = getPileOffsetsMm(6, item.s, 'UP', 'RECTANGULAR');
                   return offsets.map((p) => ({
                     px: plCx + p.x * dScale,
                     py: plCy - p.y * dScale,
@@ -2802,32 +2801,19 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
 
               const pilesInPlan = planPilePoints();
 
-              // Compute Plan Pentagon Vertices for Aligned Dimensioning
-              const pentagonVertices = (extraMm: number) => {
-                const Rp = item.s / (2 * Math.sin(Math.PI / 5));
-                const Rcap = (Rp + item.eo + extraMm) * dScale;
-                const cos18 = Math.cos(Math.PI / 10);
-                const sin18 = Math.sin(Math.PI / 10);
-                const sin36 = Math.sin(Math.PI / 5);
-                const cos36 = Math.cos(Math.PI / 5);
-                return [
-                  { x: plCx, y: plCy - Rcap },
-                  { x: plCx - Rcap * cos18, y: plCy - Rcap * sin18 },
-                  { x: plCx - Rcap * sin36, y: plCy + Rcap * cos36 },
-                  { x: plCx + Rcap * sin36, y: plCy + Rcap * cos36 },
-                  { x: plCx + Rcap * cos18, y: plCy - Rcap * sin18 },
-                ];
-              };
-
               // Compute Plan Polygon
               const getPolygon = (extraMm: number) => {
                 if (item.count === 3 || item.shape === 'TRIANGULAR') {
                   const pts = getTruncated3PilePolygonMm(item.s, item.eo, 'UP', extraMm);
                   return pts.map((p) => `${plCx + p.x * dScale},${plCy - p.y * dScale}`).join(' ');
                 }
-                if (item.shape === 'PENTAGONAL') {
-                  const pts = pentagonVertices(extraMm);
-                  return pts.map((p) => `${p.x},${p.y}`).join(' ');
+                if (item.count === 5 || item.shape === 'PENTAGONAL') {
+                  const pts = get5PilePolygonMm(item.s, item.eo, 'UP', extraMm);
+                  return pts.map((p) => `${plCx + p.x * dScale},${plCy - p.y * dScale}`).join(' ');
+                }
+                if (item.shape === 'HEXAGONAL' || (item.count === 6 && item.shape !== 'RECTANGULAR')) {
+                  const pts = get6PilePolygonMm(item.s, item.eo, 'UP', extraMm);
+                  return pts.map((p) => `${plCx + p.x * dScale},${plCy - p.y * dScale}`).join(' ');
                 }
                 const halfW = ((item.L + 2 * extraMm) / 2) * dScale;
                 const halfH = ((item.B + 2 * extraMm) / 2) * dScale;
@@ -2838,8 +2824,8 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
               const capPoly = getPolygon(0);
 
               // Section Piles X positions
-              const p1_secX = item.shape === 'PENTAGONAL' ? plCx - (item.s / 2) * 0.95 * dScale : secX + item.eo * secScale;
-              const p2_secX = item.shape === 'PENTAGONAL' ? plCx + (item.s / 2) * 0.95 * dScale : secX + (item.eo + item.s) * secScale;
+              const p1_secX = (item.shape === 'PENTAGONAL' || item.count === 5 || item.shape === 'HEXAGONAL' || item.count === 6) ? plCx - (item.s / 2) * 0.95 * dScale : secX + item.eo * secScale;
+              const p2_secX = (item.shape === 'PENTAGONAL' || item.count === 5 || item.shape === 'HEXAGONAL' || item.count === 6) ? plCx + (item.s / 2) * 0.95 * dScale : secX + (item.eo + item.s) * secScale;
 
               // Section Rebar Paths
               const rebarPaths = getSectionRebarPaths(
@@ -2865,7 +2851,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                     {item.typeId}: {item.count}P {item.shape === 'TRIANGULAR' ? 'TRAP' : item.shape}
                   </text>
                   <text x={cardX + 8} y={cardY + 22} fill={isCadWhite ? '#475569' : '#94a3b8'} fontSize="7">
-                    {item.count === 3 && dims3p ? `${dims3p.lengthMm}×${dims3p.widthMm}×${item.D}` : item.shape === 'PENTAGONAL' ? `1461×5 Sides×${item.D}` : `${item.L}×${item.B}×${item.D}`} mm
+                    {item.count === 3 && dims3p ? `${dims3p.lengthMm}×${dims3p.widthMm}×${item.D}` : (item.shape === 'PENTAGONAL' || item.count === 5) ? `${item.facetDim || 1461}×5 Sides×${item.D}` : (item.shape === 'HEXAGONAL' || item.count === 6) ? `${item.facetDim || 2078}×6 Sides×${item.D}` : `${item.L}×${item.B}×${item.D}`} mm
                   </text>
                   <text x={cardX + cardW - 8} y={cardY + 16} fill={isCadWhite ? '#64748b' : '#64748b'} fontSize="7" textAnchor="end">
                     Cols: {item.associatedColumns.slice(0, 3).join(', ')}{item.associatedColumns.length > 3 ? '...' : ''}
@@ -2924,7 +2910,32 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                         return renderCadPolygonFacetDimensions(cardPtsSvg, cardPtsMm, `card_c3_${item.typeId}`, 13, 7.0);
                       })()}
                     </g>
-                  ) : item.shape === 'RECTANGULAR' ? (
+                  ) : (item.shape === 'PENTAGONAL' || item.count === 5) ? (
+                    /* Pentagon 5 Aligned Facet Dimensions */
+                    <g>
+                      {(() => {
+                        const ptsMm = get5PilePolygonMm(item.s, item.eo, 'UP', 0);
+                        const ptsSvg = ptsMm.map((p) => ({
+                          x: plCx + p.x * dScale,
+                          y: plCy - p.y * dScale,
+                        }));
+                        return renderCadPolygonFacetDimensions(ptsSvg, ptsMm, `card_c5_${item.typeId}`, 13, 7.0);
+                      })()}
+                    </g>
+                  ) : (item.shape === 'HEXAGONAL' || (item.count === 6 && item.shape !== 'RECTANGULAR')) ? (
+                    /* Hexagon 6 Aligned Facet Dimensions */
+                    <g>
+                      {(() => {
+                        const ptsMm = get6PilePolygonMm(item.s, item.eo, 'UP', 0);
+                        const ptsSvg = ptsMm.map((p) => ({
+                          x: plCx + p.x * dScale,
+                          y: plCy - p.y * dScale,
+                        }));
+                        return renderCadPolygonFacetDimensions(ptsSvg, ptsMm, `card_c6_${item.typeId}`, 13, 7.0);
+                      })()}
+                    </g>
+                  ) : (
+                    /* Linear Dimensions for Rectangular / Combined */
                     <g>
                       {/* Top Horizontal Dimension: L */}
                       {(() => {
@@ -2962,27 +2973,6 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                             </text>
                           </g>
                         );
-                      })()}
-                    </g>
-                  ) : (
-                    /* Pentagon 5 Aligned Facet Dimensions */
-                    <g>
-                      {(() => {
-                        const ptsSvg = pentagonVertices(0);
-                        const Rp = item.s / (2 * Math.sin(Math.PI / 5));
-                        const Rcap = Rp + item.eo;
-                        const cos18 = Math.cos(Math.PI / 10);
-                        const sin18 = Math.sin(Math.PI / 10);
-                        const sin36 = Math.sin(Math.PI / 5);
-                        const cos36 = Math.cos(Math.PI / 5);
-                        const ptsMm = [
-                          { x: 0, y: Rcap },
-                          { x: -Rcap * cos18, y: Rcap * sin18 },
-                          { x: -Rcap * sin36, y: -Rcap * cos36 },
-                          { x: Rcap * sin36, y: -Rcap * cos36 },
-                          { x: Rcap * cos18, y: Rcap * sin18 },
-                        ];
-                        return renderCadPolygonFacetDimensions(ptsSvg, ptsMm, `card_c5_${item.typeId}`, 13, 7.0);
                       })()}
                     </g>
                   )}

@@ -4,10 +4,15 @@ import {
   CapOrientation,
   getTruncated3PilePolygonMm,
   get3PileDimensionsMm,
+  get5PilePolygonMm,
+  get5PileDimensionsMm,
+  get6PilePolygonMm,
+  get6PileDimensionsMm,
   renderQuarteredPileSvg,
   getSectionRebarPaths,
   getPileOffsetsMm,
   angleToOrientation,
+  rotatePoints2D,
 } from './pileCapGeometryUtils';
 
 interface PileCapDrawingSvgProps {
@@ -32,7 +37,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
   const D = pileCap.capDepth || 750;
   const Dp = pileCap.pileDiameter || 500;
   const count = pileCap.pileCount || 4;
-  const shape = pileCap.capShape || (count === 3 ? 'TRIANGULAR' : count === 5 ? 'PENTAGONAL' : 'RECTANGULAR');
+  const shape = pileCap.capShape || (count === 3 ? 'TRIANGULAR' : count === 5 ? 'PENTAGONAL' : count === 6 ? 'HEXAGONAL' : 'RECTANGULAR');
   const s = pileCap.pileSpacing || 3 * Dp;
   const eo = pileCap.edgeDistance || Dp;
   const pccThk = 150; // 150mm THK PCC Bedding
@@ -60,8 +65,30 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
 
   // Scaled Pile Positions in Plan
   const getScaledPileOffsets = () => {
-    if (count === 3) {
+    if (count === 3 || shape === 'TRIANGULAR') {
       const offsets = getPileOffsetsMm(3, s, effOrientation);
+      return offsets.map((p) => ({
+        px: cx + p.x * scale,
+        py: cy - p.y * scale,
+      }));
+    }
+
+    if (count === 5 || shape === 'PENTAGONAL') {
+      const rawOffsets = (pileCap.pileOffsets && pileCap.pileOffsets.length === 5)
+        ? pileCap.pileOffsets
+        : getPileOffsetsMm(5, s, 'UP');
+      const offsets = rotDeg !== 0 ? rotatePoints2D(rawOffsets, rotDeg, { x: 0, y: 0 }, false) : rawOffsets;
+      return offsets.map((p) => ({
+        px: cx + p.x * scale,
+        py: cy - p.y * scale,
+      }));
+    }
+
+    if (count === 6 && shape === 'HEXAGONAL') {
+      const rawOffsets = (pileCap.pileOffsets && pileCap.pileOffsets.length === 6 && pileCap.capShape === 'HEXAGONAL')
+        ? pileCap.pileOffsets
+        : getPileOffsetsMm(6, s, 'UP', 'HEXAGONAL');
+      const offsets = rotDeg !== 0 ? rotatePoints2D(rawOffsets, rotDeg, { x: 0, y: 0 }, false) : rawOffsets;
       return offsets.map((p) => ({
         px: cx + p.x * scale,
         py: cy - p.y * scale,
@@ -92,23 +119,20 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
     }
 
     if (count === 5 || shape === 'PENTAGONAL') {
-      const Rp = s / (2 * Math.sin(Math.PI / 5));
-      const Rcap = (Rp + eo + extraOffsetMm) * scale;
-      const rotRad = (rotDeg * Math.PI) / 180;
-      const pts: string[] = [];
-      for (let i = 0; i < 5; i++) {
-        // In SVG (Y down): -PI/2 is top (North). Clockwise rotation adds rotRad.
-        const angle = -Math.PI / 2 + (2 * Math.PI * i) / 5 + rotRad;
-        const px = cx + Rcap * Math.cos(angle);
-        const py = cy + Rcap * Math.sin(angle);
-        pts.push(`${px},${py}`);
-      }
-      return pts.join(' ');
+      const rawPts = get5PilePolygonMm(s, eo, 'UP', extraOffsetMm);
+      const pts = rotDeg !== 0 ? rotatePoints2D(rawPts, rotDeg, { x: 0, y: 0 }, false) : rawPts;
+      return pts.map((p) => `${cx + p.x * scale},${cy - p.y * scale}`).join(' ');
     }
 
-    // Rectangular / Square (2-pile, 4-pile, 6-pile)
+    if (count === 6 && shape === 'HEXAGONAL') {
+      const rawPts = get6PilePolygonMm(s, eo, 'UP', extraOffsetMm);
+      const pts = rotDeg !== 0 ? rotatePoints2D(rawPts, rotDeg, { x: 0, y: 0 }, false) : rawPts;
+      return pts.map((p) => `${cx + p.x * scale},${cy - p.y * scale}`).join(' ');
+    }
+
+    // Rectangular / Square (2-pile, 4-pile, 6-pile 3x2)
     const isRot90or270 = rotDeg === 90 || rotDeg === 270;
-    const baseL = count === 2 ? s + 2 * (eo + extraOffsetMm) : L + 2 * extraOffsetMm;
+    const baseL = count === 2 ? s + 2 * (eo + extraOffsetMm) : (count === 6 && shape === 'RECTANGULAR' ? 2 * s + 2 * (eo + extraOffsetMm) : L + 2 * extraOffsetMm);
     const baseB = count === 2 ? Dp + 2 * (eo + extraOffsetMm) : B + 2 * extraOffsetMm;
     const curL = isRot90or270 ? baseB : baseL;
     const curB = isRot90or270 ? baseL : baseB;
@@ -132,15 +156,17 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
     ? pileCap.sideFaceRebarCallout.split(' (')[0]
     : `${pileCap.numSideLayers || 2}-T${pileCap.sideBarDia || 12}`;
 
-  // 3-pile cap geometric details
-  const dims3p = count === 3 ? get3PileDimensionsMm(s, eo) : null;
+  // Geometric details for polygonal caps
+  const dims3p = (count === 3 || shape === 'TRIANGULAR') ? get3PileDimensionsMm(s, eo) : null;
+  const dims5p = (count === 5 || shape === 'PENTAGONAL') ? get5PileDimensionsMm(s, eo) : null;
+  const dims6p = (count === 6 && shape === 'HEXAGONAL') ? get6PileDimensionsMm(s, eo) : null;
 
   // ---------------------------------------------------------------------------
   // SECTION 1-1 GEOMETRY & COORDINATES
   // ---------------------------------------------------------------------------
   const secBaseX = 430;
   const secBaseY = 30;
-  const secCapW = Math.max(220, Math.min(320, (count === 3 ? dims3p!.lengthMm : L) * scale * 1.05));
+  const secCapW = Math.max(220, Math.min(320, (count === 3 ? dims3p!.lengthMm : dims5p ? dims5p.widthMm : dims6p ? dims6p.widthMm : L) * scale * 1.05));
   const secCapH = Math.max(80, Math.min(130, D * scale * 1.25));
   const secCapX = secBaseX + 60;
   const secCapY = secBaseY + 95;
@@ -151,7 +177,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
   const secColY = secCapY - secColH;
 
   // Pile positions in Section cut
-  const totalLengthMm = count === 3 ? dims3p!.lengthMm : count === 2 ? s + 2 * eo : L;
+  const totalLengthMm = count === 3 ? dims3p!.lengthMm : dims5p ? dims5p.widthMm : dims6p ? dims6p.widthMm : count === 2 ? s + 2 * eo : (count === 6 && shape === 'RECTANGULAR' ? 2 * s + 2 * eo : L);
   const secScale = secCapW / totalLengthMm;
   const secPile1X = secCapX + eo * secScale;
   const secPile2X = secCapX + (eo + s) * secScale;
@@ -178,7 +204,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
             PC-{pileCap.supportNodeId}
           </span>
           <span>
-            {count}-PILE {count === 3 ? 'TRUNCATED TRAPEZOIDAL' : shape} PILE CAP ({count === 3 ? `${dims3p!.lengthMm}×${dims3p!.widthMm}×${D}` : `${L}×${B}×${D}`} mm)
+            {count}-PILE {count === 3 ? 'TRUNCATED TRAPEZOIDAL' : (count === 5 || shape === 'PENTAGONAL') ? 'REGULAR PENTAGONAL' : (count === 6 && shape === 'HEXAGONAL') ? 'REGULAR HEXAGONAL' : shape} PILE CAP ({count === 3 ? `${dims3p!.lengthMm}×${dims3p!.widthMm}×${D}` : dims5p ? `${dims5p.facetDimMm}mm x 5 Sides × ${D}` : dims6p ? `${dims6p.facetDimMm}mm x 6 Sides × ${D}` : `${L}×${B}×${D}`} mm)
           </span>
         </span>
         <span className="text-slate-500 font-normal">
@@ -438,20 +464,22 @@ fontSize={7.5 * fs}
               {/* Top Width Dimension: L */}
               {(() => {
                 const isRot90or270 = rotDeg === 90 || rotDeg === 270;
-                const effL = isRot90or270 ? B : L;
-                const effB = isRot90or270 ? L : B;
+                const effL = dims5p ? dims5p.widthMm : dims6p ? dims6p.widthMm : (isRot90or270 ? B : (count === 6 && shape === 'RECTANGULAR' ? 2 * s + 2 * eo : L));
+                const effB = dims5p ? dims5p.lengthMm : dims6p ? dims6p.lengthMm : (isRot90or270 ? (count === 6 && shape === 'RECTANGULAR' ? 2 * s + 2 * eo : L) : B);
                 const topY = cy - (effB / 2) * scale - 22;
                 const x1 = cx - (effL / 2) * scale;
                 const x2 = cx + (effL / 2) * scale;
                 const yEdge = cy - (effB / 2) * scale;
+                const topText = dims5p ? `5 SIDES × ${dims5p.facetDimMm}` : dims6p ? `6 SIDES × ${dims6p.facetDimMm}` : `${effL}`;
+                const boxW = dims5p || dims6p ? 88 : 36;
                 return (
                   <g>
                     <line x1={x1} y1={yEdge} x2={x1} y2={topY - 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
                     <line x1={x2} y1={yEdge} x2={x2} y2={topY - 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
                     <line x1={x1} y1={topY} x2={x2} y2={topY} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
-                    <rect x={cx - 18} y={topY - 7} width={36} height={10} fill="#ffffff" rx="2" />
+                    <rect x={cx - boxW / 2} y={topY - 7} width={boxW} height={10} fill="#ffffff" rx="2" />
                     <text x={cx} y={topY} fill="#dc2626" fontSize={8.5 * fs} fontWeight="bold" textAnchor="middle">
-                      {effL}
+                      {topText}
                     </text>
                   </g>
                 );
@@ -460,8 +488,8 @@ fontSize={7.5 * fs}
               {/* Right Height Dimension: B */}
               {(() => {
                 const isRot90or270 = rotDeg === 90 || rotDeg === 270;
-                const effL = isRot90or270 ? B : L;
-                const effB = isRot90or270 ? L : B;
+                const effL = dims5p ? dims5p.widthMm : dims6p ? dims6p.widthMm : (isRot90or270 ? B : (count === 6 && shape === 'RECTANGULAR' ? 2 * s + 2 * eo : L));
+                const effB = dims5p ? dims5p.lengthMm : dims6p ? dims6p.lengthMm : (isRot90or270 ? (count === 6 && shape === 'RECTANGULAR' ? 2 * s + 2 * eo : L) : B);
                 const rightX = cx + (effL / 2) * scale + 24;
                 const y1 = cy - (effB / 2) * scale;
                 const y2 = cy + (effB / 2) * scale;

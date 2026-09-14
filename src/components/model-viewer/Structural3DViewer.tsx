@@ -13,8 +13,11 @@ import { CombinedPileCapEngine, CombinedPileCapGroup } from '@/features/design/p
 import {
   determineCapOrientation,
   getTruncated3PilePolygonMm,
+  get5PilePolygonMm,
+  get6PilePolygonMm,
   getPileOffsetsMm,
   angleToOrientation,
+  rotatePoints2D,
 } from '@/features/design/pilecap/pileCapGeometryUtils';
 import { FoundationGeometryTrimming, FoundationCapFootprint } from '@/features/design/gradebeam/foundationGeometryTrimming';
 import { StaircaseDesignEngine } from '@/features/design/staircase/staircaseEngine';
@@ -1662,6 +1665,18 @@ const [showGrid, setShowGrid] = useState(true);
           if (capResult.pileCount === 3 || capResult.capShape === 'TRIANGULAR') {
             const offsetsMm = getPileOffsetsMm(3, capResult.pileSpacing, orientation);
             pileOffsets = offsetsMm.map((p) => ({ x: p.x / 1000, z: -p.y / 1000 }));
+          } else if (capResult.pileCount === 5 || capResult.capShape === 'PENTAGONAL') {
+            const rawOffsets = (capResult.pileOffsets && capResult.pileOffsets.length === 5)
+              ? capResult.pileOffsets
+              : getPileOffsetsMm(5, capResult.pileSpacing, 'UP');
+            const offsetsMm = rotDeg !== 0 ? rotatePoints2D(rawOffsets, rotDeg, { x: 0, y: 0 }, false) : rawOffsets;
+            pileOffsets = offsetsMm.map((p) => ({ x: p.x / 1000, z: -p.y / 1000 }));
+          } else if (capResult.capShape === 'HEXAGONAL' || (capResult.pileCount === 6 && capResult.capShape !== 'RECTANGULAR')) {
+            const rawOffsets = (capResult.pileOffsets && capResult.pileOffsets.length === 6 && capResult.capShape === 'HEXAGONAL')
+              ? capResult.pileOffsets
+              : getPileOffsetsMm(6, capResult.pileSpacing, 'UP', 'HEXAGONAL');
+            const offsetsMm = rotDeg !== 0 ? rotatePoints2D(rawOffsets, rotDeg, { x: 0, y: 0 }, false) : rawOffsets;
+            pileOffsets = offsetsMm.map((p) => ({ x: p.x / 1000, z: -p.y / 1000 }));
           } else if (capResult.pileOffsets && capResult.pileOffsets.length > 0) {
             pileOffsets = capResult.pileOffsets.map((p) => ({ x: p.x / 1000, z: -p.y / 1000 }));
           } else {
@@ -1695,19 +1710,33 @@ const [showGrid, setShowGrid] = useState(true);
               capEdges,
               isSelected ? edgeSelectedPileCapMaterial : edgePileCapMaterial
             );
-          } else if (capResult.pileCount === 5) {
-            const Rp = (capResult.pileSpacing / 1000) / (2 * Math.sin(Math.PI / 5));
-            const overhangM = (capResult.edgeDistance || 300) / 1000;
-            const R = Rp + overhangM;
-            const rotRad = (rotDeg * Math.PI) / 180;
+          } else if (capResult.pileCount === 5 || capResult.capShape === 'PENTAGONAL') {
+            const rawPolyMm = get5PilePolygonMm(capResult.pileSpacing, capResult.edgeDistance || 300, 'UP', 0);
+            const polyMm = rotDeg !== 0 ? rotatePoints2D(rawPolyMm, rotDeg, { x: 0, y: 0 }, false) : rawPolyMm;
             const shape = new THREE.Shape();
-            for (let i = 0; i < 5; i++) {
-              const angle = Math.PI / 2 + (2 * Math.PI * i) / 5 - rotRad;
-              const px = R * Math.cos(angle);
-              const py = R * Math.sin(angle);
-              if (i === 0) shape.moveTo(px, py);
-              else shape.lineTo(px, py);
-            }
+            polyMm.forEach((pt, idx) => {
+              if (idx === 0) shape.moveTo(pt.x / 1000, pt.y / 1000);
+              else shape.lineTo(pt.x / 1000, pt.y / 1000);
+            });
+            shape.closePath();
+            const capGeom = new THREE.ExtrudeGeometry(shape, { depth: capDepth, bevelEnabled: false });
+            capGeom.rotateX(-Math.PI / 2);
+            capGeom.translate(0, -capDepth, 0);
+
+            capMesh = new THREE.Mesh(capGeom, isSelected ? selectedPileCapMaterial : pileCapMaterial);
+            const capEdges = new THREE.EdgesGeometry(capGeom);
+            capLine = new THREE.LineSegments(
+              capEdges,
+              isSelected ? edgeSelectedPileCapMaterial : edgePileCapMaterial
+            );
+          } else if (capResult.capShape === 'HEXAGONAL' || (capResult.pileCount === 6 && capResult.capShape !== 'RECTANGULAR')) {
+            const rawPolyMm = get6PilePolygonMm(capResult.pileSpacing, capResult.edgeDistance || 300, 'UP', 0);
+            const polyMm = rotDeg !== 0 ? rotatePoints2D(rawPolyMm, rotDeg, { x: 0, y: 0 }, false) : rawPolyMm;
+            const shape = new THREE.Shape();
+            polyMm.forEach((pt, idx) => {
+              if (idx === 0) shape.moveTo(pt.x / 1000, pt.y / 1000);
+              else shape.lineTo(pt.x / 1000, pt.y / 1000);
+            });
             shape.closePath();
             const capGeom = new THREE.ExtrudeGeometry(shape, { depth: capDepth, bevelEnabled: false });
             capGeom.rotateX(-Math.PI / 2);

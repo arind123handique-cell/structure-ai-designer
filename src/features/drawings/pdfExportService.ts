@@ -5,8 +5,14 @@ import { PileCapDesignOutput } from '@/features/design/pilecap/pileCapDesignEngi
 import {
   determineCapOrientation,
   get3PileDimensionsMm,
+  get5PilePolygonMm,
+  get5PileDimensionsMm,
+  get6PilePolygonMm,
+  get6PileDimensionsMm,
   getPileOffsetsMm,
   getTruncated3PilePolygonMm,
+  rotatePoints2D,
+  angleToOrientation,
 } from '@/features/design/pilecap/pileCapGeometryUtils';
 
 /**
@@ -102,7 +108,7 @@ function computeUniquePileCapTypes(floorPlan: FloorPlanLevel): UniquePileCapType
     }
     const cap = col.pileCap;
     const count = cap.pileCount;
-    const shape = cap.capShape || (count === 3 ? 'TRIANGULAR' : count === 5 ? 'PENTAGONAL' : 'RECTANGULAR');
+    const shape = cap.capShape || (count === 3 ? 'TRIANGULAR' : count === 5 ? 'PENTAGONAL' : count === 6 ? 'HEXAGONAL' : 'RECTANGULAR');
     const key = `${count}_${shape}`;
 
     if (!typeMap.has(key)) {
@@ -115,19 +121,26 @@ function computeUniquePileCapTypes(floorPlan: FloorPlanLevel): UniquePileCapType
       let B = cap.capWidth;
       let facetDim: number | undefined = undefined;
 
-      if (count === 3) {
+      if (count === 3 || shape === 'TRIANGULAR') {
         const dims3p = get3PileDimensionsMm(s, eo);
         L = cap.capLength || dims3p.lengthMm;
         B = cap.capWidth || dims3p.widthMm;
-      } else if (count === 5) {
-        L = cap.capLength || 2316;
-        B = cap.capWidth || 2399;
-        const Rp = s / (2 * Math.sin(Math.PI / 5));
-        const Rcap = Rp + eo;
-        facetDim = Math.round(2 * Rcap * Math.sin(Math.PI / 5));
+      } else if (count === 5 || shape === 'PENTAGONAL') {
+        const dims5p = get5PileDimensionsMm(s, eo);
+        L = cap.capLength || dims5p.widthMm;
+        B = cap.capWidth || dims5p.lengthMm;
+        facetDim = dims5p.facetDimMm;
+      } else if (count === 6 && shape === 'HEXAGONAL') {
+        const dims6p = get6PileDimensionsMm(s, eo);
+        L = cap.capLength || dims6p.widthMm;
+        B = cap.capWidth || dims6p.lengthMm;
+        facetDim = dims6p.facetDimMm;
       } else if (count === 2) {
         L = cap.capLength || s + 2 * eo;
         B = cap.capWidth || Dp + 2 * eo;
+      } else if (count === 6 && shape === 'RECTANGULAR') {
+        L = cap.capLength || 2 * s + 2 * eo;
+        B = cap.capWidth || s + 2 * eo;
       } else {
         L = cap.capLength || s + 2 * eo;
         B = cap.capWidth || s + 2 * eo;
@@ -135,7 +148,7 @@ function computeUniquePileCapTypes(floorPlan: FloorPlanLevel): UniquePileCapType
 
       typeMap.set(key, {
         typeId: `TYPE-${secNum}`,
-        typeName: count === 3 ? '3-PILE TRUNCATED TRAPEZOIDAL' : `${count}-PILE ${shape}`,
+        typeName: count === 3 ? '3-PILE TRUNCATED TRAPEZOIDAL' : count === 5 ? '5-PILE REGULAR PENTAGONAL' : (count === 6 && shape === 'HEXAGONAL') ? '6-PILE REGULAR HEXAGONAL' : `${count}-PILE ${shape}`,
         cap,
         representativeColumn: col,
         associatedColumns: [col.label],
@@ -637,7 +650,8 @@ export class PdfExportService {
           );
           if (isAbsorbedInCombined) return;
           const count = cap.pileCount;
-          const shape = cap.capShape || (count === 3 ? 'TRIANGULAR' : count === 5 ? 'PENTAGONAL' : 'RECTANGULAR');
+          const shape = cap.capShape || (count === 3 ? 'TRIANGULAR' : count === 5 ? 'PENTAGONAL' : count === 6 ? 'HEXAGONAL' : 'RECTANGULAR');
+          const rotDeg = ((cap.rotationAngle ?? (project?.customPileCapOverrides as any)?.[col.nodeId]?.rotationAngle ?? 0) % 360 + 360) % 360;
 
           doc.setFillColor(30, 27, 75);
           doc.setDrawColor(129, 140, 248);
@@ -645,47 +659,45 @@ export class PdfExportService {
 
           const orientation = determineCapOrientation(col.x, col.z, bounds);
 
-          const offsets = count === 3
-            ? getPileOffsetsMm(3, cap.pileSpacing, orientation)
-            : (cap.pileOffsets || getPileOffsetsMm(count, cap.pileSpacing));
-
-          const pileXs = offsets.map((p) => p.x);
-          const pileYs = offsets.map((p) => (p.y !== undefined ? p.y : (p as any).z || 0));
-          const spanX = pileXs.length > 1 ? Math.max(...pileXs) - Math.min(...pileXs) : 0;
-          const spanY = pileYs.length > 1 ? Math.max(...pileYs) - Math.min(...pileYs) : 0;
-
-          const maxDim = Math.max(cap.capLength, cap.capWidth);
-          const minDim = Math.min(cap.capLength, cap.capWidth);
-          const effDimX = spanX >= spanY ? maxDim : minDim;
-          const effDimY = spanX >= spanY ? minDim : maxDim;
-          const capL = (effDimX / 1000) * scale;
-          const capW = (effDimY / 1000) * scale;
-
+          let offsets: { x: number; y: number }[];
           if (shape === 'TRIANGULAR' || count === 3) {
-            const polyMm = getTruncated3PilePolygonMm(cap.pileSpacing, cap.edgeDistance, orientation);
+            const orient = rotDeg !== 0 ? angleToOrientation(rotDeg) : orientation;
+            offsets = getPileOffsetsMm(3, cap.pileSpacing, orient);
+            const polyMm = getTruncated3PilePolygonMm(cap.pileSpacing, cap.edgeDistance, orient);
             const pts: [number, number][] = polyMm.map((p) => [cx + (p.x / 1000) * scale, cy - (p.y / 1000) * scale]);
             const lines: [number, number][] = pts.slice(1).map((pt, i) => [pt[0] - pts[i][0], pt[1] - pts[i][1]]);
             doc.lines(lines, pts[0][0], pts[0][1], [1, 1], 'FD', true);
-          } else if (shape === 'PENTAGONAL') {
-            const Rp = (cap.pileSpacing / (2 * Math.sin(Math.PI / 5)) / 1000) * scale;
-            const Rcap = Rp + (cap.edgeDistance / 1000) * scale;
-            const cos18 = Math.cos(Math.PI / 10);
-            const sin18 = Math.sin(Math.PI / 10);
-            const sin36 = Math.sin(Math.PI / 5);
-            const cos36 = Math.cos(Math.PI / 5);
-            const p1 = [cx, cy - Rcap];
-            const p2 = [cx - Rcap * cos18, cy - Rcap * sin18];
-            const p3 = [cx - Rcap * sin36, cy + Rcap * cos36];
-            const p4 = [cx + Rcap * sin36, cy + Rcap * cos36];
-            const p5 = [cx + Rcap * cos18, cy - Rcap * sin18];
-            const polyLines: [number, number][] = [
-              [p2[0] - p1[0], p2[1] - p1[1]],
-              [p3[0] - p2[0], p3[1] - p2[1]],
-              [p4[0] - p3[0], p4[1] - p3[1]],
-              [p5[0] - p4[0], p5[1] - p4[1]],
-            ];
-            doc.lines(polyLines, p1[0], p1[1], [1, 1], 'FD', true);
+          } else if (shape === 'PENTAGONAL' || count === 5) {
+            const rawPolyMm = get5PilePolygonMm(cap.pileSpacing, cap.edgeDistance, 'UP', 0);
+            const polyMm = rotDeg !== 0 ? rotatePoints2D(rawPolyMm, rotDeg, { x: 0, y: 0 }, false) : rawPolyMm;
+            const pts: [number, number][] = polyMm.map((p) => [cx + (p.x / 1000) * scale, cy - (p.y / 1000) * scale]);
+            const lines: [number, number][] = pts.slice(1).map((pt, i) => [pt[0] - pts[i][0], pt[1] - pts[i][1]]);
+            doc.lines(lines, pts[0][0], pts[0][1], [1, 1], 'FD', true);
+
+            const rawOffsets = (cap.pileOffsets && cap.pileOffsets.length === 5) ? cap.pileOffsets : getPileOffsetsMm(5, cap.pileSpacing, 'UP');
+            offsets = rotDeg !== 0 ? rotatePoints2D(rawOffsets, rotDeg, { x: 0, y: 0 }, false) : rawOffsets;
+          } else if (shape === 'HEXAGONAL' || (count === 6 && shape !== 'RECTANGULAR')) {
+            const rawPolyMm = get6PilePolygonMm(cap.pileSpacing, cap.edgeDistance, 'UP', 0);
+            const polyMm = rotDeg !== 0 ? rotatePoints2D(rawPolyMm, rotDeg, { x: 0, y: 0 }, false) : rawPolyMm;
+            const pts: [number, number][] = polyMm.map((p) => [cx + (p.x / 1000) * scale, cy - (p.y / 1000) * scale]);
+            const lines: [number, number][] = pts.slice(1).map((pt, i) => [pt[0] - pts[i][0], pt[1] - pts[i][1]]);
+            doc.lines(lines, pts[0][0], pts[0][1], [1, 1], 'FD', true);
+
+            const rawOffsets = (cap.pileOffsets && cap.pileOffsets.length === 6 && cap.capShape === 'HEXAGONAL') ? cap.pileOffsets : getPileOffsetsMm(6, cap.pileSpacing, 'UP', 'HEXAGONAL');
+            offsets = rotDeg !== 0 ? rotatePoints2D(rawOffsets, rotDeg, { x: 0, y: 0 }, false) : rawOffsets;
           } else {
+            offsets = cap.pileOffsets || getPileOffsetsMm(count, cap.pileSpacing);
+            const pileXs = offsets.map((p) => p.x);
+            const pileYs = offsets.map((p) => (p.y !== undefined ? p.y : (p as any).z || 0));
+            const spanX = pileXs.length > 1 ? Math.max(...pileXs) - Math.min(...pileXs) : 0;
+            const spanY = pileYs.length > 1 ? Math.max(...pileYs) - Math.min(...pileYs) : 0;
+
+            const maxDim = Math.max(cap.capLength, cap.capWidth);
+            const minDim = Math.min(cap.capLength, cap.capWidth);
+            const effDimX = spanX >= spanY ? maxDim : minDim;
+            const effDimY = spanX >= spanY ? minDim : maxDim;
+            const capL = (effDimX / 1000) * scale;
+            const capW = (effDimY / 1000) * scale;
             doc.rect(cx - capL / 2, cy - capW / 2, capL, capW, 'FD');
           }
 
@@ -700,7 +712,9 @@ export class PdfExportService {
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(6);
             doc.setTextColor(165, 180, 252);
-            doc.text(`PC${Math.max(1, count - 1)} (${count}P)`, cx, cy - capW / 2 - 1.5, { align: 'center' });
+            const capLabelH = ((cap.capWidth || 2000) / 2000) * scale;
+            const pcText = `PC${Math.max(1, count - 1)} (${count}P)${rotDeg !== 0 ? ` (${rotDeg}°)` : ''}`;
+            doc.text(pcText, cx, cy - capLabelH - 1.5, { align: 'center' });
           }
         });
       }
@@ -1178,7 +1192,7 @@ export class PdfExportService {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(6.5);
         doc.setTextColor(79, 70, 229);
-        const title = `${item.typeId}: ${item.typeName} (${item.shape === 'PENTAGONAL' ? (item.facetDim || 1461) + 'mm x 5 Sides' : `${item.L}x${item.B}`} x ${item.D} mm) - ${item.sectionLabel} · ${item.associatedColumns.join(', ')}`;
+        const title = `${item.typeId}: ${item.typeName} (${item.shape === 'PENTAGONAL' ? (item.facetDim || 1461) + 'mm x 5 Sides' : item.shape === 'HEXAGONAL' ? (item.facetDim || 2077) + 'mm x 6 Sides' : `${item.L}x${item.B}`} x ${item.D} mm) - ${item.sectionLabel} · ${item.associatedColumns.join(', ')}`;
         doc.text(title.substring(0, 78), pBoxX + 4, subBoxY + 4);
 
         const plCx = pBoxX + 32;
@@ -1200,30 +1214,21 @@ export class PdfExportService {
         // PCC
         doc.setDrawColor(37, 99, 235);
         doc.setLineWidth(0.35);
-        if (item.count === 3) {
+        if (item.count === 3 || item.shape === 'TRIANGULAR') {
           const polyMm = getTruncated3PilePolygonMm(item.s, item.eo + 150, 'UP');
           const pts: [number, number][] = polyMm.map((p) => [plCx + p.x * dScale, plCy - p.y * dScale]);
           const lines: [number, number][] = pts.slice(1).map((pt, i) => [pt[0] - pts[i][0], pt[1] - pts[i][1]]);
           doc.lines(lines, pts[0][0], pts[0][1], [1, 1], 'S', true);
-        } else if (item.shape === 'PENTAGONAL') {
-          const Rp = (item.s * dScale) / (2 * Math.sin(Math.PI / 5));
-          const Rcap = Rp + (item.eo + 150) * dScale;
-          const cos18 = Math.cos(Math.PI / 10);
-          const sin18 = Math.sin(Math.PI / 10);
-          const sin36 = Math.sin(Math.PI / 5);
-          const cos36 = Math.cos(Math.PI / 5);
-          const p1 = [plCx, plCy - Rcap];
-          const p2 = [plCx - Rcap * cos18, plCy - Rcap * sin18];
-          const p3 = [plCx - Rcap * sin36, plCy + Rcap * cos36];
-          const p4 = [plCx + Rcap * sin36, plCy + Rcap * cos36];
-          const p5 = [plCx + Rcap * cos18, plCy - Rcap * sin18];
-          const polyLines: [number, number][] = [
-            [p2[0] - p1[0], p2[1] - p1[1]],
-            [p3[0] - p2[0], p3[1] - p2[1]],
-            [p4[0] - p3[0], p4[1] - p3[1]],
-            [p5[0] - p4[0], p5[1] - p4[1]],
-          ];
-          doc.lines(polyLines, p1[0], p1[1], [1, 1], 'S', true);
+        } else if (item.shape === 'PENTAGONAL' || item.count === 5) {
+          const polyMm = get5PilePolygonMm(item.s, item.eo + 150, 'UP', 0);
+          const pts: [number, number][] = polyMm.map((p) => [plCx + p.x * dScale, plCy - p.y * dScale]);
+          const lines: [number, number][] = pts.slice(1).map((pt, i) => [pt[0] - pts[i][0], pt[1] - pts[i][1]]);
+          doc.lines(lines, pts[0][0], pts[0][1], [1, 1], 'S', true);
+        } else if (item.shape === 'HEXAGONAL' || (item.count === 6 && item.shape !== 'RECTANGULAR')) {
+          const polyMm = get6PilePolygonMm(item.s, item.eo + 150, 'UP', 0);
+          const pts: [number, number][] = polyMm.map((p) => [plCx + p.x * dScale, plCy - p.y * dScale]);
+          const lines: [number, number][] = pts.slice(1).map((pt, i) => [pt[0] - pts[i][0], pt[1] - pts[i][1]]);
+          doc.lines(lines, pts[0][0], pts[0][1], [1, 1], 'S', true);
         } else if (item.shape === 'COMBINED') {
           // Combined mat: rect + PCC
           doc.rect(plCx - ((item.L + 300) * dScale) / 2, plCy - ((item.B + 300) * dScale) / 2, (item.L + 300) * dScale, (item.B + 300) * dScale, 'S');
@@ -1235,37 +1240,32 @@ export class PdfExportService {
         doc.setFillColor(item.shape === 'COMBINED' ? 240 : 253, item.shape === 'COMBINED' ? 253 : 244, item.shape === 'COMBINED' ? 244 : 255);
         doc.setDrawColor(item.shape === 'COMBINED' ? 244 : 192, item.shape === 'COMBINED' ? 63 : 38, item.shape === 'COMBINED' ? 94 : 211);
         doc.setLineWidth(0.6);
-        if (item.count === 3) {
+        if (item.count === 3 || item.shape === 'TRIANGULAR') {
           const polyMm = getTruncated3PilePolygonMm(item.s, item.eo, 'UP');
           const pts: [number, number][] = polyMm.map((p) => [plCx + p.x * dScale, plCy - p.y * dScale]);
           const lines: [number, number][] = pts.slice(1).map((pt, i) => [pt[0] - pts[i][0], pt[1] - pts[i][1]]);
           doc.lines(lines, pts[0][0], pts[0][1], [1, 1], 'FD', true);
-        } else if (item.shape === 'PENTAGONAL') {
-          const Rp = (item.s * dScale) / (2 * Math.sin(Math.PI / 5));
-          const Rcap = Rp + item.eo * dScale;
-          const cos18 = Math.cos(Math.PI / 10);
-          const sin18 = Math.sin(Math.PI / 10);
-          const sin36 = Math.sin(Math.PI / 5);
-          const cos36 = Math.cos(Math.PI / 5);
-          const p1 = [plCx, plCy - Rcap];
-          const p2 = [plCx - Rcap * cos18, plCy - Rcap * sin18];
-          const p3 = [plCx - Rcap * sin36, plCy + Rcap * cos36];
-          const p4 = [plCx + Rcap * sin36, plCy + Rcap * cos36];
-          const p5 = [plCx + Rcap * cos18, plCy - Rcap * sin18];
-          const polyLines: [number, number][] = [
-            [p2[0] - p1[0], p2[1] - p1[1]],
-            [p3[0] - p2[0], p3[1] - p2[1]],
-            [p4[0] - p3[0], p4[1] - p3[1]],
-            [p5[0] - p4[0], p5[1] - p4[1]],
-          ];
-          doc.lines(polyLines, p1[0], p1[1], [1, 1], 'FD', true);
+        } else if (item.shape === 'PENTAGONAL' || item.count === 5) {
+          const polyMm = get5PilePolygonMm(item.s, item.eo, 'UP', 0);
+          const pts: [number, number][] = polyMm.map((p) => [plCx + p.x * dScale, plCy - p.y * dScale]);
+          const lines: [number, number][] = pts.slice(1).map((pt, i) => [pt[0] - pts[i][0], pt[1] - pts[i][1]]);
+          doc.lines(lines, pts[0][0], pts[0][1], [1, 1], 'FD', true);
+        } else if (item.shape === 'HEXAGONAL' || (item.count === 6 && item.shape !== 'RECTANGULAR')) {
+          const polyMm = get6PilePolygonMm(item.s, item.eo, 'UP', 0);
+          const pts: [number, number][] = polyMm.map((p) => [plCx + p.x * dScale, plCy - p.y * dScale]);
+          const lines: [number, number][] = pts.slice(1).map((pt, i) => [pt[0] - pts[i][0], pt[1] - pts[i][1]]);
+          doc.lines(lines, pts[0][0], pts[0][1], [1, 1], 'FD', true);
         } else {
           doc.rect(plCx - planW_mm / 2, plCy - planH_mm / 2, planW_mm, planH_mm, 'FD');
         }
 
         // Piles
-        const pileOffsets = item.count === 3
+        const pileOffsets = (item.count === 3 || item.shape === 'TRIANGULAR')
           ? getPileOffsetsMm(3, item.s, 'UP')
+          : (item.shape === 'PENTAGONAL' || item.count === 5)
+          ? getPileOffsetsMm(5, item.s, 'UP')
+          : (item.shape === 'HEXAGONAL' || (item.count === 6 && item.shape !== 'RECTANGULAR'))
+          ? getPileOffsetsMm(6, item.s, 'UP', 'HEXAGONAL')
           : item.shape === 'COMBINED' && item.pileOffsets
           ? item.pileOffsets
           : ((item as any).cap?.pileOffsets || getPileOffsetsMm(item.count, item.s, 'UP'));
@@ -1317,6 +1317,16 @@ export class PdfExportService {
           doc.line(plCx + planW_mm / 2, plCy + planH_mm / 2, rDimX + 1, plCy + planH_mm / 2);
           doc.setLineDashPattern([], 0);
           drawVertDim(rDimX, plCy - planH_mm / 2, plCy + planH_mm / 2, `${item.B}`);
+        } else if (item.shape === 'PENTAGONAL' || item.count === 5) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(4.5);
+          doc.setTextColor(220, 38, 38);
+          doc.text(`5 SIDES x ${item.facetDim || 1461} mm`, plCx, plCy - planH_mm / 2 - 2, { align: 'center' });
+        } else if (item.shape === 'HEXAGONAL' || (item.count === 6 && item.shape !== 'RECTANGULAR')) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(4.5);
+          doc.setTextColor(220, 38, 38);
+          doc.text(`6 SIDES x ${item.facetDim || 2077} mm`, plCx, plCy - planH_mm / 2 - 2, { align: 'center' });
         } else {
           doc.setFont('helvetica', 'bold');
           doc.setFontSize(4.5);
