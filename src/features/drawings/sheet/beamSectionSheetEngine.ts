@@ -406,9 +406,9 @@ export class BeamSectionSheetEngine {
   }
 
   /**
-   * Builds the reinforcement zones along the span. When ductile detailing
-   * requires closer hoops than the shear design, the beam gets the three-zone
-   * support / mid-span / support split; otherwise it is a single uniform zone.
+   * Builds the reinforcement zones along the span.
+   * Uses L/4 support zones and L/2 midspan zone per standard detailing practice.
+   * IS 13920 Cl. 6.3.5 — 2d confinement zone at each support (minimum).
    */
   private static computeZones(
     spanM: number,
@@ -419,36 +419,39 @@ export class BeamSectionSheetEngine {
     ctx: { ductility?: any; curtailment?: any; effectiveDepth?: number }
   ): BeamZone[] {
     const L = Math.round(spanM * 1000);
-    let supZone = 0;
 
-    // IS 13920 Cl. 6.3.5 — 2d confinement zone at each support.
+    // L/4 for support zones (confinement zones)
+    const lBy4 = Math.round(L / 4);
+
+    // IS 13920 Cl. 6.3.5 — 2d confinement zone at each support (minimum)
+    let confinementLen = 0;
     if (ctx.ductility?.confinementZoneLength) {
-      supZone = Math.round(ctx.ductility.confinementZoneLength);
+      confinementLen = Math.round(ctx.ductility.confinementZoneLength);
     } else if (spacingSupport < spacingMid) {
-      supZone = Math.round(ctx.effectiveDepth ? 2 * ctx.effectiveDepth : L * 0.18);
+      confinementLen = Math.round(ctx.effectiveDepth ? 2 * ctx.effectiveDepth : L * 0.18);
     }
-    const cutoffMm = ctx.curtailment?.extraTopSupport?.cutoffLength
-      ? Math.round(ctx.curtailment.extraTopSupport.cutoffLength * 1000)
-      : 0;
-    supZone = Math.max(supZone, cutoffMm);
 
-    const makeZone = (start: number, end: number, spacing: number): BeamZone => ({
+    // Use L/4 as support zone, but at least 2d if ductile
+    const supZone = Math.max(lBy4, confinementLen);
+
+    const makeZone = (start: number, end: number, spacing: number, label: string): BeamZone => ({
       startMm: start,
       endMm: end,
-      label: `${mark} (LOC: ${start} TO ${end})`,
+      label,
       spacing,
       stirrupCount: Math.ceil((end - start) / spacing) + 1,
       stirrupDia,
     });
 
-    if (supZone <= 0 || supZone * 2 >= L) {
-      return [makeZone(0, L, Math.min(spacingSupport, spacingMid))];
+    if (supZone * 2 >= L) {
+      return [makeZone(0, L, Math.min(spacingSupport, spacingMid), `${mark} (LOC: 0 TO ${L})`)];
     }
 
+    const midEnd = L - supZone;
     return [
-      makeZone(0, supZone, spacingSupport),
-      makeZone(supZone, L - supZone, spacingMid),
-      makeZone(L - supZone, L, spacingSupport),
+      makeZone(0, supZone, spacingSupport, `${mark} SUPPORT ZONE (0 TO ${supZone})`),
+      makeZone(supZone, midEnd, spacingMid, `${mark} MIDSPAN ZONE (${supZone} TO ${midEnd})`),
+      makeZone(midEnd, L, spacingSupport, `${mark} SUPPORT ZONE (${midEnd} TO ${L})`),
     ];
   }
 
@@ -1206,6 +1209,24 @@ export class BeamSectionSheetEngine {
       // Span center-to-center dimension
       const spanDimText = String(spanMm);
       allText.push({ x: (xStart + xEnd) / 2, y: yTop + 1650, w: spanDimText.length * 50 + 60, h: TEXT_H.DIM - 20, text: spanDimText, layer: LAYER_DIMENSION.name, fontSize: TEXT_H.DIM - 20, bold: false, dimLine: { x1: xStart, x2: xEnd, y: yTop + 1650 } });
+
+      // L/4 and L/2 zone dimension markers (below stirrup callouts)
+      const Lmm = spanMm; // center-to-center span in mm
+      if (design.zones.length >= 3) {
+        const z0End = design.zones[0].endMm;
+        const z1End = design.zones[0].endMm + design.zones[1].endMm - design.zones[1].startMm;
+        const lBy4 = z0End; // L/4 boundary
+        const threeLBy4 = Lmm - z0End; // 3L/4 boundary
+        // L/4 dimension (left support zone)
+        const lBy4X = xStart + (lBy4 / Lmm) * (xEnd - xStart);
+        allText.push({ x: (xStart + lBy4X) / 2, y: yBot - 1850, w: 200, h: TEXT_H.CALLOUT - 40, text: 'L/4', layer: LAYER_DIMENSION.name, fontSize: TEXT_H.CALLOUT - 60, bold: false, dimLine: { x1: xStart, x2: lBy4X, y: yBot - 1850 } });
+        // L/2 dimension (midspan zone)
+        const lBy2X = xStart + ((Lmm / 2) / Lmm) * (xEnd - xStart);
+        allText.push({ x: lBy2X, y: yBot - 1850, w: 200, h: TEXT_H.CALLOUT - 40, text: 'L/2', layer: LAYER_DIMENSION.name, fontSize: TEXT_H.CALLOUT - 60, bold: false, dimLine: { x1: lBy4X, x2: xEnd - (lBy4 / Lmm) * (xEnd - xStart), y: yBot - 1850 } });
+        // L/4 dimension (right support zone)
+        const rLBy4X = xEnd - (lBy4 / Lmm) * (xEnd - xStart);
+        allText.push({ x: (rLBy4X + xEnd) / 2, y: yBot - 1850, w: 200, h: TEXT_H.CALLOUT - 40, text: 'L/4', layer: LAYER_DIMENSION.name, fontSize: TEXT_H.CALLOUT - 60, bold: false, dimLine: { x1: rLBy4X, x2: xEnd, y: yBot - 1850 } });
+      }
 
       // Beam Mark & Size below span
       const availW = spanUnits - 80;
