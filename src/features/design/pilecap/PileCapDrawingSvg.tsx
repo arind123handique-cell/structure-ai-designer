@@ -7,6 +7,7 @@ import {
   renderQuarteredPileSvg,
   getSectionRebarPaths,
   getPileOffsetsMm,
+  angleToOrientation,
 } from './pileCapGeometryUtils';
 
 interface PileCapDrawingSvgProps {
@@ -32,6 +33,9 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
   const eo = pileCap.edgeDistance || Dp;
   const pccThk = 150; // 150mm THK PCC Bedding
 
+  const rotDeg = pileCap.rotationAngle || 0;
+  const effOrientation: CapOrientation = rotDeg !== 0 ? angleToOrientation(rotDeg) : orientation;
+
   // Center of Plan View SVG
   const cx = 175;
   const cy = 165;
@@ -50,7 +54,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
   // Scaled Pile Positions in Plan
   const getScaledPileOffsets = () => {
     if (count === 3) {
-      const offsets = getPileOffsetsMm(3, s, orientation);
+      const offsets = getPileOffsetsMm(3, s, effOrientation);
       return offsets.map((p) => ({
         px: cx + p.x * scale,
         py: cy - p.y * scale,
@@ -64,7 +68,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
       }));
     }
 
-    const defaultOffsets = getPileOffsetsMm(count, s, orientation);
+    const defaultOffsets = getPileOffsetsMm(count, s, effOrientation);
     return defaultOffsets.map((p) => ({
       px: cx + p.x * scale,
       py: cy - p.y * scale,
@@ -76,29 +80,31 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
   // Compute Outer Polygon Points for Plan
   const getCapPolygonPoints = (extraOffsetMm = 0) => {
     if (count === 3 || shape === 'TRIANGULAR') {
-      const pts = getTruncated3PilePolygonMm(s, eo, orientation, extraOffsetMm);
+      const pts = getTruncated3PilePolygonMm(s, eo, effOrientation, extraOffsetMm);
       return pts.map((p) => `${cx + p.x * scale},${cy - p.y * scale}`).join(' ');
     }
 
     if (count === 5 || shape === 'PENTAGONAL') {
       const Rp = s / (2 * Math.sin(Math.PI / 5));
       const Rcap = (Rp + eo + extraOffsetMm) * scale;
-      const cos18 = Math.cos(Math.PI / 10);
-      const sin18 = Math.sin(Math.PI / 10);
-      const sin36 = Math.sin(Math.PI / 5);
-      const cos36 = Math.cos(Math.PI / 5);
-
-      const p1 = `${cx},${cy - Rcap}`;
-      const p2 = `${cx - Rcap * cos18},${cy - Rcap * sin18}`;
-      const p3 = `${cx - Rcap * sin36},${cy + Rcap * cos36}`;
-      const p4 = `${cx + Rcap * sin36},${cy + Rcap * cos36}`;
-      const p5 = `${cx + Rcap * cos18},${cy - Rcap * sin18}`;
-      return `${p1} ${p2} ${p3} ${p4} ${p5}`;
+      const rotRad = (rotDeg * Math.PI) / 180;
+      const pts: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        // In SVG (Y down): -PI/2 is top (North). Clockwise rotation adds rotRad.
+        const angle = -Math.PI / 2 + (2 * Math.PI * i) / 5 + rotRad;
+        const px = cx + Rcap * Math.cos(angle);
+        const py = cy + Rcap * Math.sin(angle);
+        pts.push(`${px},${py}`);
+      }
+      return pts.join(' ');
     }
 
     // Rectangular / Square (2-pile, 4-pile, 6-pile)
-    const curL = count === 2 ? s + 2 * (eo + extraOffsetMm) : L + 2 * extraOffsetMm;
-    const curB = count === 2 ? Dp + 2 * (eo + extraOffsetMm) : B + 2 * extraOffsetMm;
+    const isRot90or270 = rotDeg === 90 || rotDeg === 270;
+    const baseL = count === 2 ? s + 2 * (eo + extraOffsetMm) : L + 2 * extraOffsetMm;
+    const baseB = count === 2 ? Dp + 2 * (eo + extraOffsetMm) : B + 2 * extraOffsetMm;
+    const curL = isRot90or270 ? baseB : baseL;
+    const curB = isRot90or270 ? baseL : baseB;
     const halfW = (curL / 2) * scale;
     const halfH = (curB / 2) * scale;
     return `${cx - halfW},${cy - halfH} ${cx + halfW},${cy - halfH} ${cx + halfW},${cy + halfH} ${cx - halfW},${cy + halfH}`;
@@ -424,10 +430,13 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
             <g>
               {/* Top Width Dimension: L */}
               {(() => {
-                const topY = cy - (B / 2) * scale - 22;
-                const x1 = cx - (L / 2) * scale;
-                const x2 = cx + (L / 2) * scale;
-                const yEdge = cy - (B / 2) * scale;
+                const isRot90or270 = rotDeg === 90 || rotDeg === 270;
+                const effL = isRot90or270 ? B : L;
+                const effB = isRot90or270 ? L : B;
+                const topY = cy - (effB / 2) * scale - 22;
+                const x1 = cx - (effL / 2) * scale;
+                const x2 = cx + (effL / 2) * scale;
+                const yEdge = cy - (effB / 2) * scale;
                 return (
                   <g>
                     <line x1={x1} y1={yEdge} x2={x1} y2={topY - 4} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
@@ -435,7 +444,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
                     <line x1={x1} y1={topY} x2={x2} y2={topY} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
                     <rect x={cx - 18} y={topY - 7} width={36} height={10} fill="#ffffff" rx="2" />
                     <text x={cx} y={topY} fill="#dc2626" fontSize="8.5" fontWeight="bold" textAnchor="middle">
-                      {L}
+                      {effL}
                     </text>
                   </g>
                 );
@@ -443,10 +452,13 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
 
               {/* Right Height Dimension: B */}
               {(() => {
-                const rightX = cx + (L / 2) * scale + 24;
-                const y1 = cy - (B / 2) * scale;
-                const y2 = cy + (B / 2) * scale;
-                const xEdge = cx + (L / 2) * scale;
+                const isRot90or270 = rotDeg === 90 || rotDeg === 270;
+                const effL = isRot90or270 ? B : L;
+                const effB = isRot90or270 ? L : B;
+                const rightX = cx + (effL / 2) * scale + 24;
+                const y1 = cy - (effB / 2) * scale;
+                const y2 = cy + (effB / 2) * scale;
+                const xEdge = cx + (effL / 2) * scale;
                 return (
                   <g>
                     <line x1={xEdge} y1={y1} x2={rightX + 4} y2={y1} stroke="#dc2626" strokeWidth="0.5" strokeDasharray="1,1" />
@@ -454,7 +466,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
                     <line x1={rightX} y1={y1} x2={rightX} y2={y2} stroke="#dc2626" strokeWidth="0.9" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
                     <rect x={rightX - 16} y={cy - 5} width={32} height={10} fill="#ffffff" rx="2" />
                     <text x={rightX} y={cy + 2.5} fill="#dc2626" fontSize="8.5" fontWeight="bold" textAnchor="middle">
-                      {B}
+                      {effB}
                     </text>
                   </g>
                 );
@@ -462,11 +474,14 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
 
               {/* Bottom Internal Spacing Chain: eo | s | eo */}
               {(() => {
-                const btmY = cy + (B / 2) * scale + 20;
-                const x1 = cx - (L / 2) * scale;
+                const isRot90or270 = rotDeg === 90 || rotDeg === 270;
+                const effL = isRot90or270 ? B : L;
+                const effB = isRot90or270 ? L : B;
+                const btmY = cy + (effB / 2) * scale + 20;
+                const x1 = cx - (effL / 2) * scale;
                 const xP1 = cx - (s / 2) * scale;
                 const xP2 = cx + (s / 2) * scale;
-                const x2 = cx + (L / 2) * scale;
+                const x2 = cx + (effL / 2) * scale;
                 return (
                   <g>
                     <line x1={x1} y1={btmY} x2={xP1} y2={btmY} stroke="#dc2626" strokeWidth="0.8" markerStart="url(#cad-arrow-start)" markerEnd="url(#cad-arrow)" />
@@ -506,7 +521,7 @@ export const PileCapDrawingSvg: React.FC<PileCapDrawingSvgProps> = ({
 
           {/* Plan View Title */}
           <text x={cx} y="375" fill="#0284c7" fontSize="11" fontWeight="bold" textAnchor="middle">
-            PILE CAP PC{pileCap.supportNodeId} - PLAN
+            PILE CAP PC{pileCap.supportNodeId} - PLAN{rotDeg !== 0 ? ` (${rotDeg}°)` : ''}
           </text>
           <text x={cx} y="390" fill="#0284c7" fontSize="8.5" textAnchor="middle">
             (SCALE 1:50)

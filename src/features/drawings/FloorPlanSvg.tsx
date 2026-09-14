@@ -13,8 +13,11 @@ import {
   getSectionRebarPaths,
   getPileOffsetsMm,
   determineCapOrientation,
+  rotatePoint2D,
+  rotatePoints2D,
+  angleToOrientation,
 } from '@/features/design/pilecap/pileCapGeometryUtils';
-import { Footprints, Move, RotateCw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Footprints, Move, RotateCw, RotateCcw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface FloorPlanSvgProps {
   floorPlan: FloorPlanLevel;
@@ -44,6 +47,10 @@ interface FloorPlanSvgProps {
   cadTheme?: 'AUTOCAD_WHITE' | 'BLUEPRINT_DARK';
   onCadThemeChange?: (theme: 'AUTOCAD_WHITE' | 'BLUEPRINT_DARK') => void;
   fitScreen?: boolean;
+  selectedPileCapNodeId?: number | null;
+  onSelectPileCap?: (nodeId: number | null) => void;
+  onRotatePileCap?: (nodeId: number, direction: 'CW' | 'CCW') => void;
+  onRotateCombinedPileCap?: (groupId: string, direction: 'CW' | 'CCW') => void;
 }
 
 export interface UniquePileCapType {
@@ -93,6 +100,10 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
   cadTheme = 'AUTOCAD_WHITE',
   onCadThemeChange,
   fitScreen = false,
+  selectedPileCapNodeId = null,
+  onSelectPileCap,
+  onRotatePileCap,
+  onRotateCombinedPileCap,
 }) => {
   const bounds = floorPlan.bounds;
   const modelW = Math.max(bounds.width, 10);
@@ -1221,7 +1232,11 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                 const capW = (cap.capWidth / 1000) * scale;
                 const count = cap.pileCount;
                 const shape = cap.capShape || (count === 3 ? 'TRIANGULAR' : count === 5 ? 'PENTAGONAL' : count === 6 ? 'HEXAGONAL' : 'RECTANGULAR');
-                const orient = count === 3 ? determineCapOrientation(col.x, col.z, bounds) : 'UP';
+                const rotDeg = ((cap.rotationAngle ?? (project?.customPileCapOverrides as any)?.[col.nodeId]?.rotationAngle ?? 0) % 360 + 360) % 360;
+                const isSelected = selectedPileCapNodeId === col.nodeId;
+                const orient = rotDeg !== 0
+                  ? angleToOrientation(rotDeg)
+                  : (count === 3 ? determineCapOrientation(col.x, col.z, bounds) : 'UP');
                 const coverPx = Math.max(2, (60 / 1000) * scale);
                 const rPile = Math.max(4, (cap.pileDiameter / 2000) * scale);
                 const colW = Math.max(7, ((col.width || 0.45)) * scale);
@@ -1231,14 +1246,20 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                 const pcLabel = uType ? uType.typeId : `PC${Math.max(1, count - 1)}`;
 
                 return (
-                  <g key={`pc_${col.columnSlNo}_${col.nodeId}`}>
-                    {/* Shape 1: 5-Pile Pentagonal Cap (with right-pointing apex, matching AutoCAD standard) */}
+                  <g
+                    key={`pc_${col.columnSlNo}_${col.nodeId}`}
+                    className="cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectPileCap?.(isSelected ? null : col.nodeId);
+                    }}
+                  >
+                    {/* Shape 1: 5-Pile Pentagonal Cap */}
                     {(count === 5 || (shape as string) === 'PENTAGONAL') ? (
                       (() => {
                         const L_mm = cap.capLength || 2629;
                         const B_mm = cap.capWidth || 2237;
                         const wTopFlat = Math.round(L_mm * 0.618);
-                        const wApex = L_mm - wTopFlat;
                         const wBtmFlat = Math.round(L_mm * 0.447);
                         const hFlat = Math.round(B_mm * 0.764);
                         const hRise = B_mm - hFlat;
@@ -1251,25 +1272,21 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                         const yBtm = cy + capW / 2;
                         const yApex = yTop + (hRise / 1000) * scale;
 
-                        const ptsSvg = [
+                        const rawPtsSvg = [
                           { x: xLeft, y: yTop },
                           { x: xTopBreak, y: yTop },
                           { x: xApex, y: yApex },
                           { x: xBtmBreak, y: yBtm },
                           { x: xLeft, y: yBtm },
                         ];
-                        const ptsMm = [
+                        const rawPtsMm = [
                           { x: -L_mm / 2, y: -B_mm / 2 },
                           { x: -L_mm / 2 + wTopFlat, y: -B_mm / 2 },
                           { x: L_mm / 2, y: -B_mm / 2 + hRise },
                           { x: -L_mm / 2 + wBtmFlat, y: B_mm / 2 },
                           { x: -L_mm / 2, y: B_mm / 2 },
                         ];
-
-                        const outerPts = ptsSvg.map(p => `${p.x},${p.y}`).join(' ');
-                        const innerPts = `${xLeft + coverPx},${yTop + coverPx} ${xTopBreak - coverPx * 0.5},${yTop + coverPx} ${xApex - coverPx * 1.4},${yApex} ${xBtmBreak - coverPx * 0.5},${yBtm - coverPx} ${xLeft + coverPx},${yBtm - coverPx}`;
-
-                        const pilePositions = [
+                        const rawPilePositions = [
                           { px: xLeft + rPile * 2.3, py: yTop + rPile * 2.3 },
                           { px: xLeft + rPile * 2.3, py: yBtm - rPile * 2.3 },
                           { px: cx, py: yTop + rPile * 2.3 },
@@ -1277,10 +1294,22 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                           { px: xApex - rPile * 2.4, py: yApex },
                         ];
 
+                        const ptsSvg = rotDeg !== 0 ? rotatePoints2D(rawPtsSvg, rotDeg, { x: cx, y: cy }, true) : rawPtsSvg;
+                        const ptsMm = rotDeg !== 0 ? rotatePoints2D(rawPtsMm, rotDeg, { x: 0, y: 0 }, false) : rawPtsMm;
+                        const pilePositions = rotDeg !== 0
+                          ? rawPilePositions.map((p) => {
+                              const rot = rotatePoint2D({ x: p.px, y: p.py }, rotDeg, { x: cx, y: cy }, true);
+                              return { px: rot.x, py: rot.y };
+                            })
+                          : rawPilePositions;
+
+                        const outerPts = ptsSvg.map(p => `${p.x},${p.y}`).join(' ');
+                        const innerPts = ptsSvg.map(p => `${cx + (p.x - cx) * 0.92},${cy + (p.y - cy) * 0.92}`).join(' ');
+
                         return (
                           <g>
                             {/* Outer boundary */}
-                            <polygon points={outerPts} fill={theme.capFill} stroke={theme.capOuterStroke} strokeWidth="1.5" strokeLinejoin="round" />
+                            <polygon points={outerPts} fill={theme.capFill} stroke={isSelected ? '#2563eb' : theme.capOuterStroke} strokeWidth={isSelected ? '2.5' : '1.5'} strokeLinejoin="round" />
                             {/* Inner cyan rebar boundary */}
                             <polygon points={innerPts} fill="none" stroke={theme.capInnerStroke} strokeWidth="1.0" strokeLinejoin="round" />
                             {/* Bored Piles */}
@@ -1290,8 +1319,10 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                             <text x={cx} y={cy + 3} fill={theme.columnText} fontSize="7" fontWeight="bold" textAnchor="middle">{col.label}</text>
                             {/* Aligned Facet Dimensions */}
                             {renderCadPolygonFacetDimensions(ptsSvg, ptsMm, `c5_${col.nodeId}`, 11, 6.8)}
-                            {/* Cap Mark */}
-                            <text x={xApex + 8} y={yBtm + 12} fill={theme.capLabelText} fontSize="8" fontWeight="bold">PC2</text>
+                            {/* Cap Mark & Rotation Tag */}
+                            <text x={cx + capL / 2 + 8} y={cy + capW / 2 + 12} fill={theme.capLabelText} fontSize="8" fontWeight="bold">
+                              {pcLabel}{rotDeg !== 0 ? ` (${rotDeg}°)` : ''}
+                            </text>
                           </g>
                         );
                       })()
@@ -1308,7 +1339,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                         const yT = cy - capW / 2;
                         const yB = cy + capW / 2;
 
-                        const ptsSvg = [
+                        const rawPtsSvg = [
                           { x: xTop1, y: yT },
                           { x: xTop2, y: yT },
                           { x: xR, y: cy },
@@ -1316,7 +1347,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                           { x: xTop1, y: yB },
                           { x: xL, y: cy },
                         ];
-                        const ptsMm = [
+                        const rawPtsMm = [
                           { x: -wTop / 2, y: -B_mm / 2 },
                           { x: wTop / 2, y: -B_mm / 2 },
                           { x: L_mm / 2, y: 0 },
@@ -1324,11 +1355,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                           { x: -wTop / 2, y: B_mm / 2 },
                           { x: -L_mm / 2, y: 0 },
                         ];
-
-                        const outerPts = ptsSvg.map(p => `${p.x},${p.y}`).join(' ');
-                        const innerPts = `${xTop1},${yT + coverPx} ${xTop2},${yT + coverPx} ${xR - coverPx * 1.2},${cy} ${xTop2},${yB - coverPx} ${xTop1},${yB - coverPx} ${xL + coverPx * 1.2},${cy}`;
-
-                        const pilePositions = [
+                        const rawPilePositions = [
                           { px: cx - capL * 0.22, py: cy - capW * 0.28 },
                           { px: cx + capL * 0.22, py: cy - capW * 0.28 },
                           { px: cx - capL * 0.22, py: cy },
@@ -1337,16 +1364,30 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                           { px: cx + capL * 0.22, py: cy + capW * 0.28 },
                         ];
 
+                        const ptsSvg = rotDeg !== 0 ? rotatePoints2D(rawPtsSvg, rotDeg, { x: cx, y: cy }, true) : rawPtsSvg;
+                        const ptsMm = rotDeg !== 0 ? rotatePoints2D(rawPtsMm, rotDeg, { x: 0, y: 0 }, false) : rawPtsMm;
+                        const pilePositions = rotDeg !== 0
+                          ? rawPilePositions.map((p) => {
+                              const rot = rotatePoint2D({ x: p.px, y: p.py }, rotDeg, { x: cx, y: cy }, true);
+                              return { px: rot.x, py: rot.y };
+                            })
+                          : rawPilePositions;
+
+                        const outerPts = ptsSvg.map(p => `${p.x},${p.y}`).join(' ');
+                        const innerPts = ptsSvg.map(p => `${cx + (p.x - cx) * 0.93},${cy + (p.y - cy) * 0.93}`).join(' ');
+
                         return (
                           <g>
-                            <polygon points={outerPts} fill={theme.capFill} stroke={theme.capOuterStroke} strokeWidth="1.5" strokeLinejoin="round" />
+                            <polygon points={outerPts} fill={theme.capFill} stroke={isSelected ? '#2563eb' : theme.capOuterStroke} strokeWidth={isSelected ? '2.5' : '1.5'} strokeLinejoin="round" />
                             <polygon points={innerPts} fill="none" stroke={theme.capInnerStroke} strokeWidth="1.0" strokeLinejoin="round" />
                             {pilePositions.map((p, pIdx) => renderCadBoredPile(`p6_${col.nodeId}_${pIdx}`, p.px, p.py, rPile))}
                             <rect x={cx - colW / 2} y={cy - colD / 2} width={colW} height={colD} fill={theme.columnFill} stroke={theme.columnStroke} strokeWidth="1.2" />
                             <text x={cx} y={cy + 3} fill={theme.columnText} fontSize="7" fontWeight="bold" textAnchor="middle">{col.label}</text>
                             {/* Aligned Facet Dimensions */}
                             {renderCadPolygonFacetDimensions(ptsSvg, ptsMm, `c6_${col.nodeId}`, 11, 6.8)}
-                            <text x={xR + 8} y={yB + 12} fill={theme.capLabelText} fontSize="8" fontWeight="bold">PC3</text>
+                            <text x={cx + capL / 2 + 8} y={cy + capW / 2 + 12} fill={theme.capLabelText} fontSize="8" fontWeight="bold">
+                              {pcLabel}{rotDeg !== 0 ? ` (${rotDeg}°)` : ''}
+                            </text>
                           </g>
                         );
                       })()
@@ -1364,43 +1405,95 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
 
                         return (
                           <g>
-                            <polygon points={polyStr} fill={theme.capFill} stroke={theme.capOuterStroke} strokeWidth="1.5" strokeLinejoin="round" />
+                            <polygon points={polyStr} fill={theme.capFill} stroke={isSelected ? '#2563eb' : theme.capOuterStroke} strokeWidth={isSelected ? '2.5' : '1.5'} strokeLinejoin="round" />
                             <polygon points={innerStr} fill="none" stroke={theme.capInnerStroke} strokeWidth="1.0" strokeLinejoin="round" />
                             {pileOffsets.map((off, pIdx) => renderCadBoredPile(`p3_${col.nodeId}_${pIdx}`, cx + (off.x / 1000) * scale, cy - (off.y / 1000) * scale, rPile))}
                             <rect x={cx - colW / 2} y={cy - colD / 2} width={colW} height={colD} fill={theme.columnFill} stroke={theme.columnStroke} strokeWidth="1.2" />
                             <text x={cx} y={cy + 3} fill={theme.columnText} fontSize="7" fontWeight="bold" textAnchor="middle">{col.label}</text>
                             {/* Aligned dimensions along each side/facet showing each side length */}
                             {renderCadPolygonFacetDimensions(ptsSvg, ptsMm, `c3_${col.nodeId}`, 11, 6.8)}
-                            <text x={cx + capL / 2 + 8} y={cy + capW / 2 + 14} fill={theme.capLabelText} fontSize="8" fontWeight="bold">{pcLabel}</text>
+                            <text x={cx + capL / 2 + 8} y={cy + capW / 2 + 14} fill={theme.capLabelText} fontSize="8" fontWeight="bold">
+                              {pcLabel}{rotDeg !== 0 ? ` (${rotDeg}°)` : ''}
+                            </text>
                           </g>
                         );
                       })()
                     ) : (
                       /* Rectangular 4-Pile, 2-Pile, or Standard Rectangular Cap */
                       (() => {
-                        const pileOffsets = cap.pileOffsets && cap.pileOffsets.length > 0
+                        const isRot90or270 = rotDeg === 90 || rotDeg === 270;
+                        const effCapL = isRot90or270 ? capW : capL;
+                        const effCapW = isRot90or270 ? capL : capW;
+                        const effValL = isRot90or270 ? cap.capWidth : cap.capLength;
+                        const effValW = isRot90or270 ? cap.capLength : cap.capWidth;
+
+                        const baseOffsets = cap.pileOffsets && cap.pileOffsets.length > 0
                           ? cap.pileOffsets
-                          : getPileOffsetsMm(count, cap.pileSpacing, orient);
+                          : getPileOffsetsMm(count, cap.pileSpacing, 'UP');
+                        const pileOffsets = rotDeg !== 0
+                          ? (cap.rotationAngle ? cap.pileOffsets : rotatePoints2D(baseOffsets, rotDeg, { x: 0, y: 0 }))
+                          : baseOffsets;
 
                         return (
                           <g>
                             {/* Outer boundary */}
-                            <rect x={cx - capL / 2} y={cy - capW / 2} width={capL} height={capW} fill={theme.capFill} stroke={theme.capOuterStroke} strokeWidth="1.5" />
+                            <rect x={cx - effCapL / 2} y={cy - effCapW / 2} width={effCapL} height={effCapW} fill={theme.capFill} stroke={isSelected ? '#2563eb' : theme.capOuterStroke} strokeWidth={isSelected ? '2.5' : '1.5'} />
                             {/* Inner cyan rebar boundary */}
-                            <rect x={cx - capL / 2 + coverPx} y={cy - capW / 2 + coverPx} width={capL - 2 * coverPx} height={capW - 2 * coverPx} fill="none" stroke={theme.capInnerStroke} strokeWidth="1.0" />
+                            <rect x={cx - effCapL / 2 + coverPx} y={cy - effCapW / 2 + coverPx} width={effCapL - 2 * coverPx} height={effCapW - 2 * coverPx} fill="none" stroke={theme.capInnerStroke} strokeWidth="1.0" />
                             {/* Bored Piles */}
                             {pileOffsets.map((off, pIdx) => renderCadBoredPile(`p4_${col.nodeId}_${pIdx}`, cx + (off.x / 1000) * scale, cy - (off.y / 1000) * scale, rPile))}
                             {/* Center Magenta Column */}
                             <rect x={cx - colW / 2} y={cy - colD / 2} width={colW} height={colD} fill={theme.columnFill} stroke={theme.columnStroke} strokeWidth="1.2" />
                             <text x={cx} y={cy + 3} fill={theme.columnText} fontSize="7" fontWeight="bold" textAnchor="middle">{col.label}</text>
                             {/* Cap Dimension Lines */}
-                            {renderCadLinearDimension({ key: `c4_top_${col.nodeId}`, x1: cx - capL / 2, y1: cy - capW / 2, x2: cx + capL / 2, y2: cy - capW / 2, dimOffset: -10, valueMm: cap.capLength, fontSize: 7 })}
-                            {renderCadLinearDimension({ key: `c4_left_${col.nodeId}`, x1: cx - capL / 2, y1: cy - capW / 2, x2: cx - capL / 2, y2: cy + capW / 2, dimOffset: -10, isVertical: true, valueMm: cap.capWidth, fontSize: 7 })}
-                            {/* Cap Mark */}
-                            <text x={cx + capL / 2 + 3} y={cy + capW / 2 + 6} fill={theme.capLabelText} fontSize="8" fontWeight="bold">{pcLabel}</text>
+                            {renderCadLinearDimension({ key: `c4_top_${col.nodeId}`, x1: cx - effCapL / 2, y1: cy - effCapW / 2, x2: cx + effCapL / 2, y2: cy - effCapW / 2, dimOffset: -10, valueMm: effValL, fontSize: 7 })}
+                            {renderCadLinearDimension({ key: `c4_left_${col.nodeId}`, x1: cx - effCapL / 2, y1: cy - effCapW / 2, x2: cx - effCapL / 2, y2: cy + effCapW / 2, dimOffset: -10, isVertical: true, valueMm: effValW, fontSize: 7 })}
+                            {/* Cap Mark & Rotation Tag */}
+                            <text x={cx + effCapL / 2 + 3} y={cy + effCapW / 2 + 6} fill={theme.capLabelText} fontSize="8" fontWeight="bold">
+                              {pcLabel}{rotDeg !== 0 ? ` (${rotDeg}°)` : ''}
+                            </text>
                           </g>
                         );
                       })()
+                    )}
+
+                    {/* Interactive On-Canvas Rotation Overlay when Selected */}
+                    {isSelected && onRotatePileCap && (
+                      <g className="cursor-pointer select-none">
+                        <rect
+                          x={cx - Math.max(capL, capW) / 2 - 12}
+                          y={cy - Math.max(capL, capW) / 2 - 12}
+                          width={Math.max(capL, capW) + 24}
+                          height={Math.max(capL, capW) + 24}
+                          fill="none"
+                          stroke="#2563eb"
+                          strokeWidth="2"
+                          strokeDasharray="5 3"
+                          rx="6"
+                        />
+                        {/* Mini Rotate CCW Button */}
+                        <g
+                          transform={`translate(${cx - 32}, ${cy + Math.max(capL, capW) / 2 + 20})`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRotatePileCap(col.nodeId, 'CCW');
+                          }}
+                        >
+                          <rect x="-18" y="-9" width="36" height="18" rx="4" fill="#1d4ed8" stroke="#3b82f6" strokeWidth="1" />
+                          <text x="0" y="3.5" fill="#ffffff" fontSize="8.5" fontWeight="bold" textAnchor="middle">⟲ -90°</text>
+                        </g>
+                        {/* Mini Rotate CW Button */}
+                        <g
+                          transform={`translate(${cx + 32}, ${cy + Math.max(capL, capW) / 2 + 20})`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRotatePileCap(col.nodeId, 'CW');
+                          }}
+                        >
+                          <rect x="-18" y="-9" width="36" height="18" rx="4" fill="#1d4ed8" stroke="#3b82f6" strokeWidth="1" />
+                          <text x="0" y="3.5" fill="#ffffff" fontSize="8.5" fontWeight="bold" textAnchor="middle">⟳ +90°</text>
+                        </g>
+                      </g>
                     )}
                   </g>
                 );
@@ -1422,6 +1515,13 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
               const colW = Math.max(8, 0.45 * scale);
               const colD = Math.max(8, 0.55 * scale);
 
+              const combRotDeg = ((grp.rotationAngle ?? (project?.customCombinedCapOverrides as any)?.[grp.groupId]?.rotationAngle ?? 0) % 360 + 360) % 360;
+              const isRot90or270 = combRotDeg === 90 || combRotDeg === 270;
+              const effCapLpx = isRot90or270 ? capBpx : capLpx;
+              const effCapBpx = isRot90or270 ? capLpx : capBpx;
+              const effValL = isRot90or270 ? grp.capWidth : grp.capLength;
+              const effValB = isRot90or270 ? grp.capLength : grp.capWidth;
+
               // Unique sorted X coordinates for pile spacing dimension string
               const uniquePileX = Array.from(new Set(grp.pileOffsets.map((p) => Math.round(p.x)))).sort((a, b) => a - b);
               // Unique sorted Z coordinates for pile row spacing dimension string
@@ -1431,20 +1531,20 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                 <g key={`cpc_${grp.groupId}`}>
                   {/* Outer Combined Cap Boundary */}
                   <rect
-                    x={cx - capLpx / 2}
-                    y={cy - capBpx / 2}
-                    width={capLpx}
-                    height={capBpx}
+                    x={cx - effCapLpx / 2}
+                    y={cy - effCapBpx / 2}
+                    width={effCapLpx}
+                    height={effCapBpx}
                     fill={theme.capFill}
                     stroke={theme.capOuterStroke}
                     strokeWidth="2.0"
                   />
                   {/* Inner Cyan Rebar Boundary */}
                   <rect
-                    x={cx - capLpx / 2 + coverPx}
-                    y={cy - capBpx / 2 + coverPx}
-                    width={capLpx - 2 * coverPx}
-                    height={capBpx - 2 * coverPx}
+                    x={cx - effCapLpx / 2 + coverPx}
+                    y={cy - effCapBpx / 2 + coverPx}
+                    width={effCapLpx - 2 * coverPx}
+                    height={effCapBpx - 2 * coverPx}
                     fill="none"
                     stroke={theme.capInnerStroke}
                     strokeWidth="1.0"
@@ -1602,31 +1702,31 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                   {/* Top Overall Dimension Line (Length in mm, e.g. 5700) */}
                   {renderCadLinearDimension({
                     key: `cpc_dim_top_${grp.groupId}`,
-                    x1: cx - capLpx / 2,
-                    y1: cy - capBpx / 2,
-                    x2: cx + capLpx / 2,
-                    y2: cy - capBpx / 2,
+                    x1: cx - effCapLpx / 2,
+                    y1: cy - effCapBpx / 2,
+                    x2: cx + effCapLpx / 2,
+                    y2: cy - effCapBpx / 2,
                     dimOffset: -16,
-                    valueMm: grp.capLength,
+                    valueMm: effValL,
                     fontSize: 8.5,
                   })}
 
                   {/* Right Overall Dimension Line (Width in mm, e.g. 6200) */}
                   {renderCadLinearDimension({
                     key: `cpc_dim_right_${grp.groupId}`,
-                    x1: cx + capLpx / 2,
-                    y1: cy - capBpx / 2,
-                    x2: cx + capLpx / 2,
-                    y2: cy + capBpx / 2,
+                    x1: cx + effCapLpx / 2,
+                    y1: cy - effCapBpx / 2,
+                    x2: cx + effCapLpx / 2,
+                    y2: cy + effCapBpx / 2,
                     dimOffset: 16,
                     isVertical: true,
-                    valueMm: grp.capWidth,
+                    valueMm: effValB,
                     fontSize: 8.5,
                   })}
 
                   {/* Bottom Pile Spacing Dimension Chain */}
                   {(() => {
-                    const botDimY = cy + capBpx / 2;
+                    const botDimY = cy + effCapBpx / 2;
                     const dims = [];
                     for (let i = 0; i < uniquePileX.length - 1; i++) {
                       const spMm = Math.round(uniquePileX[i + 1] - uniquePileX[i]);

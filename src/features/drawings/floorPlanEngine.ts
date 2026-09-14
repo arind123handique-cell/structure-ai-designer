@@ -350,6 +350,7 @@ export class FloorPlanEngine {
         customCapWidth: overrides?.customCapWidth,
         customCapDepth: overrides?.customCapDepth,
         assignedPileTypeId: assignedPile.id,
+        rotationAngle: overrides?.rotationAngle,
         factoredVerticalLoad: maxFy,
         factoredMomentX: maxMx,
         factoredMomentY: maxMy,
@@ -363,7 +364,12 @@ export class FloorPlanEngine {
     if (savedPileCapDesigns && Object.keys(savedPileCapDesigns).length > 0) {
       designedPileCaps = new Map();
       Object.entries(savedPileCapDesigns).forEach(([k, v]) => {
-        designedPileCaps.set(Number(k), v);
+        const nid = Number(k);
+        const ov = customPileCapOverrides ? customPileCapOverrides[nid] : undefined;
+        designedPileCaps.set(nid, {
+          ...v,
+          rotationAngle: ov?.rotationAngle ?? v.rotationAngle,
+        });
       });
     } else {
       designedPileCaps = pileCapInputs.length > 0

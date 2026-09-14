@@ -21,6 +21,8 @@ import {
   Footprints,
   Move,
   RotateCw,
+  RotateCcw,
+  X,
   ChevronUp,
   ChevronDown,
   ChevronLeft,
@@ -54,6 +56,8 @@ export const FloorPlanViewer: React.FC = () => {
     restoreStaircaseForFloor,
     customStaircaseGeometry,
     customStaircaseLandingEntry,
+    rotatePileCap,
+    setPileCapRotation,
     setActiveView,
   } = useProjectStore();
 
@@ -99,6 +103,21 @@ export const FloorPlanViewer: React.FC = () => {
   const [pileCapDisplayMode, setPileCapDisplayMode] = useState<'BOTH' | 'PLAN' | 'SECTION'>('BOTH');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [pdfSuccessMessage, setPdfSuccessMessage] = useState<string | null>(null);
+  const [selectedPileCapNodeId, setSelectedPileCapNodeId] = useState<number | null>(null);
+
+  const selectedCapCol = useMemo(() => {
+    if (!selectedPileCapNodeId || !activePlan) return null;
+    return activePlan.columns.find((c) => c.nodeId === selectedPileCapNodeId) || null;
+  }, [selectedPileCapNodeId, activePlan]);
+
+  const selectedCapRot = useMemo(() => {
+    if (!selectedPileCapNodeId) return 0;
+    return (
+      customPileCapOverrides[selectedPileCapNodeId]?.rotationAngle ??
+      selectedCapCol?.pileCap?.rotationAngle ??
+      0
+    );
+  }, [selectedPileCapNodeId, customPileCapOverrides, selectedCapCol]);
 
   // Active floor staircase helper
   const activeFloorId = `floor_${activePlan?.levelIndex || 0}`;
@@ -798,6 +817,65 @@ export const FloorPlanViewer: React.FC = () => {
         </div>
       )}
 
+      {/* Foundation Level: Interactive Pile Cap Rotation Control Bar */}
+      {activePlan.isFoundationLevel && showPileCaps && (
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-lg shadow-2xs font-mono text-xs">
+          <div className="flex items-center gap-2">
+            <RotateCw className="w-4 h-4 text-blue-600 shrink-0" />
+            {selectedCapCol ? (
+              <span className="text-slate-800">
+                Selected Pile Cap: <strong className="text-blue-700">PC-{selectedCapCol.nodeId} (Col {selectedCapCol.label})</strong>
+                {' • '}Current Orientation: <strong className="text-indigo-700">{selectedCapRot}°</strong>
+              </span>
+            ) : (
+              <span className="text-slate-600">
+                <strong>Pile Cap Rotator:</strong> Click any pile cap on the plan to rotate with its bored piles.
+              </span>
+            )}
+          </div>
+
+          {selectedCapCol && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => rotatePileCap(selectedCapCol.nodeId, 'CCW')}
+                className="flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-blue-100 text-blue-700 border border-blue-300 rounded font-bold transition-colors shadow-2xs"
+                title="Rotate 90 degrees Counter-Clockwise (Anticlockwise)"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Rotate CCW (-90°)</span>
+              </button>
+
+              <button
+                onClick={() => rotatePileCap(selectedCapCol.nodeId, 'CW')}
+                className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors shadow-2xs"
+                title="Rotate 90 degrees Clockwise"
+              >
+                <RotateCw className="w-3.5 h-3.5" />
+                <span>Rotate CW (+90°)</span>
+              </button>
+
+              {selectedCapRot !== 0 && (
+                <button
+                  onClick={() => setPileCapRotation(selectedCapCol.nodeId, 0)}
+                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-semibold transition-colors"
+                  title="Reset rotation to 0 degrees"
+                >
+                  Reset 0°
+                </button>
+              )}
+
+              <button
+                onClick={() => setSelectedPileCapNodeId(null)}
+                className="p-1 hover:bg-slate-200 rounded text-slate-500"
+                title="Deselect Pile Cap"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Main 2D CAD SVG Canvas Plan — Fully Scrollable Responsive Container */}
       <div className="w-full flex justify-center items-center p-1 pb-28">
         <div className="w-full max-w-[1680px] flex justify-center items-center">
@@ -825,6 +903,9 @@ export const FloorPlanViewer: React.FC = () => {
             pileCapDisplayMode={pileCapDisplayMode}
             selectedSectionType={selectedSectionType}
             onSelectSection={setSelectedSectionType}
+            selectedPileCapNodeId={selectedPileCapNodeId}
+            onSelectPileCap={setSelectedPileCapNodeId}
+            onRotatePileCap={rotatePileCap}
             width={sheetOrientation === 'PORTRAIT' ? 1188 : 1680}
             height={sheetOrientation === 'PORTRAIT' ? 1680 : 1188}
           />

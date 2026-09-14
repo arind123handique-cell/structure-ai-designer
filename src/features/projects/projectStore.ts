@@ -107,8 +107,8 @@ export interface ProjectState {
   // Foundation Pile & Pile Cap States
   projectPileTypes: any[];
   supportPileAssignments: Record<number, string>;
-  customPileCapOverrides: Record<number, { customPileCount?: number; customCapLength?: number; customCapWidth?: number; customCapDepth?: number }>;
-  customCombinedCapOverrides: Record<string, { customPileCount?: number; customCapLength?: number; customCapWidth?: number; customCapDepth?: number; customSafePileCapacity?: number; customBottomRebar?: string; customTopRebar?: string }>;
+  customPileCapOverrides: Record<number, { customPileCount?: number; customCapLength?: number; customCapWidth?: number; customCapDepth?: number; rotationAngle?: number }>;
+  customCombinedCapOverrides: Record<string, { customPileCount?: number; customCapLength?: number; customCapWidth?: number; customCapDepth?: number; customSafePileCapacity?: number; customBottomRebar?: string; customTopRebar?: string; rotationAngle?: number }>;
   manualMergedPileCapGroups: number[][];
   detachedCombinedCapNodeIds: number[];
   selectedSupportNodeIds: number[];
@@ -177,10 +177,14 @@ export interface ProjectState {
   setProjectPileTypes: (types: any[]) => void;
   updateProjectPileType: (pile: any) => void;
   assignPileTypeToSupport: (supportNodeId: number, pileTypeId: string) => void;
-  setCustomPileCapOverride: (supportNodeId: number, override: { customPileCount?: number; customCapLength?: number; customCapWidth?: number; customCapDepth?: number }) => void;
+  setCustomPileCapOverride: (supportNodeId: number, override: { customPileCount?: number; customCapLength?: number; customCapWidth?: number; customCapDepth?: number; rotationAngle?: number }) => void;
   clearCustomPileCapOverride: (supportNodeId: number) => void;
-  setCustomCombinedCapOverride: (groupId: string, override: { customPileCount?: number; customCapLength?: number; customCapWidth?: number; customCapDepth?: number; customSafePileCapacity?: number; customBottomRebar?: string; customTopRebar?: string }) => void;
+  rotatePileCap: (supportNodeId: number, direction: 'CW' | 'CCW') => void;
+  setPileCapRotation: (supportNodeId: number, angleDeg: number) => void;
+  setCustomCombinedCapOverride: (groupId: string, override: { customPileCount?: number; customCapLength?: number; customCapWidth?: number; customCapDepth?: number; customSafePileCapacity?: number; customBottomRebar?: string; customTopRebar?: string; rotationAngle?: number }) => void;
   clearCustomCombinedCapOverride: (groupId: string) => void;
+  rotateCombinedPileCap: (groupId: string, direction: 'CW' | 'CCW') => void;
+  setCombinedCapRotation: (groupId: string, angleDeg: number) => void;
   // Saved Component Designs & Overrides
   savedColumnDesigns: Record<number, any>;
   savedBeamDesigns: Record<number, any>;
@@ -1447,6 +1451,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         metadata: { ...currentProj.metadata, updatedAt: new Date().toISOString() },
       });
     }
+  },
+
+  rotatePileCap: (supportNodeId, direction) => {
+    const currentAngle = get().customPileCapOverrides[supportNodeId]?.rotationAngle || 0;
+    const delta = direction === 'CW' ? 90 : -90;
+    const newAngle = ((currentAngle + delta) % 360 + 360) % 360;
+    get().setCustomPileCapOverride(supportNodeId, { rotationAngle: newAngle });
+  },
+
+  setPileCapRotation: (supportNodeId, angleDeg) => {
+    const normalized = ((angleDeg % 360) + 360) % 360;
+    get().setCustomPileCapOverride(supportNodeId, { rotationAngle: normalized });
+  },
+
+  rotateCombinedPileCap: (groupId, direction) => {
+    const currentAngle = get().customCombinedCapOverrides[groupId]?.rotationAngle || 0;
+    const delta = direction === 'CW' ? 90 : -90;
+    const newAngle = ((currentAngle + delta) % 360 + 360) % 360;
+    get().setCustomCombinedCapOverride(groupId, { rotationAngle: newAngle });
+  },
+
+  setCombinedCapRotation: (groupId, angleDeg) => {
+    const normalized = ((angleDeg % 360) + 360) % 360;
+    get().setCustomCombinedCapOverride(groupId, { rotationAngle: normalized });
   },
 
   setUniversalRebarModalOpen: (open) => set({ isUniversalRebarModalOpen: open }),

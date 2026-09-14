@@ -337,3 +337,75 @@ export function determineCapOrientation(
 
   return 'UP';
 }
+
+/**
+ * Rotate a 2D point (x, y) clockwise around a center (default 0, 0) by angleDeg.
+ */
+export function rotatePoint2D(
+  pt: Point2D,
+  angleDeg: number,
+  center: Point2D = { x: 0, y: 0 },
+  isSvg = false
+): Point2D {
+  const norm = ((angleDeg % 360) + 360) % 360;
+  if (norm === 0) return { ...pt };
+  const rad = (norm * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = pt.x - center.x;
+  const dy = pt.y - center.y;
+
+  const roundCoord = (v: number) => {
+    const fixed = parseFloat(v.toFixed(2));
+    return Math.abs(fixed) < 1e-9 ? 0 : fixed;
+  };
+
+  if (isSvg) {
+    // Screen / SVG coordinates (Y down): clockwise rotation
+    return {
+      x: roundCoord(center.x + dx * cos - dy * sin),
+      y: roundCoord(center.y + dx * sin + dy * cos),
+    };
+  } else {
+    // Cartesian / Math / Engineering coordinates (Y up): clockwise rotation
+    return {
+      x: roundCoord(center.x + dx * cos + dy * sin),
+      y: roundCoord(center.y - dx * sin + dy * cos),
+    };
+  }
+}
+
+export function rotatePoints2D(
+  pts: Point2D[],
+  angleDeg: number,
+  center: Point2D = { x: 0, y: 0 },
+  isSvg = false
+): Point2D[] {
+  const norm = ((angleDeg % 360) + 360) % 360;
+  if (norm === 0) return pts.map((p) => ({ ...p }));
+  return pts.map((p) => rotatePoint2D(p, angleDeg, center, isSvg));
+}
+
+/**
+ * Converts rotation angle (0, 90, 180, 270) to CapOrientation for 3-pile equilateral caps.
+ */
+export function angleToOrientation(angleDeg: number): CapOrientation {
+  const norm = ((angleDeg % 360) + 360) % 360;
+  if (norm >= 45 && norm < 135) return 'RIGHT';
+  if (norm >= 135 && norm < 225) return 'DOWN';
+  if (norm >= 225 && norm < 315) return 'LEFT';
+  return 'UP';
+}
+
+/**
+ * Converts CapOrientation to angle in degrees.
+ */
+export function orientationToAngle(orient: CapOrientation): number {
+  switch (orient) {
+    case 'RIGHT': return 90;
+    case 'DOWN': return 180;
+    case 'LEFT': return 270;
+    case 'UP':
+    default: return 0;
+  }
+}

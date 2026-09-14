@@ -1,6 +1,7 @@
 import { FoundationPunchingShear, PunchingShearResult } from '@/features/codes/foundation/punchingShear';
 import { IS456Flexure, FlexureDesignResult } from '@/features/codes/is456/flexure';
 import { DetailedCalculationReport } from '@/features/calculations/types';
+import { rotatePoints2D, angleToOrientation, getPileOffsetsMm } from './pileCapGeometryUtils';
 
 export interface PileCapDesignInput {
   supportNodeId: number;
@@ -13,6 +14,7 @@ export interface PileCapDesignInput {
   customCapWidth?: number; // mm
   customCapDepth?: number; // mm
   assignedPileTypeId?: string;
+  rotationAngle?: number; // 0, 90, 180, 270 degrees
   factoredVerticalLoad: number; // Pu in kN (from STAAD reaction)
   factoredMomentX?: number; // kNm
   factoredMomentY?: number; // kNm
@@ -30,6 +32,7 @@ export interface PileCapDesignOutput {
   pileCount: number;
   capShape: 'RECTANGULAR' | 'TRIANGULAR' | 'PENTAGONAL';
   pileDiameter: number;
+  rotationAngle?: number;
   safePileCapacity: number;
   assignedPileTypeId?: string;
   pileSpacing: number; // mm (s = 3 * Dp as per IS 2911 Cl. 6.6)
@@ -218,8 +221,25 @@ export class PileCapDesignEngine {
       armY = Math.max(0.1, (overhang - colB / 2) / 1000);
     }
 
-    const capLength = input.customCapLength || autoCapLength;
-    const capWidth = input.customCapWidth || autoCapWidth;
+    const rotationAngle = ((input.rotationAngle || 0) % 360 + 360) % 360;
+    if (rotationAngle !== 0) {
+      if (pileCount === 3 || capShape === 'TRIANGULAR') {
+        const orient = angleToOrientation(rotationAngle);
+        pileOffsets = getPileOffsetsMm(3, pileSpacing, orient);
+      } else {
+        pileOffsets = rotatePoints2D(pileOffsets, rotationAngle, { x: 0, y: 0 });
+      }
+    }
+
+    let capLength = input.customCapLength || autoCapLength;
+    let capWidth = input.customCapWidth || autoCapWidth;
+    if (!input.customCapLength && !input.customCapWidth && (rotationAngle === 90 || rotationAngle === 270)) {
+      if (capShape === 'RECTANGULAR' && autoCapLength !== autoCapWidth) {
+        const temp = capLength;
+        capLength = capWidth;
+        capWidth = temp;
+      }
+    }
 
     // 3. Cap Depth D and Effective Depth d (sized for punching shear & rigid cap condition IS 2911 Cl. 6.8)
     let autoCapDepth = Math.max(750, Math.round(1.5 * Dp));
@@ -503,6 +523,7 @@ export class PileCapDesignEngine {
       pileCount,
       capShape,
       pileDiameter: Dp,
+      rotationAngle,
       safePileCapacity: Qsafe,
       assignedPileTypeId: input.assignedPileTypeId,
       pileSpacing,

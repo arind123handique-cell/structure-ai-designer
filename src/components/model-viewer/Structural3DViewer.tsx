@@ -14,6 +14,7 @@ import {
   determineCapOrientation,
   getTruncated3PilePolygonMm,
   getPileOffsetsMm,
+  angleToOrientation,
 } from '@/features/design/pilecap/pileCapGeometryUtils';
 import { StaircaseDesignEngine } from '@/features/design/staircase/staircaseEngine';
 import { Architectural3DLayer } from '@/features/architectural/3d/Architectural3DLayer';
@@ -586,6 +587,7 @@ export const Structural3DViewer: React.FC = () => {
         customCapLength: overrides?.customCapLength,
         customCapWidth: overrides?.customCapWidth,
         customCapDepth: overrides?.customCapDepth,
+        rotationAngle: overrides?.rotationAngle,
         assignedPileTypeId: assignedPile.id,
         factoredVerticalLoad: maxFy,
         fck: 25,
@@ -1551,6 +1553,7 @@ export const Structural3DViewer: React.FC = () => {
             customCapLength: overrides?.customCapLength,
             customCapWidth: overrides?.customCapWidth,
             customCapDepth: overrides?.customCapDepth,
+            rotationAngle: overrides?.rotationAngle,
             assignedPileTypeId: assignedPile.id,
             factoredVerticalLoad: maxFy,
             fck: 25,
@@ -1564,8 +1567,10 @@ export const Structural3DViewer: React.FC = () => {
           const pileRadius = (capResult.pileDiameter / 1000) / 2;
           const pileLength = 4.5;
 
+          const rotDeg = overrides?.rotationAngle ?? capResult.rotationAngle ?? 0;
           const bounds = activeModel.boundingBox || { minX: -10, maxX: 10, minZ: -10, maxZ: 10 };
-          const orientation = determineCapOrientation(node.x, node.z, bounds);
+          const defaultOrientation = determineCapOrientation(node.x, node.z, bounds);
+          const orientation = rotDeg !== 0 ? angleToOrientation(rotDeg) : defaultOrientation;
 
           let pileOffsets: { x: number; z: number }[] = [];
           if (capResult.pileCount === 3 || capResult.capShape === 'TRIANGULAR') {
@@ -1608,9 +1613,10 @@ export const Structural3DViewer: React.FC = () => {
             const Rp = (capResult.pileSpacing / 1000) / (2 * Math.sin(Math.PI / 5));
             const overhangM = (capResult.edgeDistance || 300) / 1000;
             const R = Rp + overhangM;
+            const rotRad = (rotDeg * Math.PI) / 180;
             const shape = new THREE.Shape();
             for (let i = 0; i < 5; i++) {
-              const angle = Math.PI / 2 + (2 * Math.PI * i) / 5;
+              const angle = Math.PI / 2 + (2 * Math.PI * i) / 5 - rotRad;
               const px = R * Math.cos(angle);
               const py = R * Math.sin(angle);
               if (i === 0) shape.moveTo(px, py);

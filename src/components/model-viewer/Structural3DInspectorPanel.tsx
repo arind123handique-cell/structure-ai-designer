@@ -194,6 +194,8 @@ export const Structural3DInspectorPanel: React.FC<Structural3DInspectorPanelProp
   const customPileCapOverrides = useProjectStore((s) => s.customPileCapOverrides);
   const savedColumnDesigns = useProjectStore((s) => s.savedColumnDesigns);
   const savedBeamDesigns = useProjectStore((s) => s.savedBeamDesigns);
+  const rotatePileCap = useProjectStore((s) => s.rotatePileCap);
+  const setPileCapRotation = useProjectStore((s) => s.setPileCapRotation);
 
   // Active support ID
   const activeSupportNodeId = useMemo(() => {
@@ -350,6 +352,7 @@ export const Structural3DInspectorPanel: React.FC<Structural3DInspectorPanelProp
       customCapLength: overrides?.customCapLength,
       customCapWidth: overrides?.customCapWidth,
       customCapDepth: overrides?.customCapDepth,
+      rotationAngle: overrides?.rotationAngle,
       assignedPileTypeId: assignedPile.id,
       factoredVerticalLoad: Math.max(maxFy, 650),
       fck: 25,
@@ -887,6 +890,41 @@ export const Structural3DInspectorPanel: React.FC<Structural3DInspectorPanelProp
                           <span className="text-slate-500 block text-[9px]">Clear Cover</span>
                           <strong className="text-white">50 mm</strong>
                         </div>
+                      </div>
+                    </div>
+
+                    {/* Cap Rotation & Orientation Controls */}
+                    <div className="p-3 bg-slate-800/60 rounded-xl border border-slate-700/80 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 text-[11px] font-medium">Orientation & Rotation</span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                          {((customPileCapOverrides[activeSupportNodeId]?.rotationAngle || 0) % 360)}°
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 pt-1">
+                        <button
+                          onClick={() => rotatePileCap(activeSupportNodeId, 'CCW')}
+                          className="flex-1 py-1.5 px-2 bg-slate-800 hover:bg-indigo-600/30 text-slate-300 hover:text-indigo-200 border border-slate-700 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                          title="Rotate Pile Cap and Piles Anticlockwise (-90°)"
+                        >
+                          <span>⟲</span>
+                          <span>CCW (-90°)</span>
+                        </button>
+                        <button
+                          onClick={() => rotatePileCap(activeSupportNodeId, 'CW')}
+                          className="flex-1 py-1.5 px-2 bg-slate-800 hover:bg-indigo-600/30 text-slate-300 hover:text-indigo-200 border border-slate-700 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                          title="Rotate Pile Cap and Piles Clockwise (+90°)"
+                        >
+                          <span>⟳</span>
+                          <span>CW (+90°)</span>
+                        </button>
+                        <button
+                          onClick={() => setPileCapRotation(activeSupportNodeId, 0)}
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700 rounded text-xs font-semibold transition-colors"
+                          title="Reset rotation to 0°"
+                        >
+                          0°
+                        </button>
                       </div>
                     </div>
 

@@ -3,6 +3,7 @@ import { ColumnNumberingService } from '@/features/model/columnNumbering';
 import { PileCapDesignOutput } from './pileCapDesignEngine';
 import { IS456Flexure } from '@/features/codes/is456/flexure';
 import { DetailedCalculationReport } from '@/features/calculations/types';
+import { rotatePoints2D } from './pileCapGeometryUtils';
 
 export type CombinedCapReason = 'SHEAR_WALL' | 'MERGED_CLOSE_COLUMNS' | 'MANUAL_MERGE';
 
@@ -43,6 +44,7 @@ export interface CombinedPileCapGroup {
   botRebarCallout: string;
   topRebarCallout: string;
   shearWallStirrupCallout: string;
+  rotationAngle?: number;
   isCustomized?: boolean;
   status: 'PASS' | 'WARNING';
   absorbedIndividualCaps: number[];
@@ -70,6 +72,7 @@ export class CombinedPileCapEngine {
       customSafePileCapacity?: number;
       customBottomRebar?: string;
       customTopRebar?: string;
+      rotationAngle?: number;
     }>,
     defaultSafeWorkingCapacity = 280
   ): CombinedPileCapGroup[] {
@@ -377,7 +380,7 @@ export class CombinedPileCapEngine {
 
     // Dynamic optimal grid placement strictly bounded within cap dimensions
     const grid = CombinedPileCapEngine.computeOptimalGrid(pileCount, capLength, capWidth, Dp, eo);
-    const pileOffsets = grid.pileOffsets;
+    let pileOffsets = grid.pileOffsets;
     const nCols = longIsX ? grid.nX : grid.nZ;
     const nRows = longIsX ? grid.nZ : grid.nX;
 
@@ -444,6 +447,18 @@ export class CombinedPileCapEngine {
       boundaryZones,
     };
 
+    const rotationAngle = override?.rotationAngle || 0;
+    if (rotationAngle !== 0) {
+      const pts2D = pileOffsets.map((p) => ({ x: p.x, y: p.z }));
+      const rotated = rotatePoints2D(pts2D, rotationAngle, { x: 0, y: 0 });
+      pileOffsets = rotated.map((p) => ({ x: p.x, z: p.y }));
+      if (!override?.customCapLength && !override?.customCapWidth && (rotationAngle === 90 || rotationAngle === 270)) {
+        const temp = capLength;
+        capLength = capWidth;
+        capWidth = temp;
+      }
+    }
+
     const groupResult: CombinedPileCapGroup = {
       groupId: 'SW-' + idx,
       reason: 'SHEAR_WALL',
@@ -454,8 +469,8 @@ export class CombinedPileCapEngine {
       maxX,
       minZ,
       maxZ,
-      wallLengthM: Math.max(maxX - minX, maxZ - minZ),
-      wallWidthM: Math.min(maxX - minX, maxZ - minZ),
+      wallLengthM: spanLongMm / 1000,
+      wallWidthM: spanShortMm / 1000,
       totalFactoredLoad: Math.round(totalPu),
       totalWorkingLoad,
       safePileCapacity,
@@ -474,6 +489,7 @@ export class CombinedPileCapEngine {
       botRebarCallout: override?.customBottomRebar || `T16 @ ${sp} mm c/c (Long Way Bot)`,
       topRebarCallout: override?.customTopRebar || `T12 @ 150 mm c/c (Both Ways Top)`,
       shearWallStirrupCallout: 'T10 @ 200 mm c/c (Strap Ties)',
+      rotationAngle,
       isCustomized,
       status,
       absorbedIndividualCaps: cn.map((n) => n.nodeId),
@@ -594,7 +610,7 @@ export class CombinedPileCapEngine {
 
     // Dynamic optimal grid placement strictly bounded within cap dimensions
     const grid = CombinedPileCapEngine.computeOptimalGrid(pileCount, capLength, capWidth, Dp, eo);
-    const pileOffsets = grid.pileOffsets;
+    let pileOffsets = grid.pileOffsets;
     const nLongGrid = isXDir ? grid.nX : grid.nZ;
     const nShortGrid = isXDir ? grid.nZ : grid.nX;
 
@@ -665,6 +681,18 @@ export class CombinedPileCapEngine {
       }
     }
 
+    const rotationAngle = override?.rotationAngle || 0;
+    if (rotationAngle !== 0) {
+      const pts2D = pileOffsets.map((p) => ({ x: p.x, y: p.z }));
+      const rotated = rotatePoints2D(pts2D, rotationAngle, { x: 0, y: 0 });
+      pileOffsets = rotated.map((p) => ({ x: p.x, z: p.y }));
+      if (!override?.customCapLength && !override?.customCapWidth && (rotationAngle === 90 || rotationAngle === 270)) {
+        const temp = capLength;
+        capLength = capWidth;
+        capWidth = temp;
+      }
+    }
+
     const groupResult: CombinedPileCapGroup = {
       groupId: isManual ? `MANUAL-${idx}` : `MERGE-${idx}`,
       reason: nodes.length >= 3 ? 'SHEAR_WALL' : isManual ? 'MANUAL_MERGE' : 'MERGED_CLOSE_COLUMNS',
@@ -695,6 +723,7 @@ export class CombinedPileCapEngine {
       botRebarCallout: override?.customBottomRebar || `T16 @ ${sp} mm c/c (Long Way Bot)`,
       topRebarCallout: override?.customTopRebar || `T12 @ 150 mm c/c (Both Ways Top)`,
       shearWallStirrupCallout: `T10 @ 200 mm c/c (Strap Ties)`,
+      rotationAngle,
       isCustomized,
       status,
       absorbedIndividualCaps: nodes.map((n) => n.nodeId),

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { CombinedPileCapEngine, CombinedPileCapGroup } from './combinedPileCapEngine';
-import { X, Layers, CheckCircle2, AlertTriangle, RotateCcw, ShieldCheck, Grid } from 'lucide-react';
+import { X, Layers, CheckCircle2, AlertTriangle, RotateCcw, RotateCw, ShieldCheck, Grid } from 'lucide-react';
 
 interface CombinedPileCapEditModalProps {
   cap: CombinedPileCapGroup | null;
@@ -16,6 +16,7 @@ interface CombinedPileCapEditModalProps {
       customSafePileCapacity?: number;
       customBottomRebar?: string;
       customTopRebar?: string;
+      rotationAngle?: number;
     }
   ) => void;
   onReset: (groupId: string) => void;
@@ -47,6 +48,7 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
   const [capLength, setCapLength] = useState<number>(cap.capLength || Math.max(minRequiredX, 2200));
   const [capWidth, setCapWidth] = useState<number>(cap.capWidth || Math.max(minRequiredZ, 2200));
   const [capDepth, setCapDepth] = useState<number>(cap.capDepth || 900);
+  const [rotationAngle, setRotationAngle] = useState<number>(cap.rotationAngle || 0);
   const [botRebar, setBotRebar] = useState<string>(cap.botRebarCallout || 'T16 @ 100 mm c/c (Long Way Bot)');
   const [topRebar, setTopRebar] = useState<string>(cap.topRebarCallout || 'T12 @ 150 mm c/c (Both Ways Top)');
 
@@ -69,6 +71,7 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
       customCapDepth: capDepth,
       customBottomRebar: botRebar,
       customTopRebar: topRebar,
+      rotationAngle,
     });
     onClose();
   };
@@ -242,6 +245,53 @@ export const CombinedPileCapEditModal: React.FC<CombinedPileCapEditModalProps> =
                 onChange={(e) => setTopRebar(e.target.value)}
                 className="w-full px-3 py-1.5 bg-white border border-ui-border rounded focus:outline-none focus:ring-1 focus:ring-secondary-brand"
               />
+            </div>
+
+            {/* Mat Rotation & Alignment */}
+            <div className="col-span-2 bg-slate-50 border border-ui-border rounded p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="font-bold text-slate-700 flex items-center gap-1.5">
+                  <RotateCw className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Mat Orientation / Rotation:</span>
+                </label>
+                <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                  {((rotationAngle % 360) + 360) % 360}°
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {[0, 90, 180, 270].map((deg) => (
+                  <button
+                    key={deg}
+                    type="button"
+                    onClick={() => setRotationAngle(deg)}
+                    className={`flex-1 py-1.5 rounded font-bold border text-center transition-all ${
+                      (((rotationAngle % 360) + 360) % 360) === deg
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white hover:bg-slate-100 text-slate-700 border-ui-border'
+                    }`}
+                  >
+                    {deg}°
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => setRotationAngle((prev) => ((prev - 90) % 360 + 360) % 360)}
+                  className="flex-1 flex items-center justify-center gap-1 py-1 bg-white hover:bg-slate-100 border border-ui-border rounded font-bold text-slate-700"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Rotate CCW (-90°)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRotationAngle((prev) => ((prev + 90) % 360 + 360) % 360)}
+                  className="flex-1 flex items-center justify-center gap-1 py-1 bg-white hover:bg-slate-100 border border-ui-border rounded font-bold text-slate-700"
+                >
+                  <RotateCw className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Rotate CW (+90°)</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

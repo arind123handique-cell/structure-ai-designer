@@ -64,8 +64,12 @@ export const PileCapDesignView: React.FC = () => {
     assignPileTypeToSupport,
     setCustomPileCapOverride,
     clearCustomPileCapOverride,
+    rotatePileCap,
+    setPileCapRotation,
     setCustomCombinedCapOverride,
     clearCustomCombinedCapOverride,
+    rotateCombinedPileCap,
+    setCombinedCapRotation,
     savedPileCapDesigns,
     savePileCapDesigns,
     getSectionAnalysisSource,
@@ -262,6 +266,7 @@ export const PileCapDesignView: React.FC = () => {
       customCapLength?: number;
       customCapWidth?: number;
       customCapDepth?: number;
+      rotationAngle?: number;
     }
   ) => {
     if (overrides.pileTypeId) {
@@ -272,6 +277,7 @@ export const PileCapDesignView: React.FC = () => {
       customCapLength: overrides.customCapLength,
       customCapWidth: overrides.customCapWidth,
       customCapDepth: overrides.customCapDepth,
+      rotationAngle: overrides.rotationAngle,
     });
   };
 
@@ -609,6 +615,41 @@ export const PileCapDesignView: React.FC = () => {
       width: '180px',
     },
     {
+      header: 'ORIENTATION',
+      align: 'center',
+      cell: (r) => {
+        if (!r.design) return <span className="text-slate-400 font-mono">—</span>;
+        const nodeId = r.nodeIds[0];
+        const rot = ((customPileCapOverrides[nodeId]?.rotationAngle ?? r.design.rotationAngle ?? 0) % 360 + 360) % 360;
+        return (
+          <div className="flex items-center justify-center gap-1 font-mono">
+            <button
+              onClick={() => rotatePileCap(nodeId, 'CCW')}
+              className="p-1 hover:bg-slate-200 text-slate-600 rounded transition-colors"
+              title="Rotate Counter-Clockwise (-90°)"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
+            </button>
+            <span className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${
+              rot !== 0
+                ? 'bg-blue-50 text-blue-700 border-blue-300'
+                : 'bg-slate-50 text-slate-600 border-slate-200'
+            }`}>
+              {rot}°
+            </span>
+            <button
+              onClick={() => rotatePileCap(nodeId, 'CW')}
+              className="p-1 hover:bg-slate-200 text-slate-600 rounded transition-colors"
+              title="Rotate Clockwise (+90°)"
+            >
+              <RotateCw className="w-3.5 h-3.5 text-blue-600" />
+            </button>
+          </div>
+        );
+      },
+      width: '130px',
+    },
+    {
       header: 'CONCRETE (m³)',
       sortable: true,
       align: 'right',
@@ -890,6 +931,26 @@ export const PileCapDesignView: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                selectedSupportNodeIds.forEach((nid) => rotatePileCap(nid, 'CCW'));
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-600/40 rounded font-bold transition-colors"
+              title="Rotate selected pile caps 90° counter-clockwise"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Rotate CCW</span>
+            </button>
+            <button
+              onClick={() => {
+                selectedSupportNodeIds.forEach((nid) => rotatePileCap(nid, 'CW'));
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-600/40 rounded font-bold transition-colors"
+              title="Rotate selected pile caps 90° clockwise"
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+              <span>Rotate CW</span>
+            </button>
             <button
               onClick={() => clearSelectedSupportNodes()}
               className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-semibold transition-colors"

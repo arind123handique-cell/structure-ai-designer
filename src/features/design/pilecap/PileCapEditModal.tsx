@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { PileCapDesignEngine, PileCapDesignOutput } from './pileCapDesignEngine';
 import { ProjectPileType } from '@/features/design/pile/pileDesignEngine';
 import { FoundationPunchingShear } from '@/features/codes/foundation/punchingShear';
-import { X, Sparkles, Check, RotateCcw, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { X, Sparkles, Check, RotateCcw, RotateCw, ShieldCheck, AlertTriangle } from 'lucide-react';
 
 interface PileCapEditModalProps {
   pileCap: PileCapDesignOutput | null;
@@ -15,6 +15,7 @@ interface PileCapEditModalProps {
     customCapLength?: number;
     customCapWidth?: number;
     customCapDepth?: number;
+    rotationAngle?: number;
   }) => void;
   onReset: (nodeId: number) => void;
 }
@@ -32,6 +33,7 @@ export const PileCapEditModal: React.FC<PileCapEditModalProps> = ({
   const [length, setLength] = useState<number>(2500);
   const [width, setWidth] = useState<number>(2500);
   const [depth, setDepth] = useState<number>(800);
+  const [rotationAngle, setRotationAngle] = useState<number>(0);
 
   useEffect(() => {
     if (pileCap && isOpen) {
@@ -40,6 +42,7 @@ export const PileCapEditModal: React.FC<PileCapEditModalProps> = ({
       setLength(pileCap.capLength);
       setWidth(pileCap.capWidth);
       setDepth(pileCap.capDepth);
+      setRotationAngle(pileCap.rotationAngle || 0);
     }
   }, [pileCap, isOpen, projectPileTypes]);
 
@@ -117,6 +120,7 @@ export const PileCapEditModal: React.FC<PileCapEditModalProps> = ({
       customCapLength: length,
       customCapWidth: width,
       customCapDepth: depth,
+      rotationAngle,
     });
     onClose();
   };
@@ -281,6 +285,67 @@ export const PileCapEditModal: React.FC<PileCapEditModalProps> = ({
               >
                 {punchingCheck.status === 'PASS' ? 'Punching Safe' : 'Punching Fails (Increase Depth)'}
               </span>
+            </div>
+          </div>
+
+          {/* 3. Orientation & Alignment (Rotation with Bored Piles) */}
+          <div className="bg-slate-50 border border-ui-border rounded p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label className="font-bold text-slate-800 uppercase flex items-center gap-1.5">
+                <RotateCw className="w-3.5 h-3.5 text-blue-600" />
+                <span>3. Orientation &amp; Cap Rotation</span>
+              </label>
+              <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                Current: {((rotationAngle % 360) + 360) % 360}°
+              </span>
+            </div>
+
+            <p className="text-[11px] text-slate-500 font-sans">
+              Rotates the pile cap perimeter, bored piles, and rebar boundaries relative to the column centerline. Synced across 2D drawings, 3D viewer, and design schedule.
+            </p>
+
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { angle: 0, label: '0° (North)' },
+                { angle: 90, label: '90° (East/CW)' },
+                { angle: 180, label: '180° (South)' },
+                { angle: 270, label: '270° (West/CCW)' },
+              ].map((opt) => {
+                const isCur = (((rotationAngle % 360) + 360) % 360) === opt.angle;
+                return (
+                  <button
+                    key={opt.angle}
+                    type="button"
+                    onClick={() => setRotationAngle(opt.angle)}
+                    className={`py-2 px-2 rounded font-bold border transition-all text-center ${
+                      isCur
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                        : 'bg-white hover:bg-slate-100 text-slate-700 border-ui-border'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setRotationAngle((prev) => ((prev - 90) % 360 + 360) % 360)}
+                className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-white hover:bg-slate-100 border border-ui-border rounded font-bold text-slate-700 transition-colors shadow-2xs"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
+                <span>Rotate CCW (-90°)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRotationAngle((prev) => ((prev + 90) % 360 + 360) % 360)}
+                className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-white hover:bg-slate-100 border border-ui-border rounded font-bold text-slate-700 transition-colors shadow-2xs"
+              >
+                <RotateCw className="w-3.5 h-3.5 text-blue-600" />
+                <span>Rotate CW (+90°)</span>
+              </button>
             </div>
           </div>
         </div>
