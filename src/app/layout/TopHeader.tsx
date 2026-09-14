@@ -21,6 +21,7 @@ import {
   VolumeX,
   Video,
   PanelTopClose,
+  PanelLeftOpen,
   Sun,
   Moon,
   Undo2,
@@ -36,9 +37,11 @@ import { exportToStd } from '@/utils/exportUtils';
 
 interface TopHeaderProps {
   onHide?: () => void;
+  sidebarVisible?: boolean;
+  onShowSidebar?: () => void;
 }
 
-export const TopHeader: React.FC<TopHeaderProps> = React.memo(({ onHide }) => {
+export const TopHeader: React.FC<TopHeaderProps> = React.memo(({ onHide, sidebarVisible = true, onShowSidebar }) => {
   const activeProject = useProjectStore(s => s.activeProject);
   const activeModel = useProjectStore(s => s.activeModel);
   const setImportModalOpen = useProjectStore(s => s.setImportModalOpen);
@@ -124,9 +127,20 @@ export const TopHeader: React.FC<TopHeaderProps> = React.memo(({ onHide }) => {
 
   return (
     <>
-      <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-5 w-full flex-shrink-0 z-10 font-sans shadow-xs">
-        {/* Left: Project Title & Breadcrumb */}
-        <div className="flex items-center gap-3">
+      <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-5 w-full flex-shrink-0 z-10 font-sans shadow-xs">
+        {/* Left: Sidebar toggle (when hidden) & Project Title & Breadcrumb */}
+        <div className="flex items-center gap-2.5">
+          {!sidebarVisible && onShowSidebar && (
+            <button
+              type="button"
+              onClick={onShowSidebar}
+              className="p-1.5 px-2.5 bg-deep-navy hover:bg-slate-800 text-white rounded-md shadow-xs border border-slate-700 flex items-center gap-1.5 text-xs font-mono shrink-0 transition-colors"
+              title="Show Navigation Sidebar"
+            >
+              <PanelLeftOpen className="w-3.5 h-3.5" />
+              <span>Nav</span>
+            </button>
+          )}
           <h2 className="font-sans text-sm font-bold text-slate-900 truncate max-w-xs sm:max-w-md">
             {activeProject?.metadata.name || 'G+4 RCC Residential Building (6 MILES)'}
           </h2>

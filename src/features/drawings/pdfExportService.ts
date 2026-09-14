@@ -62,6 +62,8 @@ export interface PdfExportOptions {
   showGradeBeams?: boolean;
   showLiftCore?: boolean;
   selectedSectionType?: string;
+  orientation?: 'landscape' | 'portrait';
+  showCrossSections?: boolean;
 }
 
 export interface UniquePileCapType {
@@ -287,7 +289,7 @@ function computeUniquePileCapTypes(floorPlan: FloorPlanLevel): UniquePileCapType
 
 export class PdfExportService {
   /**
-   * Exports a single floor plan level to a high-resolution, vector-drawn PDF sheet (A3 Landscape).
+   * Exports a single floor plan level to a high-resolution, vector-drawn PDF sheet (A3 Landscape or Portrait).
    * Now respects web view toggles to ensure 1:1 parity with FloorPlanSvg web rendering.
    */
   public static exportSingleFloorPlanToPdf(
@@ -296,10 +298,11 @@ export class PdfExportService {
     fileName?: string,
     options: PdfExportOptions = {}
   ): void {
+    const orientation = options.orientation || 'landscape';
     const doc = new jsPDF({
-      orientation: 'landscape',
+      orientation,
       unit: 'mm',
-      format: 'a3', // 420mm x 297mm
+      format: 'a3', // 420mm x 297mm (Landscape) or 297mm x 420mm (Portrait)
     });
 
     this.renderFloorPlanPage(doc, floorPlan, project, 1, 1, options);
@@ -319,15 +322,16 @@ export class PdfExportService {
   ): void {
     if (!floorPlans || floorPlans.length === 0) return;
 
+    const orientation = options.orientation || 'landscape';
     const doc = new jsPDF({
-      orientation: 'landscape',
+      orientation,
       unit: 'mm',
-      format: 'a3', // 420mm x 297mm
+      format: 'a3',
     });
 
     floorPlans.forEach((fp, index) => {
       if (index > 0) {
-        doc.addPage('a3', 'landscape');
+        doc.addPage('a3', orientation);
       }
       this.renderFloorPlanPage(doc, fp, project, index + 1, floorPlans.length, options);
     });
@@ -358,10 +362,15 @@ export class PdfExportService {
       showGradeBeams = true,
       showLiftCore = false,
       selectedSectionType = 'ALL',
+      orientation = 'landscape',
+      showCrossSections = true,
     } = options;
 
-    const pageWidth = 420;
-    const pageHeight = 297;
+    const isPortrait = orientation === 'portrait';
+    const pageWidth = isPortrait ? 297 : 420;
+    const pageHeight = isPortrait ? 420 : 297;
+    const isFoundation = fp.isFoundationLevel;
+    const hasCrossSections = isFoundation && showCrossSections && selectedSectionType !== 'NONE';
 
     // 1. Drawing Border
     doc.setDrawColor(30, 41, 59);
@@ -371,10 +380,10 @@ export class PdfExportService {
     doc.rect(13, 13, pageWidth - 26, pageHeight - 26);
 
     // 2. Title Block
-    const tbX = pageWidth - 13 - 130;
-    const tbY = pageHeight - 13 - 48;
-    const tbW = 130;
+    const tbW = isPortrait ? pageWidth - 26 : 130;
     const tbH = 48;
+    const tbX = isPortrait ? 13 : pageWidth - 13 - tbW;
+    const tbY = pageHeight - 13 - tbH;
     doc.setFillColor(248, 250, 252);
     doc.rect(tbX, tbY, tbW, tbH, 'F');
     doc.setDrawColor(51, 65, 85);
@@ -406,34 +415,36 @@ export class PdfExportService {
     doc.setTextColor(5, 150, 105);
     doc.text(`SHEET: ${pageNumber} OF ${totalPages} (APPROVED)`, tbX + 74, tbY + 44);
 
-    // 3. Notes & Legend Box
-    const nbX = 16;
-    const nbY = pageHeight - 13 - 48;
-    const nbW = 140;
-    const nbH = 48;
-    doc.setFillColor(248, 250, 252);
-    doc.rect(nbX, nbY, nbW, nbH, 'F');
-    doc.setDrawColor(203, 213, 225);
-    doc.rect(nbX, nbY, nbW, nbH, 'S');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
-    doc.setTextColor(30, 41, 59);
-    doc.text('GENERAL STRUCTURAL SPECIFICATIONS (IS 456 & IS 2911):', nbX + 4, nbY + 7);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7);
-    doc.setTextColor(71, 85, 105);
-    doc.text('1. All dimensions are in millimeters (mm) and levels are in meters (m) unless specified.', nbX + 4, nbY + 14);
-    doc.text('2. Concrete Grade: M25 / M30 (fck = 25 - 30 N/mm2), Steel: TMT Fe500D (IS 1786).', nbX + 4, nbY + 20);
-    doc.text('3. Clear Covers: Footings/Pile Caps = 60mm, Columns = 40mm, Beams = 30mm, Slabs = 20mm.', nbX + 4, nbY + 26);
-    doc.text('4. Lap Length = 47 x dia for tension laps; Laps shall be staggered as per IS 13920.', nbX + 4, nbY + 32);
-    doc.text(
-      fp.isFoundationLevel
-        ? '5. Foundation: Bored RCC Piles Dia 500mm (Qsafe = 450 kN). All caps rigid IS 2911.'
-        : `5. Floor Area: ${fp.metrics.totalFloorAreaM2} sq.m | Beams: ${fp.metrics.totalBeams} Nos | Columns: ${fp.metrics.totalColumns} Nos.`,
-      nbX + 4,
-      nbY + 38
-    );
-    doc.text('6. Construction shall conform strictly to National Building Code (NBC) 2016.', nbX + 4, nbY + 44);
+    // 3. Notes & Legend Box (drawn when Landscape)
+    if (!isPortrait) {
+      const nbX = 16;
+      const nbY = pageHeight - 13 - 48;
+      const nbW = 140;
+      const nbH = 48;
+      doc.setFillColor(248, 250, 252);
+      doc.rect(nbX, nbY, nbW, nbH, 'F');
+      doc.setDrawColor(203, 213, 225);
+      doc.rect(nbX, nbY, nbW, nbH, 'S');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(30, 41, 59);
+      doc.text('GENERAL STRUCTURAL SPECIFICATIONS (IS 456 & IS 2911):', nbX + 4, nbY + 7);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(71, 85, 105);
+      doc.text('1. All dimensions are in millimeters (mm) and levels are in meters (m) unless specified.', nbX + 4, nbY + 14);
+      doc.text('2. Concrete Grade: M25 / M30 (fck = 25 - 30 N/mm2), Steel: TMT Fe500D (IS 1786).', nbX + 4, nbY + 20);
+      doc.text('3. Clear Covers: Footings/Pile Caps = 60mm, Columns = 40mm, Beams = 30mm, Slabs = 20mm.', nbX + 4, nbY + 26);
+      doc.text('4. Lap Length = 47 x dia for tension laps; Laps shall be staggered as per IS 13920.', nbX + 4, nbY + 32);
+      doc.text(
+        fp.isFoundationLevel
+          ? '5. Foundation: Bored RCC Piles Dia 500mm (Qsafe = 450 kN). All caps rigid IS 2911.'
+          : `5. Floor Area: ${fp.metrics.totalFloorAreaM2} sq.m | Beams: ${fp.metrics.totalBeams} Nos | Columns: ${fp.metrics.totalColumns} Nos.`,
+        nbX + 4,
+        nbY + 38
+      );
+      doc.text('6. Construction shall conform strictly to National Building Code (NBC) 2016.', nbX + 4, nbY + 44);
+    }
 
     // 4. North Arrow
     const naX = pageWidth - 35;
@@ -447,11 +458,37 @@ export class PdfExportService {
     doc.triangle(naX, naY - 4, naX - 4, naY + 8, naX + 4, naY + 8, 'FD');
 
     // 5. Compute Scaling & Transformation for 2D Plan View — matched to FloorPlanSvg 1:1 math
-    const isFoundation = fp.isFoundationLevel;
-    const drawX0 = isFoundation ? 35 : 40;
-    const drawY0 = 35;
-    const drawAreaW = isFoundation ? 200 : pageWidth - 80;
-    const drawAreaH = pageHeight - 110;
+    let drawX0 = 35;
+    let drawY0 = 35;
+    let drawAreaW = pageWidth - 70;
+    let drawAreaH = pageHeight - 110;
+
+    if (isPortrait) {
+      if (hasCrossSections) {
+        drawX0 = 25;
+        drawY0 = 30;
+        drawAreaW = pageWidth - 50;
+        drawAreaH = 165;
+      } else {
+        drawX0 = 25;
+        drawY0 = 30;
+        drawAreaW = pageWidth - 50;
+        drawAreaH = pageHeight - 90;
+      }
+    } else {
+      // Landscape
+      if (hasCrossSections) {
+        drawX0 = 35;
+        drawY0 = 30;
+        drawAreaW = 200;
+        drawAreaH = pageHeight - 80;
+      } else {
+        drawX0 = 35;
+        drawY0 = 30;
+        drawAreaW = pageWidth - 70;
+        drawAreaH = pageHeight - 90;
+      }
+    }
 
     const bounds = fp.bounds;
     const modelW = Math.max(bounds.width, 10);
@@ -975,8 +1012,8 @@ export class PdfExportService {
       });
     }
 
-    // 12. FOUNDATION SPECIAL: Detailed Enlarged Pile Cap Plans & Cross-Sections — now DYNAMIC, respects selectedSectionType
-    if (isFoundation) {
+    // 12. FOUNDATION SPECIAL: Detailed Enlarged Pile Cap Plans & Cross-Sections — respects orientation and hasCrossSections
+    if (hasCrossSections) {
       const uniqueTypes = computeUniquePileCapTypes(fp);
       const visibleTypes = (() => {
         if (selectedSectionType === 'ALL' || !selectedSectionType) return uniqueTypes;
@@ -987,10 +1024,10 @@ export class PdfExportService {
       // If no visible types or filter yields none, skip panel
       if (visibleTypes.length === 0) return;
 
-      const pBoxX = pageWidth - 13 - 176;
-      const pBoxY = 30;
-      const pBoxW = 176;
-      const pBoxH = 205;
+      const pBoxX = isPortrait ? 13 : pageWidth - 13 - 176;
+      const pBoxY = isPortrait ? 205 : 30;
+      const pBoxW = isPortrait ? pageWidth - 26 : 176;
+      const pBoxH = isPortrait ? 150 : 205;
       doc.setFillColor(248, 250, 252);
       doc.rect(pBoxX, pBoxY, pBoxW, pBoxH, 'F');
       doc.setDrawColor(51, 65, 85);

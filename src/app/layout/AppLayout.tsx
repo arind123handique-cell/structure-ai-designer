@@ -128,24 +128,18 @@ export const AppLayout: React.FC = () => {
   return (
     <div className={`${theme === 'dark' ? 'theme-dark' : 'theme-light'} flex h-screen w-screen overflow-hidden bg-ui-background text-on-surface`}>
       {/* Left Sidebar — hideable */}
-      {sidebarVisible ? (
+      {sidebarVisible && (
         <Sidebar onHide={() => setSidebarVisible(false)} />
-      ) : (
-        <button
-          type="button"
-          onClick={() => setSidebarVisible(true)}
-          className="fixed left-2 top-3 z-40 p-2 bg-deep-navy hover:bg-slate-800 text-white rounded-md shadow-lg border border-slate-700 flex items-center gap-1.5 text-xs font-mono"
-          title="Show Navigation Sidebar"
-        >
-          <PanelLeftOpen className="w-4 h-4" />
-          <span className="hidden md:inline">Nav</span>
-        </button>
       )}
 
       {/* Main Container */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         {headerVisible ? (
-          <TopHeader onHide={() => setHeaderVisible(false)} />
+          <TopHeader
+            onHide={() => setHeaderVisible(false)}
+            sidebarVisible={sidebarVisible}
+            onShowSidebar={() => setSidebarVisible(true)}
+          />
         ) : (
           <div className="h-8 bg-surface-card border-b border-ui-border flex items-center justify-between px-3 shrink-0">
             <span className="text-[10px] font-mono text-slate-400">Header hidden</span>

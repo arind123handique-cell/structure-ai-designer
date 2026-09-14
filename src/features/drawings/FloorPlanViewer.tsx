@@ -28,6 +28,12 @@ import {
   PlusCircle,
   ExternalLink,
   Trash2,
+  Eye,
+  EyeOff,
+  Maximize2,
+  Minimize2,
+  Settings2,
+  Info,
 } from 'lucide-react';
 
 export const FloorPlanViewer: React.FC = () => {
@@ -68,6 +74,13 @@ export const FloorPlanViewer: React.FC = () => {
   const activePlan = useMemo(() => {
     return floorPlans[selectedLevelIndex] || floorPlans[0];
   }, [floorPlans, selectedLevelIndex]);
+
+  // CAD Sheet Orientation & Section Visibility State (A3 Landscape / Portrait)
+  const [sheetOrientation, setSheetOrientation] = useState<'LANDSCAPE' | 'PORTRAIT'>('LANDSCAPE');
+  const [showCrossSections, setShowCrossSections] = useState<boolean>(true);
+  const [layersMenuOpen, setLayersMenuOpen] = useState<boolean>(false);
+  const [zoomFit, setZoomFit] = useState<boolean>(true);
+  const [metricsExpanded, setMetricsExpanded] = useState<boolean>(false);
 
   // Layer Visibility States (Always keep labels/dimensions off by default)
   const [showGrids, setShowGrids] = useState(true);
@@ -168,8 +181,10 @@ export const FloorPlanViewer: React.FC = () => {
         showPileCaps,
         showGradeBeams,
         selectedSectionType,
+        orientation: sheetOrientation.toLowerCase() as any,
+        showCrossSections,
       });
-      setPdfSuccessMessage(`Exported ${activePlan.sheetNumber} (${activePlan.levelName}) to PDF!`);
+      setPdfSuccessMessage(`Exported ${activePlan.sheetNumber} (${activePlan.levelName}) as A3 ${sheetOrientation} PDF!`);
       setTimeout(() => setPdfSuccessMessage(null), 3500);
     } catch (err) {
       console.error('PDF export failed:', err);
@@ -192,8 +207,10 @@ export const FloorPlanViewer: React.FC = () => {
         showPileCaps,
         showGradeBeams,
         selectedSectionType,
+        orientation: sheetOrientation.toLowerCase() as any,
+        showCrossSections,
       });
-      setPdfSuccessMessage(`Exported complete multi-page PDF set for all ${floorPlans.length} floor levels!`);
+      setPdfSuccessMessage(`Exported complete A3 ${sheetOrientation} multi-page PDF set for all ${floorPlans.length} floor levels!`);
       setTimeout(() => setPdfSuccessMessage(null), 4000);
     } catch (err) {
       console.error('All floors PDF export failed:', err);
@@ -306,255 +323,292 @@ export const FloorPlanViewer: React.FC = () => {
         </div>
       )}
 
-      {/* Floor Elevation Level Switcher Bar */}
-      <div className="bg-surface-card p-3 rounded-lg border border-ui-border space-y-3 shadow-2xs">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-mono font-bold text-slate-500 uppercase flex items-center gap-1.5">
-            <Building className="w-4 h-4 text-sky-600" />
-            Select Floor Level Elevation (Y):
-          </span>
-          <span className="text-xs font-mono text-slate-500">
-            Total {floorPlans.length} Floor Levels in Project
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          {floorPlans.map((fp, idx) => (
-            <button
-              key={fp.sheetNumber}
-              onClick={() => setSelectedLevelIndex(idx)}
-              className={`px-3.5 py-2 rounded-md font-mono text-xs transition-all shrink-0 flex items-center gap-2 border ${
-                selectedLevelIndex === idx
-                  ? 'bg-deep-navy text-white font-bold border-deep-navy shadow-xs'
-                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-300'
-              }`}
-            >
-              <span
-                className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+      {/* Unified CAD Engineering Toolbar */}
+      <div className="bg-surface-card p-3 rounded-lg border border-ui-border space-y-2.5 shadow-2xs">
+        {/* Row 1: Floor Elevation Level Switcher Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+            <span className="text-[11px] font-mono font-bold text-slate-500 uppercase flex items-center gap-1 mr-1 shrink-0">
+              <Building className="w-3.5 h-3.5 text-sky-600" />
+              Level:
+            </span>
+            {floorPlans.map((fp, idx) => (
+              <button
+                key={fp.sheetNumber}
+                onClick={() => setSelectedLevelIndex(idx)}
+                className={`px-2.5 py-1 rounded font-mono text-xs transition-all shrink-0 flex items-center gap-1.5 border ${
                   selectedLevelIndex === idx
-                    ? 'bg-sky-500/30 text-sky-200 border border-sky-400/40'
-                    : 'bg-slate-200 text-slate-700'
+                    ? 'bg-deep-navy text-white font-bold border-deep-navy shadow-xs'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-300'
                 }`}
               >
-                {fp.sheetNumber}
-              </span>
-              <span>{fp.isFoundationLevel ? 'Foundation Level' : `El. +${fp.elevationY.toFixed(2)}m`}</span>
-              <span className="text-[11px] opacity-75">
-                {fp.isFoundationLevel
-                  ? `(${fp.columns.length} Caps)`
-                  : `(${fp.beams.length} Beams)`}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Layer Toggles & Active Floor Level Metrics Strip */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-        {/* Layer Visibility Toggles */}
-        <div className="bg-surface-card p-3 rounded-lg border border-ui-border space-y-2 shadow-2xs">
-          <span className="text-xs font-mono font-bold text-slate-700 uppercase flex items-center gap-1.5">
-            <Sliders className="w-3.5 h-3.5 text-indigo-600" />
-            Drawing Layer Toggles
-          </span>
-          <div className="grid grid-cols-2 gap-1.5 text-xs font-mono">
-            <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 hover:text-slate-900">
-              <input
-                type="checkbox"
-                checked={showGrids}
-                onChange={(e) => setShowGrids(e.target.checked)}
-                className="rounded text-secondary-brand focus:ring-secondary-brand"
-              />
-              <span>Grid Lines</span>
-            </label>
-
-            <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 hover:text-slate-900">
-              <input
-                type="checkbox"
-                checked={showDimensions}
-                onChange={(e) => setShowDimensions(e.target.checked)}
-                className="rounded text-secondary-brand focus:ring-secondary-brand"
-              />
-              <span>Dimensions</span>
-            </label>
-
-            <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 hover:text-slate-900">
-              <input
-                type="checkbox"
-                checked={showMemberLabels}
-                onChange={(e) => setShowMemberLabels(e.target.checked)}
-                className="rounded text-secondary-brand focus:ring-secondary-brand"
-              />
-              <span>Labels (B/C)</span>
-            </label>
-
-            <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 hover:text-slate-900">
-              <input
-                type="checkbox"
-                checked={showSectionSizes}
-                onChange={(e) => setShowSectionSizes(e.target.checked)}
-                className="rounded text-secondary-brand focus:ring-secondary-brand"
-              />
-              <span>Section Sizes</span>
-            </label>
-
-            <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 hover:text-slate-900">
-              <input
-                type="checkbox"
-                checked={showSlabs}
-                onChange={(e) => setShowSlabs(e.target.checked)}
-                className="rounded text-secondary-brand focus:ring-secondary-brand"
-              />
-              <span>Floor Slabs</span>
-            </label>
-
-            <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 hover:text-slate-900 font-bold text-amber-700">
-              <input
-                type="checkbox"
-                checked={showStaircases}
-                onChange={(e) => setShowStaircases(e.target.checked)}
-                className="rounded text-amber-600 focus:ring-amber-600"
-              />
-              <span className="flex items-center gap-1">
-                <Footprints className="w-3.5 h-3.5 text-amber-600" />
-                Staircases (Moveable)
-              </span>
-            </label>
-
-            {activePlan.isFoundationLevel && (
-              <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 hover:text-slate-900">
-                <input
-                  type="checkbox"
-                  checked={showPileCaps}
-                  onChange={(e) => setShowPileCaps(e.target.checked)}
-                  className="rounded text-secondary-brand focus:ring-secondary-brand"
-                />
-                <span>Pile Caps</span>
-              </label>
-            )}
-          </div>
-        </div>
-
-        {/* Quantities Card 1: Area & Framing Elements */}
-        <div className="bg-surface-card p-3 rounded-lg border border-ui-border shadow-2xs flex flex-col justify-between">
-          <span className="text-[10px] font-mono uppercase text-slate-500 block font-semibold">
-            {activePlan.isFoundationLevel ? 'Foundation Columns / Caps' : 'Framing Members at Level'}
-          </span>
-          <div className="font-mono space-y-0.5">
-            <span className="text-base font-bold text-deep-navy">
-              {activePlan.isFoundationLevel
-                ? `${activePlan.columns.length} Column Pile Caps`
-                : `${activePlan.beams.length} Beams • ${activePlan.columns.length} Columns`}
-            </span>
-            <span className="text-[11px] text-slate-500 block">
-              Floor Plan Area: {activePlan.metrics.totalFloorAreaM2} m²
-            </span>
-          </div>
-        </div>
-
-        {/* Quantities Card 2: Concrete & Steel Volume */}
-        <div className="bg-surface-card p-3 rounded-lg border border-ui-border shadow-2xs flex flex-col justify-between">
-          <span className="text-[10px] font-mono uppercase text-slate-500 block font-semibold">
-            Estimated Takeoff for this Level
-          </span>
-          <div className="font-mono space-y-0.5">
-            <span className="text-base font-bold text-emerald-700">
-              {activePlan.metrics.totalConcreteM3} m³ Concrete
-            </span>
-            <span className="text-[11px] text-slate-500 block">
-              Rebar Takeoff: {activePlan.metrics.totalSteelKg} kg (~{(activePlan.metrics.totalSteelKg / 1000).toFixed(2)} MT)
-            </span>
-          </div>
-        </div>
-
-        {/* Quantities Card 3: IS Code Detailing */}
-        <div className="bg-surface-card p-3 rounded-lg border border-ui-border shadow-2xs flex flex-col justify-between">
-          <span className="text-[10px] font-mono uppercase text-slate-500 block font-semibold">
-            Detailing Code &amp; Sheet No
-          </span>
-          <div className="font-mono space-y-0.5">
-            <span className="text-base font-bold text-indigo-700">
-              {activePlan.sheetNumber} (IS 456 / IS 13920)
-            </span>
-            <span className="text-[11px] text-slate-500 block">
-              Elevation: Y = {activePlan.elevationY >= 0 ? `+${activePlan.elevationY.toFixed(3)}` : activePlan.elevationY.toFixed(3)} m
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Foundation Level Active Cross-Section View Selector — bullet switch per user request */}
-      {activePlan.isFoundationLevel && (
-        <div className="bg-surface-card p-3 rounded-lg border border-ui-border shadow-2xs space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Compass className="w-4 h-4 text-sky-600" />
-              <span className="text-xs font-mono font-bold text-deep-navy uppercase">
-                Foundation Cross-Section View:
-              </span>
-              <span className="text-[11px] text-slate-500 font-sans">
-                (Bullet switch — select which pile-cap plan / section to display)
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {[
-                { id: 'ALL', label: 'All Cross-Sections (Grid)' },
-                { id: 'TYPE-1', label: 'Section 1-1 (4-Pile Cap)' },
-                { id: 'TYPE-2', label: 'Section 2-2 (5-Pile Cap)' },
-                { id: 'COMBINED', label: 'Section 3-3 (Shear Wall / Combined Mat)' },
-              ].map((sec) => {
-                const isActive = selectedSectionType === sec.id;
-                return (
-                  <button
-                    key={sec.id}
-                    type="button"
-                    onClick={() => setSelectedSectionType(sec.id)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full font-mono text-xs font-semibold transition-all border ${
-                      isActive
-                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                        : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300'
-                    }`}
-                  >
-                    <span className={`w-2.5 h-2.5 rounded-full border-2 flex items-center justify-center shrink-0 ${isActive ? 'bg-white border-white' : 'border-slate-400 bg-white'}`}>
-                      {isActive && <span className="w-1.5 h-1.5 rounded-full bg-indigo-600"></span>}
-                    </span>
-                    {sec.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Bullet switch for Pile Cap Plan vs Section display */}
-          <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-100">
-            <span className="text-xs font-mono font-bold text-slate-700 flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-indigo-600" />
-              Pile Cap Display:
-            </span>
-            {[
-              { id: 'BOTH', label: 'Both Plan & Section' },
-              { id: 'PLAN', label: 'Plan Only' },
-              { id: 'SECTION', label: 'Section Only' },
-            ].map((opt) => {
-              const isActive = pileCapDisplayMode === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => setPileCapDisplayMode(opt.id as any)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full font-mono text-xs font-semibold transition-all border ${
-                    isActive ? 'bg-deep-navy text-white border-deep-navy' : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300'
+                <span
+                  className={`px-1 py-0.2 rounded text-[9.5px] font-bold ${
+                    selectedLevelIndex === idx
+                      ? 'bg-sky-500/30 text-sky-200 border border-sky-400/40'
+                      : 'bg-slate-200 text-slate-700'
                   }`}
                 >
-                  <span className={`w-2.5 h-2.5 rounded-full border-2 flex items-center justify-center ${isActive ? 'border-white bg-white' : 'border-slate-400'}`}>
-                    {isActive && <span className="w-1.5 h-1.5 rounded-full bg-deep-navy"></span>}
-                  </span>
-                  {opt.label}
+                  {fp.sheetNumber}
+                </span>
+                <span>{fp.isFoundationLevel ? 'Foundation' : `El. +${fp.elevationY.toFixed(2)}m`}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Quick Metrics Badge with Details Toggle */}
+          <div className="flex items-center gap-2 font-mono text-xs shrink-0">
+            <span className="px-2 py-0.5 bg-slate-100 border border-slate-300 text-slate-700 rounded text-[11px]">
+              Area: <strong className="text-slate-900">{activePlan.metrics.totalFloorAreaM2} m²</strong> • Concrete: <strong className="text-emerald-700">{activePlan.metrics.totalConcreteM3} m³</strong> • Steel: <strong className="text-indigo-700">{(activePlan.metrics.totalSteelKg / 1000).toFixed(2)} MT</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => setMetricsExpanded(!metricsExpanded)}
+              className="p-1 px-1.5 bg-white hover:bg-slate-50 border border-slate-300 rounded text-[10px] text-slate-600 flex items-center gap-1"
+              title="Toggle Detailed Quantity Breakdown"
+            >
+              <Info className="w-3 h-3 text-sky-600" />
+              <span>{metricsExpanded ? 'Hide Takeoff' : 'Takeoff'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Row 2: CAD Sheet Setup (A3 Landscape / Portrait) & Cross-Sections Controls */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* 1. Sheet Orientation Toggle: A3 Landscape vs Portrait */}
+            <div className="inline-flex items-center bg-slate-100 p-0.5 rounded border border-slate-300 text-xs font-mono">
+              <button
+                type="button"
+                onClick={() => setSheetOrientation('LANDSCAPE')}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-colors ${
+                  sheetOrientation === 'LANDSCAPE'
+                    ? 'bg-deep-navy text-white shadow-xs'
+                    : 'text-slate-700 hover:text-slate-900 hover:bg-white'
+                }`}
+                title="Format drawing as ISO A3 Landscape (420 × 297 mm)"
+              >
+                <span>🖼 A3 Landscape (420×297)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSheetOrientation('PORTRAIT')}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-colors ${
+                  sheetOrientation === 'PORTRAIT'
+                    ? 'bg-deep-navy text-white shadow-xs'
+                    : 'text-slate-700 hover:text-slate-900 hover:bg-white'
+                }`}
+                title="Format drawing as ISO A3 Portrait (297 × 420 mm)"
+              >
+                <span>📄 A3 Portrait (297×420)</span>
+              </button>
+            </div>
+
+            {/* 2. Foundation Cross-Sections Visibility & Selection */}
+            {activePlan.isFoundationLevel && (
+              <div className="flex items-center gap-1.5 flex-wrap font-mono text-xs">
+                {/* 1-Click Hide/Show Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setShowCrossSections(!showCrossSections)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded border text-xs font-semibold transition-colors ${
+                    showCrossSections
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                      : 'bg-rose-50 border-rose-300 text-rose-800 hover:bg-rose-100'
+                  }`}
+                  title={showCrossSections ? 'Hide cross-sections and expand foundation plan to full sheet' : 'Show foundation cross-sections'}
+                >
+                  {showCrossSections ? <Eye className="w-3.5 h-3.5 text-emerald-600" /> : <EyeOff className="w-3.5 h-3.5 text-rose-600" />}
+                  <span>{showCrossSections ? 'Cross-Sections: Visible' : 'Cross-Sections: Hidden (Plan Only)'}</span>
                 </button>
-              );
-            })}
-            <span className="text-[11px] text-slate-500 ml-2">• Bullet switch controls which pile-cap drawings are visible in 2D plan and PDF export</span>
+
+                {/* Specific Section Pills */}
+                {showCrossSections && (
+                  <div className="inline-flex items-center bg-slate-100 p-0.5 rounded border border-slate-300 gap-0.5">
+                    {[
+                      { id: 'ALL', label: 'All (Grid)' },
+                      { id: 'PC1', label: 'PC1 (2-Pile)' },
+                      { id: 'PC2', label: 'PC2 (3-Pile)' },
+                      { id: 'PC3', label: 'PC3 (4-Pile)' },
+                      { id: 'COMBINED', label: 'Combined Mat' },
+                    ].map((sec) => {
+                      const isActive = selectedSectionType === sec.id;
+                      return (
+                        <button
+                          key={sec.id}
+                          type="button"
+                          onClick={() => setSelectedSectionType(sec.id)}
+                          className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-colors ${
+                            isActive
+                              ? 'bg-indigo-600 text-white shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-white'
+                          }`}
+                        >
+                          {sec.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Right Controls: Layers Popover & Zoom/Fit Toggle */}
+          <div className="flex items-center gap-2">
+            {/* Layers Dropdown Popover */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setLayersMenuOpen(!layersMenuOpen)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-semibold rounded border transition-colors ${
+                  layersMenuOpen
+                    ? 'bg-slate-200 border-slate-400 text-slate-900'
+                    : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300 shadow-2xs'
+                }`}
+                title="Toggle Drawing CAD Layers"
+              >
+                <Sliders className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Layers (7)</span>
+                <ChevronDown className="w-3 h-3 text-slate-500" />
+              </button>
+
+              {layersMenuOpen && (
+                <div className="absolute right-0 top-full mt-1 w-56 bg-white border border-slate-300 rounded-lg shadow-xl p-3 z-50 space-y-2 text-xs font-mono animate-in fade-in zoom-in-95">
+                  <div className="font-bold text-slate-700 border-b border-slate-100 pb-1 flex items-center justify-between">
+                    <span>Drawing Layer Toggles</span>
+                    <button onClick={() => setLayersMenuOpen(false)} className="text-slate-400 hover:text-slate-600 text-[10px]">✕ Close</button>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded">
+                      <input
+                        type="checkbox"
+                        checked={showGrids}
+                        onChange={(e) => setShowGrids(e.target.checked)}
+                        className="rounded text-secondary-brand focus:ring-secondary-brand"
+                      />
+                      <span>Grid Lines</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded">
+                      <input
+                        type="checkbox"
+                        checked={showDimensions}
+                        onChange={(e) => setShowDimensions(e.target.checked)}
+                        className="rounded text-secondary-brand focus:ring-secondary-brand"
+                      />
+                      <span>Bay Dimensions</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded">
+                      <input
+                        type="checkbox"
+                        checked={showMemberLabels}
+                        onChange={(e) => setShowMemberLabels(e.target.checked)}
+                        className="rounded text-secondary-brand focus:ring-secondary-brand"
+                      />
+                      <span>Labels (Beams/Cols)</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded">
+                      <input
+                        type="checkbox"
+                        checked={showSectionSizes}
+                        onChange={(e) => setShowSectionSizes(e.target.checked)}
+                        className="rounded text-secondary-brand focus:ring-secondary-brand"
+                      />
+                      <span>Section Sizes</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded">
+                      <input
+                        type="checkbox"
+                        checked={showSlabs}
+                        onChange={(e) => setShowSlabs(e.target.checked)}
+                        className="rounded text-secondary-brand focus:ring-secondary-brand"
+                      />
+                      <span>Floor Slabs</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded text-amber-700 font-semibold">
+                      <input
+                        type="checkbox"
+                        checked={showStaircases}
+                        onChange={(e) => setShowStaircases(e.target.checked)}
+                        className="rounded text-amber-600 focus:ring-amber-600"
+                      />
+                      <span>Staircases (Moveable)</span>
+                    </label>
+                    {activePlan.isFoundationLevel && (
+                      <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded text-indigo-700 font-semibold">
+                        <input
+                          type="checkbox"
+                          checked={showPileCaps}
+                          onChange={(e) => setShowPileCaps(e.target.checked)}
+                          className="rounded text-secondary-brand focus:ring-secondary-brand"
+                        />
+                        <span>Pile Caps</span>
+                      </label>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Zoom / Fit Sheet to Screen Toggle */}
+            <button
+              type="button"
+              onClick={() => setZoomFit(!zoomFit)}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs font-mono font-semibold rounded bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 shadow-2xs transition-colors"
+              title={zoomFit ? 'Switch to 100% full detail CAD scale' : 'Fit complete A3 sheet to window'}
+            >
+              {zoomFit ? <Maximize2 className="w-3.5 h-3.5 text-sky-600" /> : <Minimize2 className="w-3.5 h-3.5 text-slate-600" />}
+              <span>{zoomFit ? 'Fit Screen' : '100% CAD'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Expandable Quantity Takeoff Cards Drawer */}
+      {metricsExpanded && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 animate-in fade-in">
+          <div className="bg-surface-card p-3 rounded-lg border border-ui-border shadow-2xs">
+            <span className="text-[10px] font-mono uppercase text-slate-500 block font-semibold">
+              {activePlan.isFoundationLevel ? 'Foundation Columns / Caps' : 'Framing Members at Level'}
+            </span>
+            <div className="font-mono space-y-0.5 mt-1">
+              <span className="text-base font-bold text-deep-navy">
+                {activePlan.isFoundationLevel
+                  ? `${activePlan.columns.length} Column Pile Caps`
+                  : `${activePlan.beams.length} Beams • ${activePlan.columns.length} Columns`}
+              </span>
+              <span className="text-[11px] text-slate-500 block">
+                Floor Plan Area: {activePlan.metrics.totalFloorAreaM2} m²
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-surface-card p-3 rounded-lg border border-ui-border shadow-2xs">
+            <span className="text-[10px] font-mono uppercase text-slate-500 block font-semibold">
+              Estimated Takeoff for this Level
+            </span>
+            <div className="font-mono space-y-0.5 mt-1">
+              <span className="text-base font-bold text-emerald-700">
+                {activePlan.metrics.totalConcreteM3} m³ Concrete
+              </span>
+              <span className="text-[11px] text-slate-500 block">
+                Rebar: {activePlan.metrics.totalSteelKg} kg (~{(activePlan.metrics.totalSteelKg / 1000).toFixed(2)} MT)
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-surface-card p-3 rounded-lg border border-ui-border shadow-2xs">
+            <span className="text-[10px] font-mono uppercase text-slate-500 block font-semibold">
+              Detailing Code &amp; Sheet No
+            </span>
+            <div className="font-mono space-y-0.5 mt-1">
+              <span className="text-base font-bold text-indigo-700">
+                {activePlan.sheetNumber} (IS 456 / IS 13920 / IS 2911)
+              </span>
+              <span className="text-[11px] text-slate-500 block">
+                Elevation: Y = {activePlan.elevationY >= 0 ? `+${activePlan.elevationY.toFixed(3)}` : activePlan.elevationY.toFixed(3)} m
+              </span>
+            </div>
           </div>
         </div>
       )}
@@ -709,28 +763,34 @@ export const FloorPlanViewer: React.FC = () => {
         </div>
       )}
 
-      {/* Main 2D CAD SVG Canvas Plan */}
-      <div className="w-full flex justify-center">
-        <FloorPlanSvg
-          floorPlan={activePlan}
-          project={activeProject}
-          showGrids={showGrids}
-          showDimensions={showDimensions}
-          showMemberLabels={showMemberLabels}
-          showSectionSizes={showSectionSizes}
-          showSlabs={showSlabs}
-          showPileCaps={showPileCaps}
-          showGradeBeams={showGradeBeams}
-          showLiftCore={showLiftCore}
-          showStaircases={showStaircases}
-          staircases={architecturalStaircases}
-          onUpdateStaircase={updateStaircase}
-          pileCapDisplayMode={pileCapDisplayMode}
-          selectedSectionType={selectedSectionType}
-          onSelectSection={setSelectedSectionType}
-          width={activePlan.isFoundationLevel ? 1560 : 960}
-          height={activePlan.isFoundationLevel ? 760 : 580}
-        />
+      {/* Main 2D CAD SVG Canvas Plan — Responsive Container with Zoom/Fit */}
+      <div className={`w-full flex-1 flex justify-center items-center p-1 ${zoomFit ? 'max-h-[calc(100vh-210px)] overflow-hidden' : 'overflow-auto'}`}>
+        <div className="w-full max-w-[1680px] flex justify-center items-center">
+          <FloorPlanSvg
+            floorPlan={activePlan}
+            project={activeProject}
+            sheetOrientation={sheetOrientation}
+            showCrossSections={showCrossSections}
+            onToggleCrossSections={setShowCrossSections}
+            onOrientationChange={setSheetOrientation}
+            showGrids={showGrids}
+            showDimensions={showDimensions}
+            showMemberLabels={showMemberLabels}
+            showSectionSizes={showSectionSizes}
+            showSlabs={showSlabs}
+            showPileCaps={showPileCaps}
+            showGradeBeams={showGradeBeams}
+            showLiftCore={showLiftCore}
+            showStaircases={showStaircases}
+            staircases={architecturalStaircases}
+            onUpdateStaircase={updateStaircase}
+            pileCapDisplayMode={pileCapDisplayMode}
+            selectedSectionType={selectedSectionType}
+            onSelectSection={setSelectedSectionType}
+            width={sheetOrientation === 'PORTRAIT' ? 1188 : 1680}
+            height={sheetOrientation === 'PORTRAIT' ? 1680 : 1188}
+          />
+        </div>
       </div>
     </div>
   );

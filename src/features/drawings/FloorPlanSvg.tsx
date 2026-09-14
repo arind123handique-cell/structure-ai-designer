@@ -21,6 +21,10 @@ interface FloorPlanSvgProps {
   project?: StoredProject | null;
   width?: number;
   height?: number;
+  sheetOrientation?: 'LANDSCAPE' | 'PORTRAIT';
+  showCrossSections?: boolean;
+  onToggleCrossSections?: (show: boolean) => void;
+  onOrientationChange?: (orientation: 'LANDSCAPE' | 'PORTRAIT') => void;
   showGrids?: boolean;
   showDimensions?: boolean;
   showMemberLabels?: boolean;
@@ -61,8 +65,12 @@ export interface UniquePileCapType {
 export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
   floorPlan,
   project,
-  width = 1560,
-  height = 760,
+  width,
+  height,
+  sheetOrientation = 'LANDSCAPE',
+  showCrossSections = true,
+  onToggleCrossSections,
+  onOrientationChange,
   showGrids = true,
   showDimensions = true,
   showMemberLabels = true,
@@ -106,38 +114,16 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
   const levelStaircases = useMemo(() => {
     const allStairs = Object.values(staircases || {});
     return allStairs.filter((s) => {
-      // If staircase is explicitly disabled/deleted for this floor level, omit it
       if (s.disabledFloorIds && s.disabledFloorIds.includes(activeFloorId)) {
         return false;
       }
-      // If stair specifically belongs to this floor
       if (s.floorId === activeFloorId) return true;
-      // If building-wide staircase, show on all non-foundation floors
       if (!isFoundation && s.allFloors !== false) {
         return true;
       }
       return false;
     });
   }, [staircases, activeFloorId, isFoundation]);
-
-  // Viewport for Layout Plan
-  const drawX0 = isFoundation ? 60 : 100;
-  const drawY0 = isFoundation ? 60 : 60;
-  const drawAreaW = isFoundation ? 460 : 780;
-  const drawAreaH = isFoundation ? 480 : 480;
-
-  const scale = Math.min(drawAreaW / modelW, drawAreaH / modelH) * 0.85;
-
-  const planCenterX = drawX0 + drawAreaW / 2;
-  const planCenterY = drawY0 + drawAreaH / 2;
-
-  const modelCenterX = (bounds.minX + bounds.maxX) / 2;
-  const modelCenterZ = (bounds.minZ + bounds.maxZ) / 2;
-
-  const toSvgX = (x: number) => planCenterX + (x - modelCenterX) * scale;
-  const toSvgY = (z: number) => planCenterY + (z - modelCenterZ) * scale;
-  const toWorldX = (svgX: number) => modelCenterX + (svgX - planCenterX) / scale;
-  const toWorldZ = (svgY: number) => modelCenterZ + (svgY - planCenterY) / scale;
 
   // Nudge movement handler
   const handleNudgeStaircase = (stair: ArchitecturalStaircase, dx: number, dz: number) => {
@@ -374,52 +360,202 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
     );
   }, [uniquePileCapTypes, activeSectionFilter]);
 
+  const isPortrait = sheetOrientation === 'PORTRAIT';
+  const sheetW = width || (isPortrait ? 1188 : 1680);
+  const sheetH = height || (isPortrait ? 1680 : 1188);
+
+  const hasCrossSections = isFoundation && showCrossSections && pileCapDisplayMode !== 'PLAN' && visibleTypes.length > 0;
+
+  // Viewport for Layout Plan
+  let drawX0 = 60;
+  let drawY0 = 70;
+  let drawAreaW = sheetW - 120;
+  let drawAreaH = sheetH - 140;
+
+  // Cross-Section Container Coordinates
+  let csX = 920;
+  let csY = 40;
+  let csW = sheetW - 950;
+  let csH = 880;
+
+  // Title Block Zone
+  let tbX = 920;
+  let tbY = 930;
+  let tbW = csW;
+  let tbH = sheetH - tbY - 30;
+
+  if (isPortrait) {
+    if (hasCrossSections) {
+      drawX0 = 50;
+      drawY0 = 60;
+      drawAreaW = sheetW - 100;
+      drawAreaH = 680;
+
+      csX = 40;
+      csY = 770;
+      csW = sheetW - 80;
+      csH = 680;
+
+      tbX = 40;
+      tbY = sheetH - 210;
+      tbW = sheetW - 80;
+      tbH = 180;
+    } else {
+      drawX0 = 50;
+      drawY0 = 60;
+      drawAreaW = sheetW - 100;
+      drawAreaH = sheetH - 260;
+
+      tbX = 40;
+      tbY = sheetH - 210;
+      tbW = sheetW - 80;
+      tbH = 180;
+    }
+  } else {
+    // Landscape
+    if (hasCrossSections) {
+      drawX0 = 50;
+      drawY0 = 60;
+      drawAreaW = 850;
+      drawAreaH = sheetH - 120;
+
+      csX = 920;
+      csY = 40;
+      csW = sheetW - 950;
+      csH = 875;
+
+      tbX = 920;
+      tbY = 930;
+      tbW = csW;
+      tbH = sheetH - tbY - 30;
+    } else {
+      drawX0 = 50;
+      drawY0 = 60;
+      drawAreaW = sheetW - 100;
+      drawAreaH = sheetH - 240;
+
+      tbW = 440;
+      tbH = 200;
+      tbX = sheetW - tbW - 40;
+      tbY = sheetH - tbH - 35;
+    }
+  }
+
+  const scale = Math.min(drawAreaW / modelW, drawAreaH / modelH) * 0.82;
+
+  const planCenterX = drawX0 + drawAreaW / 2;
+  const planCenterY = drawY0 + drawAreaH / 2;
+
+  const modelCenterX = (bounds.minX + bounds.maxX) / 2;
+  const modelCenterZ = (bounds.minZ + bounds.maxZ) / 2;
+
+  const toSvgX = (x: number) => planCenterX + (x - modelCenterX) * scale;
+  const toSvgY = (z: number) => planCenterY + (z - modelCenterZ) * scale;
+  const toWorldX = (svgX: number) => modelCenterX + (svgX - planCenterX) / scale;
+  const toWorldZ = (svgY: number) => modelCenterZ + (svgY - planCenterY) / scale;
+
+  const naX = isPortrait ? sheetW - 55 : (hasCrossSections ? 880 : sheetW - 55);
+  const naY = 65;
+
   return (
-    <div className="flex flex-col items-center bg-slate-950 p-4 rounded-lg border border-slate-800 shadow-2xl overflow-x-auto font-mono">
+    <div className="flex flex-col items-center bg-slate-950 p-3 rounded-lg border border-slate-800 shadow-2xl overflow-x-auto font-mono w-full">
       {/* Top Sheet Header Banner */}
-      <div className="flex items-center justify-between w-full mb-2 px-2 text-xs text-slate-400">
-        <span className="font-bold text-sky-400 flex items-center gap-2">
-          <span className="px-2 py-0.5 bg-sky-950 text-sky-300 rounded border border-sky-800 text-[11px]">
-            {floorPlan.sheetNumber}
-          </span>
-          <span>{floorPlan.levelName}</span>
-        </span>
+      <div className="flex flex-wrap items-center justify-between w-full mb-2 px-2 text-xs text-slate-400 gap-2">
         <div className="flex items-center gap-2">
-          {isFoundation && (
-            <div className="flex items-center gap-1 bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-[11px]">
-              <span className="text-slate-400 font-semibold">VIEW SECTIONS:</span>
+          <span className="font-bold text-sky-400 flex items-center gap-2">
+            <span className="px-2 py-0.5 bg-sky-950 text-sky-300 rounded border border-sky-800 text-[11px]">
+              {floorPlan.sheetNumber}
+            </span>
+            <span>{floorPlan.levelName}</span>
+          </span>
+          <span className="text-[10px] px-2 py-0.5 bg-slate-900 border border-slate-700 text-slate-300 rounded font-mono">
+            ISO A3 {sheetOrientation}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Orientation Switcher Pill */}
+          {onOrientationChange && (
+            <div className="inline-flex items-center bg-slate-900 p-0.5 rounded border border-slate-700 text-[11px]">
               <button
-                onClick={() => handleSelectFilter('ALL')}
-                className={`px-2 py-0.5 rounded text-[10px] ${
-                  activeSectionFilter === 'ALL' ? 'bg-sky-700 text-white font-bold' : 'text-slate-400 hover:text-white'
+                type="button"
+                onClick={() => onOrientationChange('LANDSCAPE')}
+                className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${
+                  sheetOrientation === 'LANDSCAPE' ? 'bg-sky-700 text-white shadow-xs' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                ALL TYPES ({uniquePileCapTypes.length})
+                🖼 Landscape (420×297)
               </button>
-              {uniquePileCapTypes.map((t) => (
-                <button
-                  key={t.typeId}
-                  onClick={() => handleSelectFilter(t.typeId)}
-                  className={`px-2 py-0.5 rounded text-[10px] ${
-                    activeSectionFilter === t.typeId ? 'bg-indigo-700 text-white font-bold' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {t.typeName} ({t.sectionLabel})
-                </button>
-              ))}
+              <button
+                type="button"
+                onClick={() => onOrientationChange('PORTRAIT')}
+                className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${
+                  sheetOrientation === 'PORTRAIT' ? 'bg-sky-700 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                📄 Portrait (297×420)
+              </button>
             </div>
           )}
-          <span className="text-[11px] text-slate-500 font-sans">
-            Scale: 1:100 @ A3 • IS 456 / IS 2911 / IS 13920 Detailing Sheet
+
+          {/* Foundation Cross-Sections Visibility & Filter Controls */}
+          {isFoundation && (
+            <>
+              {/* Show/Hide Cross-Sections Toggle */}
+              {onToggleCrossSections && (
+                <button
+                  type="button"
+                  onClick={() => onToggleCrossSections(!showCrossSections)}
+                  className={`px-2 py-0.5 rounded border text-[10px] font-semibold flex items-center gap-1 transition-colors ${
+                    showCrossSections
+                      ? 'bg-emerald-950/80 border-emerald-700 text-emerald-300 hover:bg-emerald-900'
+                      : 'bg-rose-950/80 border-rose-700 text-rose-300 hover:bg-rose-900'
+                  }`}
+                  title={showCrossSections ? 'Click to hide cross-sections and show plan only' : 'Click to show cross-sections'}
+                >
+                  <span>{showCrossSections ? '👁 Sections: Visible' : '🚫 Sections: Hidden (Plan Only)'}</span>
+                </button>
+              )}
+
+              {/* Specific Cross-Section Filter Pills */}
+              {showCrossSections && (
+                <div className="flex items-center gap-1 bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-[11px]">
+                  <span className="text-slate-400 font-semibold">SECTIONS:</span>
+                  <button
+                    onClick={() => handleSelectFilter('ALL')}
+                    className={`px-2 py-0.5 rounded text-[10px] ${
+                      activeSectionFilter === 'ALL' ? 'bg-sky-700 text-white font-bold' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    ALL ({uniquePileCapTypes.length})
+                  </button>
+                  {uniquePileCapTypes.map((t) => (
+                    <button
+                      key={t.typeId}
+                      onClick={() => handleSelectFilter(t.typeId)}
+                      className={`px-2 py-0.5 rounded text-[10px] ${
+                        activeSectionFilter === t.typeId ? 'bg-indigo-700 text-white font-bold' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {t.typeId}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          <span className="text-[10px] text-slate-500 font-sans hidden lg:inline">
+            Scale: 1:100 (Plan) • 1:50 (Sections) @ A3
           </span>
         </div>
       </div>
 
       <svg
-        width={width}
-        height={height}
-        viewBox={`0 0 ${width} ${height}`}
-        className="select-none text-xs"
+        width={sheetW}
+        height={sheetH}
+        viewBox={`0 0 ${sheetW} ${sheetH}`}
+        className="select-none text-xs w-full h-auto"
         onMouseMove={(e) => {
           if (draggingStairId && dragStartPos && onUpdateStaircase) {
             const dx = (e.clientX - dragStartPos.mouseX) / scale;
@@ -470,9 +606,10 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
           </marker>
         </defs>
 
-        {/* 1. Main Sheet Border */}
-        <rect x="12" y="12" width={width - 24} height={height - 24} fill="#090d16" stroke="#334155" strokeWidth="2" />
-        <rect x="16" y="16" width={width - 32} height={height - 32} fill="#020617" stroke="#1e293b" strokeWidth="1" />
+        {/* 1. Main Sheet Border (ISO A3 CAD Frame with 20mm left margin) */}
+        <rect x="5" y="5" width={sheetW - 10} height={sheetH - 10} fill="#090d16" stroke="#334155" strokeWidth="1.5" />
+        <rect x="25" y="15" width={sheetW - 40} height={sheetH - 30} fill="#020617" stroke="#475569" strokeWidth="1.5" />
+        <rect x="28" y="18" width={sheetW - 46} height={sheetH - 36} fill="none" stroke="#1e293b" strokeWidth="0.8" />
 
         {/* 2. Column Centerline Grid Lines (X & Z) */}
         {showGrids && (
@@ -1676,31 +1813,31 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
         {/* ========================================================================= */}
         {/* FOUNDATION SPECIAL: ALL PILE CAP TYPES STRUCTURAL DETAILING PANELS — hidden when PLAN only */}
         {/* ========================================================================= */}
-        {isFoundation && pileCapDisplayMode !== 'PLAN' && (
-          <g transform="translate(540, 30)">
+        {hasCrossSections && (
+          <g transform={`translate(${csX}, ${csY})`}>
             {/* Detailing Container Box */}
-            <rect x="0" y="0" width={width - 560} height={height - 50} fill="#0b1120" stroke="#334155" strokeWidth="1.5" rx="4" />
-            <rect x="0" y="0" width={width - 560} height={28} fill="#1e293b" rx="4" />
+            <rect x="0" y="0" width={csW} height={csH} fill="#0b1120" stroke="#334155" strokeWidth="1.5" rx="4" />
+            <rect x="0" y="0" width={csW} height={28} fill="#1e293b" rx="4" />
             <text x="12" y="18" fill="#38bdf8" fontSize="10" fontWeight="bold">
               FOUNDATION STRUCTURAL CROSS-SECTIONS (IS 2911 / SP:34 CAD STANDARD)
             </text>
 
             {/* Quick Section Selector Pills inside the CAD Canvas */}
-            <g transform={`translate(${width - 560 - 360}, 4)`}>
+            <g transform={`translate(${Math.max(220, csW - 320)}, 4)`}>
               {['ALL', ...uniquePileCapTypes.map((t) => t.typeId)].map((key, kIdx) => {
                 const isAct = activeSectionFilter === key;
-                const btnX = kIdx * 68;
+                const btnX = kIdx * 58;
                 const label = key === 'ALL' ? 'All (Grid)' : key;
                 return (
                   <g
                     key={`sec_tab_${key}`}
-                    onClick={() => onSelectSection?.(key)}
+                    onClick={() => handleSelectFilter(key)}
                     className="cursor-pointer hover:opacity-80 transition-opacity"
                   >
                     <rect
                       x={btnX}
                       y="0"
-                      width="64"
+                      width="54"
                       height="20"
                       fill={isAct ? '#2563eb' : '#0f172a'}
                       stroke={isAct ? '#60a5fa' : '#334155'}
@@ -1708,7 +1845,7 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                       rx="3"
                     />
                     <text
-                      x={btnX + 32}
+                      x={btnX + 27}
                       y="13"
                       fill={isAct ? '#ffffff' : '#94a3b8'}
                       fontSize="7.5"
@@ -1725,17 +1862,18 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
             {/* Grid of All Pile Cap Types */}
             {visibleTypes.map((item, idx) => {
               const numVisible = visibleTypes.length;
-              const cardW = numVisible === 1 ? width - 600 : (width - 590) / numVisible;
-              const cardX = 12 + idx * (cardW + 10);
-              const cardY = 36;
-              const cardH = height - 95;
+              const cardSpacing = 10;
+              const cardW = numVisible === 1 ? csW - 24 : (csW - 24 - (numVisible - 1) * cardSpacing) / numVisible;
+              const cardX = 12 + idx * (cardW + cardSpacing);
+              const cardY = 34;
+              const cardH = csH - 42;
 
-              // Plan Scale: Fit L and B nicely inside ~170px width
-              const planBoxDim = Math.min(cardW - 80, 160);
+              // Plan Scale: Fit L and B nicely inside card
+              const planBoxDim = Math.min(cardW - 60, cardH * 0.32);
               const dScale = planBoxDim / Math.max(item.L, item.B, 2600);
 
               const plCx = cardX + cardW / 2;
-              const plCy = cardY + 120;
+              const plCy = cardY + cardH * 0.28;
 
               // Plan Dimensions
               const planW_px = item.L * dScale;
@@ -1744,11 +1882,11 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
               // Section Dimensions
               const dims3p = item.count === 3 ? get3PileDimensionsMm(item.s, item.eo) : null;
               const totalSecLengthMm = item.count === 3 && dims3p ? dims3p.lengthMm : item.count === 2 ? item.s + 2 * item.eo : item.L;
-              const capW_px = Math.max(140, totalSecLengthMm * dScale);
+              const capW_px = Math.min(cardW - 60, Math.max(120, totalSecLengthMm * dScale));
               const secScale = capW_px / totalSecLengthMm;
-              const capH_px = Math.max(70, item.D * dScale * 1.15);
+              const capH_px = Math.min(cardH * 0.2, Math.max(50, item.D * dScale * 1.15));
               const secX = plCx - capW_px / 2;
-              const secY = cardY + 295;
+              const secY = cardY + cardH * 0.64;
               const secW = capW_px;
               const secH = capH_px;
 
@@ -1851,12 +1989,15 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                   <rect x={cardX} y={cardY} width={cardW} height={cardH} fill="#020617" stroke="#1e293b" strokeWidth="1.2" rx="3" />
 
                   {/* Card Header Banner */}
-                  <rect x={cardX} y={cardY} width={cardW} height={22} fill="#0f172a" rx="3" />
-                  <text x={cardX + 8} y={cardY + 15} fill="#a5b4fc" fontSize="9" fontWeight="bold">
-                    {item.typeId}: {item.typeName} ({item.count === 3 && dims3p ? `${dims3p.lengthMm}×${dims3p.widthMm}×${item.D}` : item.shape === 'PENTAGONAL' ? `1461mm × 5 Sides × ${item.D}` : `${item.L}×${item.B}×${item.D}`} mm)
+                  <rect x={cardX} y={cardY} width={cardW} height={26} fill="#0f172a" rx="3" />
+                  <text x={cardX + 8} y={cardY + 12} fill="#a5b4fc" fontSize={cardW < 260 ? '7.5' : '8.5'} fontWeight="bold">
+                    {item.typeId}: {item.count}P {item.shape === 'TRIANGULAR' ? 'TRAP' : item.shape}
                   </text>
-                  <text x={cardX + cardW - 8} y={cardY + 15} fill="#64748b" fontSize="7.5" textAnchor="end">
-                    Cols: {item.associatedColumns.slice(0, 4).join(', ')}{item.associatedColumns.length > 4 ? '...' : ''}
+                  <text x={cardX + 8} y={cardY + 22} fill="#94a3b8" fontSize="7">
+                    {item.count === 3 && dims3p ? `${dims3p.lengthMm}×${dims3p.widthMm}×${item.D}` : item.shape === 'PENTAGONAL' ? `1461×5 Sides×${item.D}` : `${item.L}×${item.B}×${item.D}`} mm
+                  </text>
+                  <text x={cardX + cardW - 8} y={cardY + 16} fill="#64748b" fontSize="7" textAnchor="end">
+                    Cols: {item.associatedColumns.slice(0, 3).join(', ')}{item.associatedColumns.length > 3 ? '...' : ''}
                   </text>
 
                   {/* ---------------- A. PLAN VIEW (TOP HALF OF CARD) ---------------- */}
@@ -2224,8 +2365,8 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
                   </text>
 
                   {/* Section Title */}
-                  <text x={plCx} y={cardY + cardH - 8} fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle">
-                    {item.sectionLabel} — DETAIL OF {item.typeId} (SCALE 1:50)
+                  <text x={plCx} y={cardY + cardH - 10} fill="#38bdf8" fontSize={cardW < 260 ? '7.5' : '8.5'} fontWeight="bold" textAnchor="middle">
+                    {item.sectionLabel} — {item.typeId} (SCALE 1:50)
                   </text>
                 </g>
               );
@@ -2233,8 +2374,63 @@ export const FloorPlanSvg: React.FC<FloorPlanSvgProps> = ({
           </g>
         )}
 
+        {/* ========================================================================= */}
+        {/* ISO A3 CAD TITLE BLOCK (Standard Corner & Specification Block) */}
+        {/* ========================================================================= */}
+        <g transform={`translate(${tbX}, ${tbY})`}>
+          <rect x="0" y="0" width={tbW} height={tbH} fill="#0b1120" stroke="#334155" strokeWidth="1.5" rx="3" />
+          <rect x="0" y="0" width={tbW} height={26} fill="#1e293b" rx="3" />
+
+          {/* Header Bar */}
+          <text x="12" y="17" fill="#38bdf8" fontSize="10" fontWeight="bold">
+            STRUCTURE AI DESIGNER — AUTONOMOUS IS CODE CAD SUITE
+          </text>
+          <text x={tbW - 12} y="17" fill="#10b981" fontSize="9" fontWeight="bold" textAnchor="end">
+            STATUS: APPROVED (REV 0)
+          </text>
+
+          {/* Project & Drawing Title */}
+          <text x="12" y="46" fill="#f8fafc" fontSize="12" fontWeight="bold">
+            {isFoundation ? 'FOUNDATION LAYOUT & REINFORCEMENT DETAILS' : `${floorPlan.levelName.toUpperCase()} FRAMING PLAN`}
+          </text>
+          <text x="12" y="64" fill="#94a3b8" fontSize="9">
+            PROJECT: <tspan fill="#f1f5f9" fontWeight="bold">{project?.metadata?.name || 'G+4 RCC Residential Building (6 MILES)'}</tspan>
+          </text>
+          <text x="12" y="80" fill="#94a3b8" fontSize="8.5">
+            LOCATION: <tspan fill="#cbd5e1">{project?.metadata?.location || 'Standard Project Site'}</tspan> • ENGINEER: <tspan fill="#cbd5e1">{project?.metadata?.engineer || 'Lead Structural Engineer'}</tspan>
+          </text>
+
+          {/* Dividing line */}
+          <line x1="8" y1="88" x2={tbW - 8} y2="88" stroke="#334155" strokeWidth="1" />
+
+          {/* Specifications Grid */}
+          <text x="12" y="102" fill="#94a3b8" fontSize="8">
+            STANDARDS: <tspan fill="#38bdf8">IS 456:2000 • IS 2911 (Part 1/Sec 2):2010 • SP 34:1987 • IS 13920:2016</tspan>
+          </text>
+          <text x="12" y="116" fill="#94a3b8" fontSize="8">
+            CONCRETE: <tspan fill="#e2e8f0">{project?.metadata?.designSettings?.concreteGrade || 'M25'}</tspan> • STEEL: <tspan fill="#e2e8f0">{project?.metadata?.designSettings?.steelGrade || 'Fe500D'}</tspan> • COVER: <tspan fill="#e2e8f0">{isFoundation ? '60mm' : '30mm'}</tspan>
+          </text>
+
+          {/* Key Metadata Row */}
+          <line x1="8" y1="124" x2={tbW - 8} y2="124" stroke="#334155" strokeWidth="0.8" />
+          <g transform="translate(12, 138)">
+            <text x="0" y="0" fill="#38bdf8" fontSize="8.5" fontWeight="bold">
+              DWG NO: {floorPlan.sheetNumber}
+            </text>
+            <text x={Math.min(180, tbW * 0.25)} y="0" fill="#94a3b8" fontSize="8">
+              SCALE: 1:100 @ A3 (Plan)
+            </text>
+            <text x={Math.min(360, tbW * 0.5)} y="0" fill="#94a3b8" fontSize="8">
+              FORMAT: ISO A3 {sheetOrientation}
+            </text>
+            <text x={Math.min(540, tbW * 0.75)} y="0" fill="#94a3b8" fontSize="8">
+              DATE: {new Date().toLocaleDateString()}
+            </text>
+          </g>
+        </g>
+
         {/* 8. North Arrow & Legend */}
-        <g transform={`translate(${isFoundation ? 490 : width - 45}, 45)`}>
+        <g transform={`translate(${naX}, ${naY})`}>
           <polygon points="0,-16 -6,4 0,0 6,4" fill="#38bdf8" stroke="#0284c7" strokeWidth="1" />
           <polygon points="0,0 -6,4 0,16 6,4" fill="#0f172a" stroke="#0284c7" strokeWidth="0.8" />
           <text x="0" y="-20" fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle">
