@@ -461,8 +461,9 @@ export class BeamSectionSheetEngine {
   // -------------------------------------------------------------------------
 
   /**
-   * Draws a beam layout plan (top-down view) showing all beams as double-line
-   * rectangles with labels and column positions. This is the first page per floor.
+   * Draws a proper GA framing plan showing columns, slabs, beams,
+   * grid lines with circles, and bay dimension chains — matching
+   * the PDF export's renderFloorPlanPage style.
    */
   private static drawBeamLayoutPlan(
     b: SheetBuilder,
@@ -471,52 +472,96 @@ export class BeamSectionSheetEngine {
   ): void {
     const beams = level.beams || [];
     const columns = level.columns || [];
-    if (beams.length === 0) return;
+    const slabs = level.slabs || [];
+    const bounds = level.bounds;
+    if (beams.length === 0 && columns.length === 0) return;
 
-    // Calculate bounds
-    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    beams.forEach((bm) => {
-      minX = Math.min(minX, bm.startX, bm.endX);
-      maxX = Math.max(maxX, bm.startX, bm.endX);
-      minZ = Math.min(minZ, bm.startZ, bm.endZ);
-      maxZ = Math.max(maxZ, bm.startZ, bm.endZ);
-    });
-    columns.forEach((c) => {
-      minX = Math.min(minX, c.x);
-      maxX = Math.max(maxX, c.x);
-      minZ = Math.min(minZ, c.z);
-      maxZ = Math.max(maxZ, c.z);
-    });
-
-    const modelSpanX = Math.max(0.1, maxX - minX);
-    const modelSpanZ = Math.max(0.1, maxZ - minZ);
+    // Use level bounds (already computed by floorPlanEngine)
+    const minX = bounds.minX - 1.0;
+    const maxX = bounds.maxX + 1.0;
+    const minZ = bounds.minZ - 1.0;
+    const maxZ = bounds.maxZ + 1.0;
+    const modelW = Math.max(0.1, maxX - minX);
+    const modelH = Math.max(0.1, maxZ - minZ);
     const modelMidX = (minX + maxX) / 2;
     const modelMidZ = (minZ + maxZ) / 2;
 
     // Drawing area: inside A3 border with margins
-    const drawX0 = A3_MARGIN + 2000;
-    const drawY0 = A3_MARGIN + 2000;
-    const drawW = A3_WIDTH - 2 * A3_MARGIN - 4000;
-    const drawH = A3_HEIGHT - 2 * A3_MARGIN - 6000; // leave room for title block
+    const drawX0 = A3_MARGIN + 1500;
+    const drawY0 = A3_MARGIN + 1500;
+    const drawW = A3_WIDTH - 2 * A3_MARGIN - 3000;
+    const drawH = A3_HEIGHT - 2 * A3_MARGIN - 5000;
 
     // Scale to fit
-    const scaleX = drawW / (modelSpanX * 1000);
-    const scaleZ = drawH / (modelSpanZ * 1000);
-    const S = Math.min(scaleX, scaleZ, 1.0);
+    const scaleX = drawW / (modelW * 1000);
+    const scaleZ = drawH / (modelH * 1000);
+    const S = Math.min(scaleX, scaleZ, 0.85);
 
     const toX = (x: number) => drawX0 + drawW / 2 + (x - modelMidX) * 1000 * S;
     const toY = (z: number) => drawY0 + drawH / 2 - (z - modelMidZ) * 1000 * S;
 
-    // Draw columns as filled rectangles
-    columns.forEach((col) => {
-      const cx = toX(col.x);
-      const cy = toY(col.z);
-      const w = (col.width || 0.4) * 1000 * S;
-      const d = (col.depth || col.width || 0.4) * 1000 * S;
-      b.rect(LAYER_CONCRETE.name, cx - w / 2, cy - d / 2, w, d, 1.0);
+    // 1. Grid Lines (dashed, with circles and labels at ends)
+    const gridLinesX = level.gridLinesX || [];
+    gridLinesX.forEach((g) => {
+      const gx = toX(g.coord);
+      b.line(LAYER_GRID.name, gx, drawY0, gx, drawY0 + drawH);
+      // Grid circle at top
+      b.text(LAYER_GRID.name, gx, drawY0 - 400, g.id, TEXT_H.MARK, { anchor: 'middle', bold: true });
+      // Grid circle at bottom
+      b.text(LAYER_GRID.name, gx, drawY0 + drawH + 600, g.id, TEXT_H.MARK, { anchor: 'middle', bold: true });
+    });
+    const gridLinesZ = level.gridLinesZ || [];
+    gridLinesZ.forEach((g) => {
+      const gy = toY(g.coord);
+      b.line(LAYER_GRID.name, drawX0, gy, drawX0 + drawW, gy);
+      // Grid circle at left
+      b.text(LAYER_GRID.name, drawX0 - 400, gy, g.id, TEXT_H.MARK, { anchor: 'end', bold: true });
+      // Grid circle at right
+      b.text(LAYER_GRID.name, drawX0 + drawW + 600, gy, g.id, TEXT_H.MARK, { anchor: 'start', bold: true });
     });
 
-    // Draw beams as double-line rectangles
+    // 2. Bay Dimension Chains (between grid lines)
+    // X bays (top)
+    gridLinesX.slice(0, -1).forEach((g1, i) => {
+      const g2 = gridLinesX[i + 1];
+      const x1 = toX(g1.coord);
+      const x2 = toX(g2.coord);
+      const dimY = drawY0 - 800;
+      b.line(LAYER_DIMENSION.name, x1, dimY, x2, dimY);
+      b.arrowHead(LAYER_DIMENSION.name, x1, dimY, Math.PI, 60);
+      b.arrowHead(LAYER_DIMENSION.name, x2, dimY, 0, 60);
+      const baySpan = ((g2.coord - g1.coord) * 1000).toFixed(0);
+      b.text(LAYER_DIMENSION.name, (x1 + x2) / 2, dimY - 250, baySpan, TEXT_H.CALLOUT - 20, { anchor: 'middle' });
+    });
+    // Z bays (left)
+    gridLinesZ.slice(0, -1).forEach((g1, i) => {
+      const g2 = gridLinesZ[i + 1];
+      const y1 = toY(g1.coord);
+      const y2 = toY(g2.coord);
+      const dimX = drawX0 - 800;
+      b.line(LAYER_DIMENSION.name, dimX, y1, dimX, y2);
+      b.arrowHead(LAYER_DIMENSION.name, dimX, y1, Math.PI / 2, 60);
+      b.arrowHead(LAYER_DIMENSION.name, dimX, y2, -Math.PI / 2, 60);
+      const baySpan = ((g2.coord - g1.coord) * 1000).toFixed(0);
+      b.text(LAYER_DIMENSION.name, dimX - 250, (y1 + y2) / 2, baySpan, TEXT_H.CALLOUT - 20, { anchor: 'middle' });
+    });
+
+    // 3. Slabs (light fill with labels)
+    if (!level.isFoundationLevel && slabs.length > 0) {
+      slabs.forEach((s) => {
+        if (s.points.length >= 3) {
+          const pts: [number, number][] = s.points.map((p) => [toX(p.x), toY(p.z)]);
+          b.poly(LAYER_CONCRETE.name, pts, true);
+          // Slab label at centroid
+          const cx = s.points.reduce((acc, p) => acc + toX(p.x), 0) / s.points.length;
+          const cy = s.points.reduce((acc, p) => acc + toY(p.z), 0) / s.points.length;
+          b.text(LAYER_LABELS.name, cx, cy - 200, s.label, TEXT_H.CALLOUT - 20, { anchor: 'middle', bold: true });
+          b.text(LAYER_LABELS.name, cx, cy + 300, `THK:${s.thickness}mm`, TEXT_H.CALLOUT - 40, { anchor: 'middle' });
+        }
+      });
+    }
+
+    // 4. Beams (double lines with labels)
     beams.forEach((bm) => {
       const x1 = toX(bm.startX);
       const y1 = toY(bm.startZ);
@@ -530,37 +575,33 @@ export class BeamSectionSheetEngine {
 
       const nx = -dy / len;
       const ny = dx / len;
-      const hw = Math.max(3, ((bm.width || 0.23) / 2) * 1000 * S);
+      const hw = Math.max(4, ((bm.width || 0.23) / 2) * 1000 * S);
 
-      // Draw beam polygon
-      b.poly(LAYER_BEAM.name, [
-        [x1 + nx * hw, y1 + ny * hw],
-        [x2 + nx * hw, y2 + ny * hw],
-        [x2 - nx * hw, y2 - ny * hw],
-        [x1 - nx * hw, y1 - ny * hw],
-      ], true);
+      // Draw beam double lines
+      b.line(LAYER_BEAM.name, x1 + nx * hw, y1 + ny * hw, x2 + nx * hw, y2 + ny * hw);
+      b.line(LAYER_BEAM.name, x1 - nx * hw, y1 - ny * hw, x2 - nx * hw, y2 - ny * hw);
 
-      // Beam label at midpoint
+      // Beam label badge at midpoint
       const midX = (x1 + x2) / 2;
       const midY = (y1 + y2) / 2;
       const label = beamLabels.get(bm.memberId) || bm.label || `B${bm.memberId}`;
       const sectionText = `${bm.width ? Math.round(bm.width * 1000) : 230}x${bm.depth ? Math.round(bm.depth * 1000) : 450}`;
       const fullLabel = `${label} (${sectionText})`;
-      b.text(LAYER_LABELS.name, midX, midY, fullLabel, TEXT_H.CALLOUT - 40, { anchor: 'middle', bold: true });
+      b.text(LAYER_BEAM.name, midX, midY, fullLabel, TEXT_H.CALLOUT - 20, { anchor: 'middle', bold: true });
     });
 
-    // Grid lines
-    const gridLinesX = level.gridLinesX || [];
-    gridLinesX.forEach((g) => {
-      const gx = toX(g.coord);
-      b.line(LAYER_GRID.name, gx, drawY0, gx, drawY0 + drawH);
-      b.text(LAYER_GRID.name, gx, drawY0 - 300, (g.label || g.id || '').replace(/^GRID\s*/i, ''), TEXT_H.MARK, { anchor: 'middle', bold: true });
-    });
-    const gridLinesZ = level.gridLinesZ || [];
-    gridLinesZ.forEach((g) => {
-      const gy = toY(g.coord);
-      b.line(LAYER_GRID.name, drawX0, gy, drawX0 + drawW, gy);
-      b.text(LAYER_GRID.name, drawX0 - 300, gy, (g.label || g.id || '').replace(/^GRID\s*/i, ''), TEXT_H.MARK, { anchor: 'end', bold: true });
+    // 5. Columns (filled rectangles with X hatch and labels)
+    columns.forEach((col) => {
+      const cx = toX(col.x);
+      const cy = toY(col.z);
+      const cw = Math.max(8, (col.width || 0.45) * 1000 * S);
+      const cd = Math.max(8, (col.depth || 0.55) * 1000 * S);
+      b.rect(LAYER_CONCRETE.name, cx - cw / 2, cy - cd / 2, cw, cd, 1.2);
+      // X hatch
+      b.line(LAYER_CONCRETE.name, cx - cw / 2, cy - cd / 2, cx + cw / 2, cy + cd / 2);
+      b.line(LAYER_CONCRETE.name, cx - cw / 2, cy + cd / 2, cx + cw / 2, cy - cd / 2);
+      // Column label below
+      b.text(LAYER_LABELS_SUPPORT.name, cx, cy + cd / 2 + 400, col.label, TEXT_H.MARK, { anchor: 'middle', bold: true });
     });
   }
 
@@ -570,26 +611,50 @@ export class BeamSectionSheetEngine {
 
   /**
    * Checks if two text bounding boxes overlap and shifts the second one to avoid collision.
+   * Tries shifting down, up, right, left in sequence to find a clear spot.
    */
   private static resolveTextOverlaps(
     placements: Array<{ x: number; y: number; w: number; h: number; text: string }>
   ): Array<{ x: number; y: number; text: string }> {
     const result: Array<{ x: number; y: number; text: string }> = [];
     const occupied: Array<{ x: number; y: number; w: number; h: number }> = [];
+    const GAP = 120; // minimum gap between text boxes
 
     for (const p of placements) {
       let px = p.x;
       let py = p.y;
       let attempts = 0;
-      const maxAttempts = 8;
+      const maxAttempts = 12;
+
+      // Try shifting in different directions: down, up, right, left, then repeat
+      const shifts = [
+        { dx: 0, dy: -(p.h + GAP) },      // down
+        { dx: 0, dy: (p.h + GAP) },       // up
+        { dx: (p.w + GAP), dy: 0 },       // right
+        { dx: -(p.w + GAP), dy: 0 },      // left
+        { dx: (p.w + GAP) * 0.7, dy: -(p.h + GAP) * 0.7 },  // down-right
+        { dx: -(p.w + GAP) * 0.7, dy: -(p.h + GAP) * 0.7 }, // down-left
+        { dx: (p.w + GAP) * 0.7, dy: (p.h + GAP) * 0.7 },   // up-right
+        { dx: -(p.w + GAP) * 0.7, dy: (p.h + GAP) * 0.7 },  // up-left
+        { dx: 0, dy: -(p.h + GAP) * 2 },  // further down
+        { dx: 0, dy: (p.h + GAP) * 2 },   // further up
+        { dx: (p.w + GAP) * 2, dy: 0 },   // further right
+        { dx: -(p.w + GAP) * 2, dy: 0 },  // further left
+      ];
 
       while (attempts < maxAttempts) {
+        const shift = shifts[attempts % shifts.length];
+        const testX = p.x + shift.dx * Math.floor(attempts / 4 + 1);
+        const testY = p.y + shift.dy * Math.floor(attempts / 4 + 1);
         const collision = occupied.some(
-          (o) => Math.abs(px - o.x) < (p.w + o.w) / 2 + 80 && Math.abs(py - o.y) < (p.h + o.h) / 2 + 80
+          (o) => Math.abs(testX - o.x) < (p.w + o.w) / 2 + GAP &&
+                 Math.abs(testY - o.y) < (p.h + o.h) / 2 + GAP
         );
-        if (!collision) break;
-        // Shift downward
-        py -= p.h + 120;
+        if (!collision) {
+          px = testX;
+          py = testY;
+          break;
+        }
         attempts++;
       }
 
@@ -1081,9 +1146,9 @@ export class BeamSectionSheetEngine {
 
       // Bottom Through Rebar Callout
       const botCalloutX = xStart + spanUnits * 0.22;
-      b.leader(LAYER_REBAR.name, botCalloutX, yBot - 170, botCalloutX, yBotBar, { h: TEXT_H.CALLOUT });
+      b.leader(LAYER_REBAR.name, botCalloutX, yBot - 170, botCalloutX, yBotBar, { h: TEXT_H.CALLOUT - 20 });
       const botText = `${design.bottom.through.count}-T ${design.bottom.through.dia}`;
-      allCallouts.push({ x: botCalloutX, y: yBot - 210, w: botText.length * 80 + 100, h: TEXT_H.CALLOUT + 40, text: botText, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT, bold: true });
+      allCallouts.push({ x: botCalloutX, y: yBot - 210, w: botText.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: botText, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
 
       // Bottom Extra Midspan Rebar
       if (design.bottom.extra && design.bottom.extra.count > 0) {
@@ -1098,10 +1163,10 @@ export class BeamSectionSheetEngine {
         b.line(LAYER_REBAR.name, xMidEnd, yBotExtra - 15, xMidEnd, yBotExtra + 15);
 
         const midCalloutX = (xMidStart + xMidEnd) / 2;
-        b.leader(LAYER_REBAR.name, midCalloutX, yBot - 370, midCalloutX, yBotExtra, { h: TEXT_H.CALLOUT });
+        b.leader(LAYER_REBAR.name, midCalloutX, yBot - 370, midCalloutX, yBotExtra, { h: TEXT_H.CALLOUT - 20 });
         const extraText = `${design.bottom.extra.count}-T ${design.bottom.extra.dia}`;
-        allCallouts.push({ x: midCalloutX, y: yBot - 410, w: extraText.length * 80 + 100, h: TEXT_H.CALLOUT + 40, text: extraText, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT, bold: true });
-        b.dimHorizontal(xMidStart, xMidEnd, yBot - 720, midLenMm, { textHeight: TEXT_H.DIM });
+        allCallouts.push({ x: midCalloutX, y: yBot - 410, w: extraText.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: extraText, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
+        b.dimHorizontal(xMidStart, xMidEnd, yBot - 720, midLenMm, { textHeight: TEXT_H.DIM - 40 });
       }
 
       // Top Extra End Support Rebar
@@ -1112,10 +1177,10 @@ export class BeamSectionSheetEngine {
         b.poly(LAYER_REBAR.name, [[xAnchLeft, yTopExtra - 160], [xAnchLeft, yTopExtra], [xCutLeft, yTopExtra]], false);
         b.line(LAYER_REBAR.name, xCutLeft, yTopExtra - 15, xCutLeft, yTopExtra + 15);
         const extraCalloutX = (xStart + xCutLeft) / 2;
-        b.leader(LAYER_REBAR.name, extraCalloutX, yTop + 200, extraCalloutX, yTopExtra, { h: TEXT_H.CALLOUT });
+        b.leader(LAYER_REBAR.name, extraCalloutX, yTop + 200, extraCalloutX, yTopExtra, { h: TEXT_H.CALLOUT - 20 });
         const extraTopText = `${design.top.extra.count}-T ${design.top.extra.dia}`;
-        allCallouts.push({ x: extraCalloutX, y: yTop + 240, w: extraTopText.length * 80 + 100, h: TEXT_H.CALLOUT + 40, text: extraTopText, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT, bold: true });
-        b.dimHorizontal(xStart, xCutLeft, yTop + 580, cutLeftMm, { textHeight: TEXT_H.DIM });
+        allCallouts.push({ x: extraCalloutX, y: yTop + 240, w: extraTopText.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: extraTopText, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
+        b.dimHorizontal(xStart, xCutLeft, yTop + 580, cutLeftMm, { textHeight: TEXT_H.DIM - 40 });
       }
 
       if (idx === N - 1 && design.top.extra && design.top.extra.count > 0) {
@@ -1125,10 +1190,10 @@ export class BeamSectionSheetEngine {
         b.poly(LAYER_REBAR.name, [[xCutRight, yTopExtra], [xAnchRight, yTopExtra], [xAnchRight, yTopExtra - 160]], false);
         b.line(LAYER_REBAR.name, xCutRight, yTopExtra - 15, xCutRight, yTopExtra + 15);
         const extraCalloutX = (xCutRight + xEnd) / 2;
-        b.leader(LAYER_REBAR.name, extraCalloutX, yTop + 200, extraCalloutX, yTopExtra, { h: TEXT_H.CALLOUT });
+        b.leader(LAYER_REBAR.name, extraCalloutX, yTop + 200, extraCalloutX, yTopExtra, { h: TEXT_H.CALLOUT - 20 });
         const extraTopText2 = `${design.top.extra.count}-T ${design.top.extra.dia}`;
-        allCallouts.push({ x: extraCalloutX, y: yTop + 240, w: extraTopText2.length * 80 + 100, h: TEXT_H.CALLOUT + 40, text: extraTopText2, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT, bold: true });
-        b.dimHorizontal(xCutRight, xEnd, yTop + 580, cutRightMm, { textHeight: TEXT_H.DIM });
+        allCallouts.push({ x: extraCalloutX, y: yTop + 240, w: extraTopText2.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: extraTopText2, layer: LAYER_REBAR.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
+        b.dimHorizontal(xCutRight, xEnd, yTop + 580, cutRightMm, { textHeight: TEXT_H.DIM - 40 });
       }
 
       // Stirrups in 3 Zones
@@ -1253,16 +1318,16 @@ export class BeamSectionSheetEngine {
         const stirrupText = `${dia}mm@${spacing}mm c/c`;
         const isMidZone = design.zones.length > 1 && design.zones.indexOf(zone) === 1;
         const calloutY = isMidZone ? yBot - 1240 : yBot - 1050;
-        callouts.push({ x: zMid, y: calloutY, w: stirrupText.length * 80 + 100, h: TEXT_H.CALLOUT + 40, text: stirrupText, layer: LAYER_SCHEDULE_TEXT.name, fontSize: TEXT_H.CALLOUT, bold: true });
+        callouts.push({ x: zMid, y: calloutY, w: stirrupText.length * 70 + 80, h: TEXT_H.CALLOUT + 20, text: stirrupText, layer: LAYER_SCHEDULE_TEXT.name, fontSize: TEXT_H.CALLOUT - 20, bold: true });
       } else if (zoneW >= 500) {
         const compactText = `${dia}@${spacing}`;
-        callouts.push({ x: zMid, y: yBot - 1050, w: compactText.length * 60 + 80, h: TEXT_H.CALLOUT - 20, text: compactText, layer: LAYER_SCHEDULE_TEXT.name, fontSize: TEXT_H.CALLOUT - 40, bold: true });
+        callouts.push({ x: zMid, y: yBot - 1050, w: compactText.length * 50 + 60, h: TEXT_H.CALLOUT - 40, text: compactText, layer: LAYER_SCHEDULE_TEXT.name, fontSize: TEXT_H.CALLOUT - 60, bold: true });
       }
 
       if (zoneMm > 0 && zoneW >= MIN_DIM_ZONE_W) {
-        dims.push({ x: zMid, y: yBot - 1520, w: 500, h: TEXT_H.DIM, text: String(Math.round(zoneMm)), layer: LAYER_DIMENSION.name, fontSize: TEXT_H.DIM + 20, bold: false });
+        dims.push({ x: zMid, y: yBot - 1520, w: 400, h: TEXT_H.DIM - 20, text: String(Math.round(zoneMm)), layer: LAYER_DIMENSION.name, fontSize: TEXT_H.DIM - 20, bold: false });
       } else if (zoneMm > 0 && zoneW >= 400) {
-        dims.push({ x: zMid, y: yBot - 1520, w: 300, h: TEXT_H.CALLOUT - 20, text: String(Math.round(zoneMm)), layer: LAYER_DIMENSION.name, fontSize: TEXT_H.CALLOUT - 40, bold: false });
+        dims.push({ x: zMid, y: yBot - 1520, w: 250, h: TEXT_H.CALLOUT - 40, text: String(Math.round(zoneMm)), layer: LAYER_DIMENSION.name, fontSize: TEXT_H.CALLOUT - 60, bold: false });
       }
 
       cursorX = zEnd;
