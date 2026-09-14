@@ -149,6 +149,7 @@ export interface BeamSupportDetail {
 export interface ContinuousSpanItem {
   design: BeamSectionDesign;
   beam: FloorBeamInfo;
+  spanMm: number;
   clearSpanMm: number;
   wLeftMm: number;
   wRightMm: number;
@@ -639,6 +640,7 @@ export class BeamSectionSheetEngine {
         return {
           design: it.design,
           beam: it.beam,
+          spanMm,
           clearSpanMm,
           wLeftMm: supLeft.widthMm,
           wRightMm: supRight.widthMm,
@@ -868,6 +870,7 @@ export class BeamSectionSheetEngine {
       const xStart = spanXStarts[idx];
       const xEnd = spanXEnds[idx];
       const clearSpanMm = spanItem.clearSpanMm;
+      const spanMm = spanItem.spanMm;
       const spanUnits = xEnd - xStart;
 
       // Bottom Continuous Through Rebar
@@ -980,8 +983,8 @@ export class BeamSectionSheetEngine {
       // Stirrups in 3 Zones (callouts at yBot - 1050 / -1240, dims at yBot - 1520)
       this.drawSpanStirrups(b, design, xStart, xEnd, yBot, yTop, S);
 
-      // Top Clear Span Dimension (at yTop + 1650, enlarged bold font)
-      b.dimHorizontal(xStart, xEnd, yTop + 1650, clearSpanMm, { textHeight: TEXT_H.DIM + 20 });
+      // Top Span Dimension — center-to-center (at yTop + 1650)
+      b.dimHorizontal(xStart, xEnd, yTop + 1650, spanMm, { textHeight: TEXT_H.DIM + 20 });
 
       // Beam Mark & Size below span (at yBot - 1880, auto-wrap on narrow spans)
       const availW = spanUnits - 80;
@@ -1513,7 +1516,7 @@ export class BeamSectionSheetEngine {
     // -----------------------------------------------------------------------
     // 7. Top Dimensions: Clear span & column width
     // -----------------------------------------------------------------------
-    b.dimHorizontal(xLeft, xRight, yTop + 1400, clearSpanMm, { textHeight: TEXT_H.CALLOUT });
+    b.dimHorizontal(xLeft, xRight, yTop + 1400, totalSpanMm, { textHeight: TEXT_H.CALLOUT });
 
     // -----------------------------------------------------------------------
     // 8. Beam Title & Scale Note Below (in cyan / Labels layer)
@@ -1739,6 +1742,9 @@ export class BeamSectionSheetEngine {
         best = g;
       }
     });
-    return best.label || best.id || null;
+    const raw = best.label || best.id || null;
+    if (!raw) return null;
+    // Strip "GRID" prefix — show just the label (e.g. "A", "1", "B")
+    return raw.replace(/^GRID\s*/i, '');
   }
 }
