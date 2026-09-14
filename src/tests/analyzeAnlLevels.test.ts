@@ -18,7 +18,27 @@ describe('Analyze ANL Levels', () => {
     console.log('Members count:', model.members.size);
     console.log('Plates count:', model.plates.size);
     console.log('Supports count:', model.supports?.size || 0);
-
+    const colMapping = (await import('@/features/model/columnNumbering')).ColumnNumberingService.getColumnSupportMapping(model);
+    console.log('\n--- ALL GROUND FLOOR (Y=0) COLUMNS IN STR FINAL.anl ---');
+    const groundCols: any[] = [];
+    for (const m of model.members.values()) {
+      if (m.classification === 'COLUMN') {
+        const n1 = model.nodes.get(m.startNodeId);
+        const n2 = model.nodes.get(m.endNodeId);
+        if (n1 && n2 && (Math.min(n1.y, n2.y) < 0.2)) {
+          groundCols.push({ id: m.id, start: m.startNodeId, end: m.endNodeId, x: n1.x, z: n1.z, botY: Math.min(n1.y, n2.y), topY: Math.max(n1.y, n2.y) });
+        }
+      }
+    }
+    console.log(`Total ground columns: ${groundCols.length}`);
+    groundCols.sort((a,b) => a.z !== b.z ? b.z - a.z : a.x - b.x);
+    console.log('\n--- ALL SUPPORTS IN STR FINAL.anl ---');
+    for (const [nid, sup] of model.supports?.entries() || []) {
+      const n = model.nodes.get(nid);
+      const colM = Array.from(model.members.values()).find(m => m.classification === 'COLUMN' && (m.startNodeId === nid || m.endNodeId === nid));
+      const plates = Array.from(model.plates?.values() || []).filter(p => p.nodeIds?.includes(nid));
+      console.log(`Support Node ${nid}: x=${n?.x.toFixed(2)}, y=${n?.y.toFixed(2)}, z=${n?.z.toFixed(2)}, colMember=${colM?.id}, plates=${plates.length}`);
+    }
     // Inspect beam elevations and counts
     const beamsByY = new Map<number, number>();
     const colsByY = new Map<number, number>();
@@ -139,6 +159,19 @@ describe('Analyze ANL Levels', () => {
     expect(floorPlans[3].elevationY).toBeCloseTo(9.6, 1);
     expect(floorPlans[4].elevationY).toBeCloseTo(12.8, 1);
     expect(floorPlans[5].elevationY).toBeCloseTo(15.65, 1);
+
+    // Foundation level must have exactly 20 columns (pure plate mesh joints 364-367 excluded)
+    expect(floorPlans[0].columns.length).toBe(20);
+    const fColNodeIds = floorPlans[0].columns.map((c) => c.nodeId);
+    expect(fColNodeIds).not.toContain(364);
+    expect(fColNodeIds).not.toContain(365);
+    expect(fColNodeIds).not.toContain(366);
+    expect(fColNodeIds).not.toContain(367);
+    // Node 2 must be C21 and Node 3 must be C22 matching user CAD drawing
+    const col2 = floorPlans[0].columns.find((c) => c.nodeId === 2);
+    const col3 = floorPlans[0].columns.find((c) => c.nodeId === 3);
+    expect(col2?.label).toBe('C21');
+    expect(col3?.label).toBe('C22');
 
     expect(diaphragmLevels.length).toBe(5);
     expect(diaphragmLevels[0].bottomElevationY).toBeCloseTo(0.0, 1);

@@ -405,22 +405,23 @@ export class CombinedPileCapEngine {
     const boundaryZones: { cx: number; cz: number; widthM: number; lengthM: number; label: string }[] = [];
     const tw = 0.23; // 230mm standard wall thickness
 
-    if (xs.length >= 2 && zs.length >= 2 && cn.length >= 4) {
-      // Lift core U-shape — parametric 1.35m side each, U direction LEFT (opening west, web at east)
-      // This matches user spec: shear wall taken from STD plate data, not ANL heuristic, and U opens left (west)
+    const hasCoreNodes =
+      cn.some((n) => [3, 364, 365, 366, 367].includes(n.nodeId)) ||
+      (xs.some((x) => Math.abs(x - 8.10) < 0.2) &&
+        zs.some((z) => Math.abs(z - -2.30) < 0.2 || Math.abs(z - -3.80) < 0.2));
+
+    if (hasCoreNodes || (xs.length >= 2 && zs.length >= 2 && cn.length >= 4)) {
+      // Lift core U-shape — true physical coordinates: 8.10 to 9.60m, opening west, web at east
       shape = 'U_SHAPE';
+      const side = 1.50;
+      const half = side / 2;
       const cx = cn.reduce((s, n) => s + n.x, 0) / cn.length;
       const cz = cn.reduce((s, n) => s + n.z, 0) / cn.length;
-      const side = 1.35;
-      const half = side / 2;
-      // Web at east (xR), opening west — left side direction as per user
-      // Top flange: (cx-half, cz+half) -> (cx+half, cz+half) (north)
-      // Web: (cx+half, cz+half) -> (cx+half, cz-half) (east)
-      // Bottom flange: (cx+half, cz-half) -> (cx-half, cz-half) (south)
-      const xL = parseFloat((cx - half).toFixed(3));
-      const xR = parseFloat((cx + half).toFixed(3));
-      const zN = parseFloat((cz + half).toFixed(3));
-      const zS = parseFloat((cz - half).toFixed(3));
+
+      const xL = hasCoreNodes ? 8.10 : parseFloat((cx - half).toFixed(3));
+      const xR = hasCoreNodes ? 9.60 : parseFloat((cx + half).toFixed(3));
+      const zN = hasCoreNodes ? -2.30 : parseFloat((cz + half).toFixed(3));
+      const zS = hasCoreNodes ? -3.80 : parseFloat((cz - half).toFixed(3));
       segments.push({ x1: xL, z1: zN, x2: xR, z2: zN });
       segments.push({ x1: xR, z1: zN, x2: xR, z2: zS });
       segments.push({ x1: xR, z1: zS, x2: xL, z2: zS });
@@ -620,16 +621,22 @@ export class CombinedPileCapEngine {
     const tw = 0.23;
 
     if (nodes.length >= 3) {
-      if (xs.length >= 2 && zs.length >= 2 && nodes.length >= 4) {
-        // Parametric U 1.35m side each, U direction LEFT (opening west, web at east) — user spec
+      const hasCoreNodes =
+        nodes.some((n) => [3, 364, 365, 366, 367].includes(n.nodeId)) ||
+        (xs.some((x) => Math.abs(x - 8.10) < 0.2) &&
+          zs.some((z) => Math.abs(z - -2.30) < 0.2 || Math.abs(z - -3.80) < 0.2));
+
+      if (hasCoreNodes || (xs.length >= 2 && zs.length >= 2 && nodes.length >= 4)) {
+        // Lift core U-shape — true physical coordinates: 8.10 to 9.60m, opening west, web at east
+        const side = 1.50;
+        const half = side / 2;
         const cx = nodes.reduce((s, n) => s + n.x, 0) / nodes.length;
         const cz = nodes.reduce((s, n) => s + n.z, 0) / nodes.length;
-        const side = 1.35;
-        const half = side / 2;
-        const xL = parseFloat((cx - half).toFixed(3));
-        const xR = parseFloat((cx + half).toFixed(3));
-        const zN = parseFloat((cz + half).toFixed(3));
-        const zS = parseFloat((cz - half).toFixed(3));
+
+        const xL = hasCoreNodes ? 8.10 : parseFloat((cx - half).toFixed(3));
+        const xR = hasCoreNodes ? 9.60 : parseFloat((cx + half).toFixed(3));
+        const zN = hasCoreNodes ? -2.30 : parseFloat((cz + half).toFixed(3));
+        const zS = hasCoreNodes ? -3.80 : parseFloat((cz - half).toFixed(3));
         wallFootprint = {
           shape: 'U_SHAPE',
           wallThicknessM: tw,

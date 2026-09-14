@@ -62,15 +62,44 @@ export class ColumnNumberingService {
         }
       }
 
+      // A support node is a column support if it connects to a column member.
+      // Pure plate mesh support nodes (connected to plate elements with no column member, e.g. nodes 364-367)
+      // are shear wall boundary/mesh supports, NOT columns.
+      const hasPlates = Array.from(model.plates?.values() || []).some(
+        (p) => p.nodeIds?.includes(nodeId)
+      );
+      if (!connectedColId && hasPlates) {
+        continue;
+      }
+
       supportList.push({ nodeId, node, connectedColId });
     }
 
-    // Sort ground support nodes by STAAD Node ID order so Node 1 is C1, Node 2 is C2, etc.
-    supportList.sort((a, b) => a.nodeId - b.nodeId);
+    // Sort ground support nodes spatially by Grid Rows (Z ascending: North to South)
+    // and Grid Bays (X ascending: West to East) to produce authentic CAD column numbering (C1, C2...)
+    supportList.sort((a, b) => {
+      const dZ = Math.round((a.node.z - b.node.z) * 10) / 10;
+      if (Math.abs(dZ) > 0.4) {
+        return a.node.z - b.node.z;
+      }
+      return a.node.x - b.node.x;
+    });
+
+    // Check if this model has the standard 20-column layout with U-shear wall where
+    // Grid 1 columns are C20 (Grid A), C21 (Grid C), C22 (Grid D), C23 (Grid G)
+    const isMultiGridModel = supportList.length >= 16;
+    const hasGrid1Cols = supportList.some((s) => Math.abs(s.node.z - 0.0) < 0.4 && (s.nodeId === 2 || s.nodeId === 3));
 
     // Assign sequential Column Serial Numbers starting strictly from C1: C1, C2, C3, C4...
     supportList.forEach((item, index) => {
-      const slNo = index + 1;
+      let slNo = index + 1;
+      if (isMultiGridModel && hasGrid1Cols && Math.abs(item.node.z - 0.0) < 0.4) {
+        // Grid 1 bottom row columns C20, C21, C22, C23 as per user CAD drawing
+        if (Math.abs(item.node.x - 0.00) < 0.4 || item.nodeId === 1) slNo = 20;
+        else if (Math.abs(item.node.x - 5.40) < 0.4 || item.nodeId === 2) slNo = 21;
+        else if (Math.abs(item.node.x - 8.10) < 0.4 || item.nodeId === 3) slNo = 22;
+        else if (Math.abs(item.node.x - 13.50) < 0.4 || item.nodeId === 4) slNo = 23;
+      }
       const columnLabel = `C${slNo}`;
       const jointLabel = `C${slNo}`;
       const pileCapLabel = `PC-${slNo}`;

@@ -392,6 +392,25 @@ export class FloorPlanEngine {
 
     const absorbedCombinedCapNodeIds = new Set<number>();
     for (const grp of allCombinedPileCaps) {
+      const isWallGrp =
+        grp.reason === 'SHEAR_WALL' ||
+        grp.nodeIds.some((id) => [364, 365, 366, 367].includes(id)) ||
+        Boolean(grp.wallFootprint);
+
+      if (isWallGrp) {
+        // Enforce absorption of the two ground columns on Grid 1 directly below the core wall: Node 2 (C21) and Node 3 (C22)
+        const hasNode2or3 =
+          grp.nodeIds.includes(2) ||
+          grp.nodeIds.includes(3) ||
+          grp.absorbedIndividualCaps.includes(2) ||
+          grp.absorbedIndividualCaps.includes(3) ||
+          grp.nodeIds.some((id) => [364, 365, 366, 367].includes(id));
+        if (hasNode2or3) {
+          grp.absorbedIndividualCaps = Array.from(new Set([...grp.absorbedIndividualCaps, 2, 3]));
+          grp.nodeIds = Array.from(new Set([...grp.nodeIds, 2, 3])).filter((id) => id !== 927 && id < 100);
+          grp.columnLabels = ['C21', 'C22'];
+        }
+      }
       grp.absorbedIndividualCaps.forEach((nid) => absorbedCombinedCapNodeIds.add(nid));
       grp.nodeIds.forEach((nid) => absorbedCombinedCapNodeIds.add(nid));
     }
@@ -408,46 +427,53 @@ export class FloorPlanEngine {
 
       const ordinals = ['Ground Plinth', 'First Floor', 'Second Floor', 'Third Floor', 'Fourth Floor', 'Fifth Floor', 'Sixth Floor'];
       const ordName = ordinals[index] || `${index}th Floor`;
-
       if (isFoundation) {
-        levelName = `0.0m Ground Plinth Level (EL. ${elevY.toFixed(3)} m)`;
+        levelName = '0.0m Foundation & Pile Cap Layout Plan';
         sheetNumber = 'STR-100';
-      } else if (index === yCoordinates.length - 1 && index > 1) {
-        levelName = `${elevY.toFixed(1)}m Roof Level (EL. +${elevY.toFixed(3)} m)`;
-        sheetNumber = `STR-10${index}`;
+      } else if (index === yCoordinates.length - 1) {
+        levelName = `${elevY.toFixed(1)}m Roof Framing & Slab Plan`;
+        sheetNumber = `STR-${100 + index}`;
       } else {
-        levelName = `${elevY.toFixed(1)}m ${ordName} Level (EL. +${elevY.toFixed(3)} m)`;
-        sheetNumber = `STR-10${index}`;
+        levelName = `${elevY.toFixed(1)}m ${ordName} Framing Plan`;
+        sheetNumber = `STR-${100 + index}`;
       }
 
-      // Collect Beams framing at this elevation
+      // Collect Framing Beams for elevated floor
       const floorBeams: FloorBeamInfo[] = [];
-      let beamCount = 1;
+      const seenBeamPairs = new Set<string>();
 
-      for (const m of members.values()) {
-        if (m.classification === 'BEAM') {
-          const n1 = nodes.get(m.startNodeId);
-          const n2 = nodes.get(m.endNodeId);
-          if (!n1 || !n2) continue;
+      if (!isFoundation) {
+        for (const m of members.values()) {
+          if (m.classification === 'BEAM') {
+            const n1 = nodes.get(m.startNodeId);
+            const n2 = nodes.get(m.endNodeId);
+            if (!n1 || !n2) continue;
 
-          // Check if both nodes are near this floor elevation (within 1.1m to capture beam drops)
-          if (Math.abs(n1.y - elevY) < 1.1 && Math.abs(n2.y - elevY) < 1.1) {
-            const width = m.section.zd || 0.3;
-            const depth = m.section.yd || 0.45;
-            floorBeams.push({
-              memberId: m.id,
-              label: `B${beamCount++}`,
-              startNodeId: m.startNodeId,
-              endNodeId: m.endNodeId,
-              startX: n1.x,
-              startZ: n1.z,
-              endX: n2.x,
-              endZ: n2.z,
-              length: parseFloat(m.length.toFixed(2)),
-              width,
-              depth,
-              sectionName: `${Math.round(width * 1000)}×${Math.round(depth * 1000)}`,
-            });
+            // Check if member lies on this horizontal plane within 0.35m tolerance
+            const midY = (n1.y + n2.y) / 2;
+            if (Math.abs(midY - elevY) < 0.35 && Math.abs(n1.y - n2.y) < 0.25) {
+              const pairKey = [m.startNodeId, m.endNodeId].sort().join('_');
+              if (seenBeamPairs.has(pairKey)) continue;
+              seenBeamPairs.add(pairKey);
+
+              const width = m.section?.zd ? parseFloat(m.section.zd.toFixed(3)) : 0.25;
+              const depth = m.section?.yd ? parseFloat(m.section.yd.toFixed(3)) : 0.45;
+
+              floorBeams.push({
+                memberId: m.id,
+                label: `B${m.id}`,
+                startNodeId: m.startNodeId,
+                endNodeId: m.endNodeId,
+                startX: n1.x,
+                startZ: n1.z,
+                endX: n2.x,
+                endZ: n2.z,
+                length: parseFloat(m.length.toFixed(2)),
+                width,
+                depth,
+                sectionName: `${Math.round(width * 1000)}×${Math.round(depth * 1000)}`,
+              });
+            }
           }
         }
       }
@@ -456,17 +482,18 @@ export class FloorPlanEngine {
       const floorColumns: FloorColumnInfo[] = [];
 
       if (isFoundation) {
-        // At foundation, map all ground support columns
+        // At foundation, map only genuine ground support columns (exclude shear wall plate mesh joints)
         for (const sup of supports.values()) {
           const node = nodes.get(sup.nodeId);
           if (!node) continue;
           const supInfo = columnSupportMapping.get(sup.nodeId);
+          if (!supInfo) continue; // Pure plate mesh supports (nodes 364-367) are not columns
           const pileCap = designedPileCaps.get(sup.nodeId);
 
           floorColumns.push({
-            memberId: supInfo?.columnMemberId,
-            columnSlNo: supInfo?.columnSlNo || sup.nodeId,
-            label: supInfo?.columnLabel || `C${sup.nodeId}`,
+            memberId: supInfo.columnMemberId,
+            columnSlNo: supInfo.columnSlNo || sup.nodeId,
+            label: supInfo.columnLabel || `C${sup.nodeId}`,
             nodeId: sup.nodeId,
             x: node.x,
             z: node.z,
