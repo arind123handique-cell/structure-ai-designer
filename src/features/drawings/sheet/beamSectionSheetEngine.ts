@@ -585,8 +585,7 @@ export class BeamSectionSheetEngine {
       const midX = (x1 + x2) / 2;
       const midY = (y1 + y2) / 2;
       const label = beamLabels.get(bm.memberId) || bm.label || `B${bm.memberId}`;
-      const sectionText = `${bm.width ? Math.round(bm.width * 1000) : 230}x${bm.depth ? Math.round(bm.depth * 1000) : 450}`;
-      const fullLabel = `${label} (${sectionText})`;
+      const fullLabel = `${label}`;
       b.text(LAYER_BEAM.name, midX, midY, fullLabel, TEXT_H.CALLOUT - 20, { anchor: 'middle', bold: true });
     });
 
